@@ -2,6 +2,7 @@ export function parseSuitcaseManifest(text) {
   const manifest = {
     suitcases: {},
     assignments: {},
+    assignmentPaths: {},
     compatibility: {}
   };
 
@@ -27,7 +28,7 @@ export function parseSuitcaseManifest(text) {
       continue;
     }
 
-    if (!["suitcases", "assignments", "compatibility"].includes(section)) {
+    if (!["suitcases", "assignments", "assignmentPaths", "compatibility"].includes(section)) {
       continue;
     }
 
@@ -39,6 +40,8 @@ export function parseSuitcaseManifest(text) {
         manifest.suitcases[currentName] = { skills: [] };
       } else if (section === "assignments") {
         manifest.assignments[currentName] = { suitcases: [] };
+      } else if (section === "assignmentPaths") {
+        manifest.assignmentPaths[currentName] = {};
       } else {
         manifest.compatibility[currentName] = {};
       }
@@ -59,6 +62,11 @@ export function parseSuitcaseManifest(text) {
       continue;
     }
 
+    if (section === "assignmentPaths") {
+      parseMappingLine(manifest.assignmentPaths[currentName], indent, trimmed);
+      continue;
+    }
+
     if (section === "compatibility") {
       currentField = parseCompatibilityLine(
         manifest.compatibility[currentName],
@@ -70,6 +78,17 @@ export function parseSuitcaseManifest(text) {
   }
 
   return manifest;
+}
+
+function parseMappingLine(record, indent, trimmed) {
+  if (indent !== 4 || !trimmed.includes(":")) {
+    return;
+  }
+
+  const separator = trimmed.indexOf(":");
+  const key = trimmed.slice(0, separator).trim();
+  const value = trimmed.slice(separator + 1).trim();
+  record[key] = value;
 }
 
 function parseSuitcaseLine(suitcase, indent, trimmed) {

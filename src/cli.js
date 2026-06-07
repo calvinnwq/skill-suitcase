@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import { plan } from "./planner.js";
+import { validate } from "./validator.js";
 
 function printUsage() {
-  console.error("Usage: suitcase plan --source <skills-repo> --target <target> --json");
+  console.error("Usage:");
+  console.error("  suitcase plan --source <skills-repo> --target <target> --json");
+  console.error("  suitcase validate --source <skills-repo> --json");
 }
 
 function parseArgs(argv) {
@@ -44,14 +47,19 @@ async function main() {
     return;
   }
 
-  if (args.command !== "plan" || !args.source || !args.target || !args.json) {
+  const isPlan = args.command === "plan" && args.source && args.target && args.json;
+  const isValidate = args.command === "validate" && args.source && !args.target && args.json;
+
+  if (!isPlan && !isValidate) {
     printUsage();
     process.exitCode = 2;
     return;
   }
 
   try {
-    const result = await plan({ source: args.source, target: args.target });
+    const result = isPlan
+      ? await plan({ source: args.source, target: args.target })
+      : await validate({ source: args.source });
     console.log(JSON.stringify(result, null, 2));
     process.exitCode = result.ok ? 0 : 1;
   } catch (error) {

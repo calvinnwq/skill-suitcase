@@ -10,6 +10,7 @@ files, mutate target install paths, or touch runtime homes.
 
 ```bash
 node src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --json
+node src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
 ```
 
 Targets currently exercised against fixture #1:

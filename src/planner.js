@@ -1,6 +1,6 @@
-import { access, readFile, stat } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
 import path from "node:path";
-import { parseSuitcaseManifest } from "./suitcase-manifest.js";
+import { loadCatalog } from "./catalog.js";
 
 export async function plan({ source, target }) {
   if (!source) {
@@ -10,10 +10,7 @@ export async function plan({ source, target }) {
     throw new Error("target is required");
   }
 
-  const sourceRoot = path.resolve(source);
-  const manifestPath = path.join(sourceRoot, "skill-suitcase.yaml");
-  const manifestText = await readFile(manifestPath, "utf8");
-  const manifest = parseSuitcaseManifest(manifestText);
+  const { sourceRoot, manifest } = await loadCatalog(source);
   const assignment = manifest.assignments[target];
 
   if (!assignment) {

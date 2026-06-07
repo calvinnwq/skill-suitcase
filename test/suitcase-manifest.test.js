@@ -20,6 +20,7 @@ test("parses the skills repo suitcase manifest shape", async () => {
     "core",
     "openclaw-builder"
   ]);
+  assert.equal(manifest.assignmentPaths["codex-global"].assignment, "codex");
   assert.equal(
     manifest.compatibility["gnhf-postflight"].blockedAgents.codex,
     "Live Codex copy is a slimmer platform variant and must not be overwritten by the OpenClaw canonical bundle."
