@@ -48,6 +48,8 @@ Targets currently exercised against fixture #1:
 npm test
 ```
 
+CI runs the same test suite on GitHub Actions with Node 24.
+
 The first milestone has no package dependencies. The manifest reader is strict
 and intentionally scoped to the current `skill-suitcase.yaml` shape from
 `/Users/ngxcalvin/repos/skills`.
