@@ -7,6 +7,7 @@ function printUsage() {
   console.error("Usage:");
   console.error("  suitcase plan --source <skills-repo> --target <target> --json");
   console.error("  suitcase pack --source <skills-repo> --target <target> --dry-run --json");
+  console.error("  suitcase pack --source <skills-repo> --target <target> --output <dir> --json");
   console.error("  suitcase validate --source <skills-repo> --json");
 }
 
@@ -27,7 +28,7 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (token === "--source" || token === "--target") {
+    if (token === "--source" || token === "--target" || token === "--output") {
       const value = rest[index + 1];
       if (!value || value.startsWith("--")) {
         throw new Error(`${token} requires a value`);
@@ -56,7 +57,11 @@ async function main() {
 
   const isPlan = args.command === "plan" && args.source && args.target && args.json;
   const isPack =
-    args.command === "pack" && args.source && args.target && args.dryRun && args.json;
+    args.command === "pack" &&
+    args.source &&
+    args.target &&
+    args.json &&
+    (args.dryRun || args.output);
   const isValidate = args.command === "validate" && args.source && !args.target && args.json;
 
   if (!isPlan && !isPack && !isValidate) {
@@ -81,7 +86,12 @@ async function runCommand(args, { isPlan, isPack }) {
   }
 
   if (isPack) {
-    return pack({ source: args.source, target: args.target, dryRun: args.dryRun });
+    return pack({
+      source: args.source,
+      target: args.target,
+      dryRun: args.dryRun,
+      output: args.output
+    });
   }
 
   return validate({ source: args.source });

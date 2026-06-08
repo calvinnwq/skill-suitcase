@@ -11,6 +11,7 @@ files, mutate target install paths, or touch runtime homes.
 ```bash
 node src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
+node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
 node src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
 ```
 
@@ -54,6 +55,9 @@ The first milestone has no package dependencies. The manifest reader is strict
 and intentionally scoped to the current `skill-suitcase.yaml` shape from
 `/Users/ngxcalvin/repos/skills`.
 
-`pack` is currently dry-run only. It reports the skill files that would be copied
-into a staging bundle, including byte counts and SHA-256 checksums, but creates
-no bundle directory and writes no receipts.
+`pack --dry-run` reports the skill files that would be copied into a staging
+bundle, including byte counts and SHA-256 checksums, but creates no bundle
+directory and writes no receipts.
+
+`pack --output <dir>` writes only to an explicit staging directory. It refuses
+existing output directories and manifest-declared install target paths.
