@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { plan } from "../src/planner.js";
 
-const fixtureSource = "/Users/ngxcalvin/repos/skills";
+const fixtureSource = path.join(import.meta.dirname, "fixtures", "skills-catalog");
 
 test("openclaw plans the full OpenClaw builder assignment", async () => {
   const result = await plan({ source: fixtureSource, target: "openclaw" });

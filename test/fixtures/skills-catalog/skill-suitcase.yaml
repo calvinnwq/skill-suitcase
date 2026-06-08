@@ -1,0 +1,81 @@
+suitcases:
+  core:
+    skills:
+      - office-hours
+
+  openclaw-builder:
+    skills:
+      - skillify
+      - gnhf-postflight
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+      - openclaw-builder
+  codex:
+    suitcases:
+      - core
+  openclaw-kody-codex:
+    suitcases:
+      - core
+  claude:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    path: /tmp/openclaw/skills
+    assignment: openclaw
+
+  codex-global:
+    kind: codex-home
+    codexHome: /tmp/codex
+    skillsPath: /tmp/codex/skills
+    assignment: codex
+
+  openclaw-kody-codex:
+    kind: codex-home
+    codexHome: /tmp/openclaw-codex
+    skillsPath: /tmp/openclaw-codex/skills
+    assignment: openclaw-kody-codex
+
+  openclaw-workspace-codex:
+    kind: nested-home-codex
+    home: /tmp/workspace-codex/home
+    codexHome: /tmp/workspace-codex/home/.codex
+    skillsPath: /tmp/workspace-codex/home/.codex/skills
+    assignment: codex
+
+  claude-global:
+    kind: claude-skills-root
+    path: /tmp/claude/skills
+    assignment: claude
+
+compatibility:
+  office-hours:
+    agents:
+      - openclaw
+      - codex
+      - claude
+    variant: canonical
+    evidence:
+      - docs/install-smoke.md
+
+  skillify:
+    agents:
+      - openclaw
+    variant: canonical
+    reason: Uses OpenClaw skill proposal and resolver workflow concepts.
+
+  gnhf-postflight:
+    agents:
+      - openclaw
+    variant: canonical
+    reason: Canonical bundle depends on OpenClaw delegation, freshness, and artifact conventions.
+    blockedAgents:
+      codex: Live Codex copy is a slimmer platform variant and must not be overwritten by the OpenClaw canonical bundle.
+      claude: Live Claude copy is a slimmer platform variant and must not be overwritten by the OpenClaw canonical bundle.
+    evidence:
+      - docs/portability-matrix.md

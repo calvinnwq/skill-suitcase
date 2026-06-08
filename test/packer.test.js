@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { pack } from "../src/packer.js";
 
-const fixtureSource = "/Users/ngxcalvin/repos/skills";
+const fixtureSource = path.join(import.meta.dirname, "fixtures", "skills-catalog");
 
 test("dry-run pack reports OpenClaw skill files without an output path", async () => {
   const result = await pack({ source: fixtureSource, target: "openclaw", dryRun: true });

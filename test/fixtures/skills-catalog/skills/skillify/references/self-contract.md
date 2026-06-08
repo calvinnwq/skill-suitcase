@@ -1,0 +1,3 @@
+# Self Contract
+
+Fixture contract.

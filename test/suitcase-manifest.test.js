@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { test } from "node:test";
 import { parseSuitcaseManifest } from "../src/suitcase-manifest.js";
 
 test("parses the skills repo suitcase manifest shape", async () => {
   const manifestText = await readFile(
-    "/Users/ngxcalvin/repos/skills/skill-suitcase.yaml",
+    path.join(import.meta.dirname, "fixtures", "skills-catalog", "skill-suitcase.yaml"),
     "utf8"
   );
 
