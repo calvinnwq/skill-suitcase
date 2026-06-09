@@ -1,0 +1,129 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import { targets } from "../src/targets.js";
+
+const fixtureSource = path.join(import.meta.dirname, "fixtures", "skills-catalog");
+
+test("lists all assignment paths with stability fields from the fixture catalog", async () => {
+  const result = await targets({ source: fixtureSource });
+  const targetIds = result.targets.map((entry) => entry.id);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.targets.length, 5);
+  assert.deepEqual(targetIds.sort(), [
+    "claude-global",
+    "codex-global",
+    "openclaw",
+    "openclaw-kody-codex",
+    "openclaw-workspace-codex"
+  ]);
+  assert.deepEqual(result.findings, []);
+
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+  assert.equal(codexGlobal.path, "/tmp/codex");
+  assert.equal(codexGlobal.codexHome, "/tmp/codex");
+  assert.equal(codexGlobal.skillsPath, "/tmp/codex/skills");
+
+  for (const entry of result.targets) {
+    assert.equal(typeof entry.id, "string");
+    assert.equal(typeof entry.name, "string");
+    assert.equal(typeof entry.assignment, "string");
+    assert.equal(typeof entry.kind, "string");
+    assert.equal(typeof entry.safety.classification, "string");
+    assert.ok(typeof entry.exists.path === "boolean");
+    assert.ok(typeof entry.exists.skillsPath === "boolean");
+    assert.ok(["live-install-root", "missing", "invalid"].includes(entry.safety.classification));
+  }
+});
+
+test("reports malformed assignmentPaths as errors and classifies them as invalid", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-invalid-"));
+  const existingPath = path.join(source, "skills-root");
+  await mkdir(existingPath, { recursive: true });
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  claude:
+    suitcases:
+      - core
+
+assignmentPaths:
+  valid-live-root:
+    kind: claude-skills-root
+    assignment: claude
+    path: ${existingPath}
+  bad-assignment:
+    kind: claude-skills-root
+    assignment: missing-assignment
+    path: ${existingPath}
+  bad-kind:
+    kind: not-a-live-root
+    assignment: claude
+    path: ${existingPath}
+  broken-not-object:
+    /tmp/bad-target-entry
+`
+  );
+
+  const result = await targets({ source });
+  const findings = result.findings.map((item) => item.code);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.targets.length, 4);
+  assert.ok(findings.includes("unknown_assignment_path_target"));
+  assert.ok(findings.includes("invalid_assignment_path"));
+
+  const invalidEntries = result.targets.filter(
+    (entry) => entry.safety.classification === "invalid"
+  );
+  assert.ok(invalidEntries.length >= 3);
+  assert.ok(
+    invalidEntries.some((entry) => entry.id === "bad-assignment" && entry.assignment === "missing-assignment")
+  );
+  assert.ok(invalidEntries.some((entry) => entry.id === "bad-kind"));
+  assert.ok(invalidEntries.some((entry) => entry.id === "broken-not-object"));
+});
+
+test("missing required path fields are invalid rather than live or missing", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-missing-field-"));
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  codex-global:
+    kind: codex-home
+    codexHome: ${source}
+    assignment: codex
+`
+  );
+
+  const result = await targets({ source });
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+
+  assert.equal(result.ok, false);
+  assert.equal(codexGlobal.safety.classification, "invalid");
+  assert.ok(
+    result.findings.some(
+      (finding) =>
+        finding.code === "invalid_assignment_path" &&
+        finding.path === "assignmentPaths.codex-global.skillsPath"
+    )
+  );
+});
