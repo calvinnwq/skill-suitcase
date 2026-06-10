@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -183,6 +183,56 @@ test("status reports stale installed content as behind instead of dirty", async 
 
   const installedHash = await hashDirectory(sourceSkill);
   await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: installedHash
+  });
+
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"new\");\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.behind, 1);
+  assert.equal(result.summary.dirty, 0);
+  assert.equal(result.statuses[0].status, "behind");
+});
+
+test("status reports stale symlinked installs as behind instead of dirty", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-stale-link-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-stale-link-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"old\");\n");
+
+  const installedHash = await hashDirectory(sourceSkill);
+  await symlink(sourceSkill, path.join(installRoot, "office-hours"), "dir");
   await writeReceipt({
     installRoot,
     sourceRoot,

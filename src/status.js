@@ -396,8 +396,28 @@ async function statusSkill({
   const installedVersion = installRecord.version ?? null;
   const installedHash = installRecord.sourceHash ?? null;
   const installedCommit = installRecord.sourceCommit ?? null;
+  let targetIsSourceSymlink = false;
 
-  if (installedHash) {
+  if (installExists.isSymbolicLink) {
+    const link = await getSymlinkTarget(targetPath);
+    targetIsSourceSymlink = link !== null && path.resolve(link) === path.resolve(sourceSkillPath);
+    if (!targetIsSourceSymlink) {
+      return {
+        status: "dirty",
+        reason: "target symlink differs from source",
+        target: installRoot,
+        targetPath,
+        installedVersion,
+        currentVersion,
+        installedCommit,
+        currentCommit,
+        installedHash,
+        currentHash: sourceHashValue
+      };
+    }
+  }
+
+  if (installedHash && !targetIsSourceSymlink) {
     let targetHash;
     try {
       targetHash = await hashInstalledTarget(targetPath);
