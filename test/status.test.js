@@ -317,6 +317,44 @@ assignmentPaths:
   assert.equal(result.errors[0].path, "assignmentPaths.codex-global.skillsPath");
 });
 
+test("status reports missing install roots as assignment errors", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-missing-root-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+
+  const missingRoot = path.join(sourceRoot, "missing-install-root");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${missingRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.statuses.length, 0);
+  assert.equal(result.assignments[0].errors[0].code, "missing_install_root");
+  assert.equal(result.errors[0].code, "missing_install_root");
+  assert.equal(result.errors[0].path, "assignmentPaths.openclaw.path");
+});
+
 test("status reports malformed sync receipts as errors", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-receipt-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-receipt-install-"));
@@ -352,6 +390,48 @@ assignmentPaths:
 
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+});
+
+test("status rejects malformed per-skill install records", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-install-record-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-install-record-root-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await writeFile(
+    path.join(installRoot, ".skills-sync.json"),
+    `${JSON.stringify({ schema: "calvinnwq.skills.sync-lock.v0", installs: { "office-hours": "bad" } })}\n`
+  );
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.statuses[0].status, "unknown");
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
 });
 
@@ -516,6 +596,75 @@ assignmentPaths:
   assert.equal(brokenAssignment.statuses.length, 0);
   assert.equal(brokenAssignment.errors.length, 1);
   assert.equal(brokenAssignment.errors[0].code, "plan_failed");
+});
+
+test("status captures source read failures and continues other assignments", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-source-read-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+
+  const validSkill = path.join(sourceRoot, "skills", "office-hours");
+  const brokenSkill = path.join(sourceRoot, "skills", "missing-skill-file");
+  await mkdir(validSkill, { recursive: true });
+  await mkdir(brokenSkill, { recursive: true });
+  await writeFile(path.join(validSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+
+  const validRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-source-valid-"));
+  const brokenRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-source-broken-"));
+  t.after(() => rm(validRoot, { recursive: true, force: true }));
+  t.after(() => rm(brokenRoot, { recursive: true, force: true }));
+
+  await cp(validSkill, path.join(validRoot, "office-hours"), { recursive: true });
+  await mkdir(path.join(brokenRoot, "missing-skill-file"), { recursive: true });
+  await writeReceipt({
+    installRoot: validRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(validSkill)
+  });
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+  broken:
+    skills:
+      - missing-skill-file
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+  broken:
+    suitcases:
+      - broken
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${validRoot}
+  broken:
+    kind: openclaw-skills-root
+    assignment: broken
+    path: ${brokenRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "source_read_failed"), true);
+
+  const validAssignment = result.assignments.find((entry) => entry.assignmentPath === "openclaw");
+  const brokenAssignment = result.assignments.find((entry) => entry.assignmentPath === "broken");
+
+  assert.equal(validAssignment.statuses[0].status, "current");
+  assert.equal(brokenAssignment.statuses[0].status, "unknown");
+  assert.equal(brokenAssignment.errors[0].code, "source_read_failed");
 });
 
 async function writeReceipt({ installRoot, sourceRoot, skillName, version, sourceHash }) {

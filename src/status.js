@@ -13,6 +13,17 @@ const PATH_FIELDS_BY_KIND = {
   "codex-home": ["skillsPath"],
   "nested-home-codex": ["skillsPath"]
 };
+const INSTALL_RECORD_SCALAR_FIELDS = [
+  "agent",
+  "mode",
+  "sourcePath",
+  "targetPath",
+  "version",
+  "sourceCommit",
+  "sourceHash"
+];
+const INSTALL_RECORD_REQUIRED_FIELDS = ["agent", "mode", "sourcePath", "targetPath"];
+const INSTALL_RECORD_PROVENANCE_FIELDS = ["version", "sourceCommit", "sourceHash"];
 const VALID_STATUSES = new Set(["current", "behind", "version", "dirty", "missing", "unknown", "blocked"]);
 
 export async function status({ source }) {
@@ -128,6 +139,18 @@ export async function status({ source }) {
       errors.push(...assignmentPlan.errors);
     }
 
+    if (!(await isDirectory(installRoot))) {
+      const assignmentError = {
+        code: "missing_install_root",
+        message: `Assignment path ${assignmentPathId} points at missing install root: ${installRoot}.`
+      };
+      const pathField = PATH_FIELDS_BY_KIND[kind]?.[0] ?? "kind";
+      assignmentResult.errors.push(assignmentError);
+      errors.push({ ...assignmentError, path: `assignmentPaths.${assignmentPathId}.${pathField}` });
+      assignments.push(assignmentResult);
+      continue;
+    }
+
     for (const blocked of assignmentPlan.blocked ?? []) {
       const blockedStatus = blockedStatusFromPlan({
         blocked,
@@ -167,13 +190,37 @@ export async function status({ source }) {
     }
 
     for (const planned of assignmentPlan.planned) {
+      const installRecordResult = validateInstallRecord({
+        installRecord: receipt.installs?.[planned.skill],
+        receiptPath: path.join(installRoot, RECEIPT_FILE),
+        skillName: planned.skill
+      });
+      if (installRecordResult.errors.length > 0) {
+        assignmentResult.errors.push(...installRecordResult.errors);
+        errors.push(
+          ...installRecordResult.errors.map((item) => ({
+            ...item,
+            path: path.join(installRoot, RECEIPT_FILE)
+          }))
+        );
+      }
+
       const check = await statusSkill({
         sourceRoot,
         sourceSkillPath: planned.sourcePath,
         installRoot,
         skillName: planned.skill,
-        installRecord: receipt.installs?.[planned.skill]
+        installRecord: installRecordResult.installRecord
       });
+      if ((check.errors ?? []).length > 0) {
+        assignmentResult.errors.push(...check.errors);
+        errors.push(
+          ...check.errors.map((item) => ({
+            ...item,
+            path: item.sourcePath ?? planned.sourcePath
+          }))
+        );
+      }
 
       const resultStatus = {
         assignment: assignmentName,
@@ -249,8 +296,34 @@ async function statusSkill({
   installRecord
 }) {
   const targetPath = path.join(installRoot, skillName);
-  const sourceVersion = await skillVersion(sourceSkillPath);
-  const sourceHashValue = await hashDirectory(sourceSkillPath);
+  let sourceVersion;
+  let sourceHashValue;
+  try {
+    sourceVersion = await skillVersion(sourceSkillPath);
+    sourceHashValue = await hashDirectory(sourceSkillPath);
+  } catch (error) {
+    const currentCommit = await readRepoCommit(sourceRoot);
+    return {
+      status: "unknown",
+      reason: `unable to read source skill: ${error.message}`,
+      target: installRoot,
+      targetPath,
+      installedVersion: null,
+      currentVersion: null,
+      installedCommit: null,
+      currentCommit,
+      installedHash: null,
+      currentHash: null,
+      errors: [
+        {
+          code: "source_read_failed",
+          message: `Unable to read source skill ${sourceSkillPath}: ${error.message}`,
+          skill: skillName,
+          sourcePath: sourceSkillPath
+        }
+      ]
+    };
+  }
   const installExists = await targetExists(targetPath);
   const currentCommit = await readRepoCommit(sourceRoot);
 
@@ -379,6 +452,74 @@ async function statusSkill({
     installedHash,
     currentHash: sourceHashValue
   };
+}
+
+function validateInstallRecord({ installRecord, receiptPath, skillName }) {
+  if (installRecord === undefined) {
+    return { installRecord: null, errors: [] };
+  }
+
+  if (!isRecord(installRecord)) {
+    return {
+      installRecord: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Sync receipt ${receiptPath} has an invalid install record for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  const missingField = INSTALL_RECORD_REQUIRED_FIELDS.find(
+    (field) => typeof installRecord[field] !== "string" || installRecord[field].length === 0
+  );
+  if (missingField) {
+    return {
+      installRecord: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Sync receipt ${receiptPath} has an invalid ${missingField} field for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  const invalidField = INSTALL_RECORD_SCALAR_FIELDS.find(
+    (field) =>
+      installRecord[field] !== undefined &&
+      installRecord[field] !== null &&
+      typeof installRecord[field] !== "string"
+  );
+  if (invalidField) {
+    return {
+      installRecord: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Sync receipt ${receiptPath} has an invalid ${invalidField} field for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  const hasProvenance = INSTALL_RECORD_PROVENANCE_FIELDS.some(
+    (field) => typeof installRecord[field] === "string" && installRecord[field].length > 0
+  );
+  if (!hasProvenance) {
+    return {
+      installRecord: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Sync receipt ${receiptPath} has no source provenance for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  return { installRecord, errors: [] };
 }
 
 async function readReceipt(installRoot) {
