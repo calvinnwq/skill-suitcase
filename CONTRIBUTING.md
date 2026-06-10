@@ -4,7 +4,14 @@
 
 ```bash
 npm test
+npm run lint
+npm run typecheck
+npm run build
+npm run format:check
 ```
+
+`lint`, `typecheck`, `build`, and `format:check` currently run the same
+JavaScript syntax check over `src` and `test`.
 
 ## Releases
 
