@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import { plan } from "./planner.js";
 import { pack } from "./packer.js";
+import { diff } from "./diff.js";
 import { validate } from "./validator.js";
 import { targets } from "./targets.js";
 
 function printUsage() {
   console.error("Usage:");
   console.error("  suitcase plan --source <skills-repo> --target <target> --json");
+  console.error("  suitcase diff --source <skills-repo> --target <target> --json");
   console.error("  suitcase pack --source <skills-repo> --target <target> --dry-run --json");
   console.error("  suitcase pack --source <skills-repo> --target <target> --output <dir> --json");
   console.error("  suitcase validate --source <skills-repo> --json");
@@ -58,6 +60,7 @@ async function main() {
   }
 
   const isPlan = args.command === "plan" && args.source && args.target && args.json;
+  const isDiff = args.command === "diff" && args.source && args.target && args.json;
   const isPack =
     args.command === "pack" &&
     args.source &&
@@ -67,14 +70,14 @@ async function main() {
   const isValidate = args.command === "validate" && args.source && !args.target && args.json;
   const isTargets = args.command === "targets" && args.source && !args.target && args.json;
 
-  if (!isPlan && !isPack && !isValidate && !isTargets) {
+  if (!isPlan && !isDiff && !isPack && !isValidate && !isTargets) {
     printUsage();
     process.exitCode = 2;
     return;
   }
 
   try {
-    const result = await runCommand(args, { isPlan, isPack, isTargets });
+    const result = await runCommand(args, { isPlan, isDiff, isPack, isTargets });
     console.log(JSON.stringify(result, null, 2));
     process.exitCode = result.ok ? 0 : 1;
   } catch (error) {
@@ -83,9 +86,13 @@ async function main() {
   }
 }
 
-async function runCommand(args, { isPlan, isPack, isTargets }) {
+async function runCommand(args, { isPlan, isDiff, isPack, isTargets }) {
   if (isPlan) {
     return plan({ source: args.source, target: args.target });
+  }
+
+  if (isDiff) {
+    return diff({ source: args.source, target: args.target });
   }
 
   if (isPack) {

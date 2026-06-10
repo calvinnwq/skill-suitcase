@@ -10,6 +10,7 @@ files, mutate target install paths, or touch runtime homes.
 
 ```bash
 node src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --json
+node src/cli.js diff --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
 node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
 node src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
@@ -30,6 +31,8 @@ Targets currently exercised against fixture #1:
   "ok": true,
   "source": "/Users/ngxcalvin/repos/skills",
   "target": "openclaw",
+  "assignment": "openclaw",
+  "installRoot": "/tmp/openclaw/skills",
   "planned": [
     {
       "skill": "office-hours",
@@ -40,6 +43,26 @@ Targets currently exercised against fixture #1:
     }
   ],
   "blocked": [],
+  "entries": [
+    {
+      "action": "create",
+      "skill": "office-hours",
+      "relativePath": "SKILL.md",
+      "targetPath": "/tmp/openclaw/skills/office-hours/SKILL.md",
+      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours/SKILL.md",
+      "sourceSha256": "b0d..",
+      "targetSha256": null,
+      "bytes": 123
+    }
+  ],
+  "summary": {
+    "create": 0,
+    "update": 0,
+    "unchanged": 0,
+    "extra": 0,
+    "missing": 0,
+    "blocked": 0
+  },
   "errors": []
 }
 ```
