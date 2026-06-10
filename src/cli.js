@@ -4,6 +4,7 @@ import { pack } from "./packer.js";
 import { diff } from "./diff.js";
 import { validate } from "./validator.js";
 import { targets } from "./targets.js";
+import { status } from "./status.js";
 
 function printUsage() {
   console.error("Usage:");
@@ -13,6 +14,7 @@ function printUsage() {
   console.error("  suitcase pack --source <skills-repo> --target <target> --output <dir> --json");
   console.error("  suitcase validate --source <skills-repo> --json");
   console.error("  suitcase targets --source <skills-repo> --json");
+  console.error("  suitcase status --source <skills-repo> --json");
 }
 
 function parseArgs(argv) {
@@ -69,15 +71,16 @@ async function main() {
     (args.dryRun || args.output);
   const isValidate = args.command === "validate" && args.source && !args.target && args.json;
   const isTargets = args.command === "targets" && args.source && !args.target && args.json;
+  const isStatus = args.command === "status" && args.source && !args.target && args.json;
 
-  if (!isPlan && !isDiff && !isPack && !isValidate && !isTargets) {
+  if (!isPlan && !isDiff && !isPack && !isValidate && !isTargets && !isStatus) {
     printUsage();
     process.exitCode = 2;
     return;
   }
 
   try {
-    const result = await runCommand(args, { isPlan, isDiff, isPack, isTargets });
+    const result = await runCommand(args, { isPlan, isDiff, isPack, isTargets, isStatus });
     console.log(JSON.stringify(result, null, 2));
     process.exitCode = result.ok ? 0 : 1;
   } catch (error) {
@@ -86,7 +89,7 @@ async function main() {
   }
 }
 
-async function runCommand(args, { isPlan, isDiff, isPack, isTargets }) {
+async function runCommand(args, { isPlan, isDiff, isPack, isTargets, isStatus }) {
   if (isPlan) {
     return plan({ source: args.source, target: args.target });
   }
@@ -106,6 +109,10 @@ async function runCommand(args, { isPlan, isDiff, isPack, isTargets }) {
 
   if (isTargets) {
     return targets({ source: args.source });
+  }
+
+  if (isStatus) {
+    return status({ source: args.source });
   }
 
   return validate({ source: args.source });

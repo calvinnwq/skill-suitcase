@@ -15,6 +15,7 @@ node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --
 node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
 node src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
 node src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
+node src/cli.js status --source /Users/ngxcalvin/repos/skills --json
 ```
 
 Targets currently exercised against fixture #1:
