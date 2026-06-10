@@ -41,16 +41,10 @@ export async function diff({ source, target }) {
   result.installRoot = installation.installRoot;
   if (!installation.ok) {
     result.errors.push(...installation.errors);
-    result.summary = summarizeActions(result.entries);
-    return result;
-  }
-
-  if (!planResult.ok) {
     for (const blockedEntry of result.blocked) {
       result.entries.push(blockedEntryFromPlan(blockedEntry));
     }
     result.summary = summarizeActions(result.entries);
-    result.ok = false;
     return result;
   }
 
@@ -59,7 +53,11 @@ export async function diff({ source, target }) {
   }
 
   for (const plannedSkill of result.planned) {
-    const relativeEntries = await comparePlannedSkill(plannedSkill, result.installRoot);
+    const { entries: relativeEntries, errors: compareErrors } = await comparePlannedSkill(
+      plannedSkill,
+      result.installRoot
+    );
+    result.errors.push(...compareErrors);
     result.entries.push(...relativeEntries);
   }
 
@@ -101,7 +99,12 @@ function blockedEntryFromPlan(blockedEntry) {
 async function comparePlannedSkill(plannedSkill, installRoot) {
   const sourceRoot = plannedSkill.sourcePath;
   const targetRoot = path.join(installRoot, plannedSkill.skill);
-  const sourceEntries = await collectSourceEntries(sourceRoot);
+  const sourceListing = await collectSourceEntries(sourceRoot);
+  if (!sourceListing.ok) {
+    return { entries: [], errors: sourceListing.errors };
+  }
+
+  const sourceEntries = sourceListing.entries;
   const plannedEntries = [];
 
   for (const sourcePath of sourceEntries) {
@@ -172,7 +175,7 @@ async function comparePlannedSkill(plannedSkill, installRoot) {
     );
   }
 
-  return plannedEntries;
+  return { entries: plannedEntries, errors: [] };
 }
 
 async function collectExtraEntries(skill, targetSkillPath, plannedRelativePaths) {
@@ -208,17 +211,30 @@ async function collectExtraEntries(skill, targetSkillPath, plannedRelativePaths)
 }
 
 async function collectSourceEntries(root) {
-  const files = await listFiles(root);
-  const entries = [];
+  try {
+    const files = await listFiles(root);
+    const entries = [];
 
-  for (const entry of files) {
-    const info = await stat(entry);
-    if (info.isFile()) {
-      entries.push(entry);
+    for (const entry of files) {
+      const info = await stat(entry);
+      if (info.isFile()) {
+        entries.push(entry);
+      }
     }
-  }
 
-  return entries;
+    return { ok: true, entries, errors: [] };
+  } catch (error) {
+    return {
+      ok: false,
+      entries: [],
+      errors: [
+        {
+          code: "source_entry_list_failed",
+          message: `Failed to list source entries for ${root}: ${error.message}`
+        }
+      ]
+    };
+  }
 }
 
 async function collectTargetEntries(targetPath) {
@@ -292,8 +308,8 @@ async function resolveAssignmentInstallRoot(manifest, target) {
     return { ok: false, errors, installRoot: null };
   }
 
-  const assignmentPath = assignmentPaths[target];
-  if (!isRecord(assignmentPath)) {
+  const directAssignmentPath = assignmentPaths[target];
+  if (directAssignmentPath !== undefined && !isRecord(directAssignmentPath)) {
     errors.push({
       code: "missing_target_assignment_path",
       message: `No assignmentPath declared for target ${target}.`
@@ -301,11 +317,37 @@ async function resolveAssignmentInstallRoot(manifest, target) {
     return { ok: false, errors, installRoot: null, assignment: null };
   }
 
+  if (isRecord(directAssignmentPath)) {
+    return await resolveSingleAssignmentPath(manifest, target, directAssignmentPath);
+  }
+
+  if (!isRecord(manifest.assignments?.[target])) {
+    errors.push({
+      code: "missing_target_assignment_path",
+      message: `No assignmentPath declared for target ${target}.`
+    });
+    return { ok: false, errors, installRoot: null, assignment: null };
+  }
+
+  const matchingAssignmentPath = findAssignmentPathByAssignment(assignmentPaths, target);
+  if (!matchingAssignmentPath) {
+    errors.push({
+      code: "missing_install_root",
+      message: `No install root declared for assignment ${target}.`
+    });
+    return { ok: false, errors, installRoot: null, assignment: target };
+  }
+
+  return resolveSingleAssignmentPath(manifest, matchingAssignmentPath.id, matchingAssignmentPath.path);
+}
+
+async function resolveSingleAssignmentPath(manifest, assignmentPathId, assignmentPath) {
+  const errors = [];
   const assignment = normalizeValue(assignmentPath.assignment);
   if (!assignment) {
     errors.push({
       code: "invalid_assignment_path",
-      message: `Assignment path ${target} is missing assignment.`
+      message: `Assignment path ${assignmentPathId} is missing assignment.`
     });
     return { ok: false, errors, installRoot: null, assignment: null };
   }
@@ -313,7 +355,7 @@ async function resolveAssignmentInstallRoot(manifest, target) {
   if (!isRecord(manifest.assignments?.[assignment])) {
     errors.push({
       code: "unknown_assignment_path_target",
-      message: `Assignment path ${target} points at unknown assignment ${assignment}.`
+      message: `Assignment path ${assignmentPathId} points at unknown assignment ${assignment}.`
     });
     return { ok: false, errors, installRoot: null, assignment };
   }
@@ -324,7 +366,7 @@ async function resolveAssignmentInstallRoot(manifest, target) {
   if (!kind) {
     errors.push({
       code: "invalid_assignment_path",
-      message: `Assignment path ${target} is missing kind.`
+      message: `Assignment path ${assignmentPathId} is missing kind.`
     });
     return { ok: false, errors, installRoot: null, assignment };
   }
@@ -332,7 +374,7 @@ async function resolveAssignmentInstallRoot(manifest, target) {
   if (!field) {
     errors.push({
       code: "unsupported_assignment_path_kind",
-      message: `Assignment path ${target} has unsupported kind ${kind}.`
+      message: `Assignment path ${assignmentPathId} has unsupported kind ${kind}.`
     });
     return { ok: false, errors, installRoot: null, assignment };
   }
@@ -341,7 +383,7 @@ async function resolveAssignmentInstallRoot(manifest, target) {
   if (!installRoot) {
     errors.push({
       code: "invalid_assignment_path",
-      message: `Assignment path ${target} is missing required field ${field}.`
+      message: `Assignment path ${assignmentPathId} is missing required field ${field}.`
     });
     return { ok: false, errors, installRoot: null, assignment };
   }
@@ -349,12 +391,24 @@ async function resolveAssignmentInstallRoot(manifest, target) {
   if (!(await isDirectory(installRoot))) {
     errors.push({
       code: "missing_install_root",
-      message: `Assignment path ${target} points at missing install root: ${installRoot}.`
+      message: `Assignment path ${assignmentPathId} points at missing install root: ${installRoot}.`
     });
     return { ok: false, errors, installRoot, assignment };
   }
 
   return { ok: true, errors: [], installRoot, assignment };
+}
+
+function findAssignmentPathByAssignment(assignmentPaths, assignment) {
+  for (const [pathId, assignmentPath] of Object.entries(assignmentPaths)) {
+    if (!isRecord(assignmentPath)) {
+      continue;
+    }
+    if (normalizeValue(assignmentPath.assignment) === assignment) {
+      return { id: pathId, path: assignmentPath };
+    }
+  }
+  return null;
 }
 
 async function isDirectory(candidate) {
