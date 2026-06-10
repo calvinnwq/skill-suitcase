@@ -4,6 +4,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } 
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { PLAN_LOCK_SCHEMA } from "../src/plan-lock.js";
 import { status } from "../src/status.js";
 
 test("status reports manifest-wide statuses for all assignments and respects receipt state", async (t) => {
@@ -524,6 +525,60 @@ assignmentPaths:
   assert.equal(result.summary.unknown, 2);
   assert.equal(result.errors.filter((entry) => entry.code === "invalid_receipt").length, 2);
   assert.equal(result.statuses.every((entry) => entry.status === "unknown"), true);
+});
+
+test("status rejects plan locks written as sync receipts", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-plan-lock-receipt-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-plan-lock-root-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await writeFile(
+    path.join(installRoot, ".skills-sync.json"),
+    `${JSON.stringify({
+      schema: PLAN_LOCK_SCHEMA,
+      source: {
+        repo: sourceRoot,
+        ref: "deadbeef",
+        commit: "deadbeef"
+      },
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      selectedSkills: ["office-hours"],
+      planEntries: [],
+      fileHashes: {},
+      planId: "lock"
+    })}\n`
+  );
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
 });
 
 test("status rejects malformed per-skill install records", async (t) => {

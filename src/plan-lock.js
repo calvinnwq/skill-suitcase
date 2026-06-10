@@ -5,7 +5,7 @@ import path from "node:path";
 import { loadCatalog } from "./catalog.js";
 import { plan } from "./planner.js";
 
-export const PLAN_LOCK_SCHEMA = "calvinnwq.skills.sync-lock.v0";
+export const PLAN_LOCK_SCHEMA = "calvinnwq.skills.plan-lock.v0";
 
 export async function buildPlanLock({ source, target, assignmentPath, sourceCommit }) {
   const { sourceRoot } = await loadCatalog(source);
