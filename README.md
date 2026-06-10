@@ -10,6 +10,7 @@ files, mutate target install paths, or touch runtime homes.
 
 ```bash
 node src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --json
+node src/cli.js diff --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
 node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
 node src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
@@ -23,7 +24,7 @@ Targets currently exercised against fixture #1:
 - `openclaw-kody-codex`
 - `claude`
 
-## JSON Shape
+## `plan` Output
 
 ```json
 {
@@ -43,6 +44,85 @@ Targets currently exercised against fixture #1:
   "errors": []
 }
 ```
+
+`plan` reports package-level actions (`install`/`blocked`) and no file-level
+`entries`.
+
+`diff` resolves `--target` to an assignment plus install root, then adds
+file-level `entries` and a summary:
+
+## `diff` Output
+
+```json
+{
+  "ok": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "target": "openclaw",
+  "assignment": "openclaw",
+  "installRoot": "/tmp/openclaw/skills",
+  "planned": [
+    {
+      "skill": "office-hours",
+      "action": "install",
+      "variant": "canonical",
+      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours",
+      "evidence": ["docs/install-smoke.md"]
+    }
+  ],
+  "blocked": [],
+  "entries": [
+    {
+      "action": "create",
+      "skill": "office-hours",
+      "relativePath": "SKILL.md",
+      "targetPath": "/tmp/openclaw/skills/office-hours/SKILL.md",
+      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours/SKILL.md",
+      "sourceSha256": "b0d..",
+      "targetSha256": null,
+      "bytes": 123
+    },
+    {
+      "action": "unchanged",
+      "skill": "office-hours",
+      "relativePath": "runtime.js",
+      "targetPath": "/tmp/openclaw/skills/office-hours/runtime.js",
+      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours/runtime.js",
+      "sourceSha256": "e1c..",
+      "targetSha256": "e1c..",
+      "bytes": 56
+    }
+  ],
+  "summary": {
+    "create": 1,
+    "update": 0,
+    "unchanged": 1,
+    "extra": 0,
+    "missing": 0,
+    "blocked": 0
+  },
+  "errors": []
+}
+```
+
+For `diff`, `target` may be either an assignment name (`openclaw`) or an
+`assignmentPath` id (`codex-global`). `assignment` is the resolved assignment
+name used to produce the package plan, while `installRoot` is the concrete target
+skills directory used for file comparison.
+
+`entries.action` values:
+
+- `create`: present in source, absent on target
+- `update`: present on both, contents differ
+- `unchanged`: present on both, contents match
+- `extra`: present on target only
+- `missing`: source entry could not be read/listed
+- `blocked`: compatibility blocked this skill
+
+`diff` is read-only: it never creates missing `installRoot` directories and does
+not write files. If target resolution fails (for example ambiguous or missing
+`assignmentPath` entries), `ok` is `false`, `installRoot` is `null`, and
+`errors` includes structured codes like `ambiguous_install_root` and
+`missing_install_root`.
 
 `targets` returns assignment target discovery details instead of install plans:
 
