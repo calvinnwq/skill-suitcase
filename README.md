@@ -241,9 +241,10 @@ receipt, and reports one status per planned or blocked skill. It uses `path` for
 
 `status` treats `<installRoot>/.skills-sync.json` as optional. When present, the
 supported schema is `calvinnwq.skills.sync-lock.v0` with an `installs` object
-keyed by skill name. Each install record requires string `agent`, `mode`,
-`sourcePath`, and `targetPath` fields, and at least one of `version`,
-`sourceCommit`, or `sourceHash`.
+keyed by skill name. Plan locks use a separate schema and are reported as
+`invalid_receipt` if written to `.skills-sync.json`. Each install record requires
+string `agent`, `mode`, `sourcePath`, and `targetPath` fields, and at least one
+of `version`, `sourceCommit`, or `sourceHash`.
 
 ## Plan Lock (internal API)
 
@@ -261,13 +262,21 @@ const result = await assessPlanLock({ source, target, assignmentPath, lock, sour
 // result: { valid: boolean, reasons: string[], current: lock | null }
 ```
 
-`buildPlanLock` produces a deterministic record that captures the source repo,
-commit, selected skills, planned entry metadata, assignment path, per-file
-SHA-256 hashes, and a `planId` hash over the entire record. `assessPlanLock`
-rebuilds the lock from current state and returns `valid: true` if nothing
-changed, or `valid: false` with one or more `reasons` strings describing what
-drifted (e.g. `file_hashes_changed`, `source_commit_changed`,
-`selected_skills_changed`, `plan_entries_changed`).
+`buildPlanLock` produces a deterministic record with schema
+`calvinnwq.skills.plan-lock.v0`. It captures the source repo, resolved commit,
+selected skills, planned entry metadata, assignment path, per-file SHA-256
+hashes for regular skill files, and a `planId` hash over the entire record.
+Symlinks, `__pycache__` directories, and `.pyc` files are ignored. If
+`sourceCommit` is omitted, the module attempts `git rev-parse HEAD` from the
+source root and records `null` when no commit can be resolved.
+
+`assessPlanLock` rebuilds the lock from current state and returns `valid: true`
+if nothing changed, or `valid: false` with one or more `reasons` strings
+describing what drifted. Reason codes include `invalid_lock`,
+`current_plan_unavailable`, `missing_source_metadata`, `source_repo_changed`,
+`source_ref_changed`, `source_commit_changed`, `target_changed`,
+`assignment_path_changed`, `selected_skills_changed`, `plan_entries_changed`,
+`file_hashes_changed`, `plan_id_changed`, and `invalid_lock_schema`.
 
 This module does not write files or require the apply/install layer to exist.
 
