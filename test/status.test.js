@@ -713,6 +713,49 @@ assignmentPaths:
   assert.equal(result.errors.some((entry) => entry.code === "invalid_target"), true);
 });
 
+test("status reports target access errors instead of missing", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-target-access-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-target-access-root-"));
+  t.after(async () => {
+    await chmod(installRoot, 0o700).catch(() => {});
+    await rm(sourceRoot, { recursive: true, force: true });
+    await rm(installRoot, { recursive: true, force: true });
+  });
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await chmod(installRoot, 0);
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.summary.missing, 0);
+  assert.equal(result.statuses[0].status, "unknown");
+  assert.equal(result.errors.some((entry) => entry.code === "target_read_failed"), true);
+});
+
 test("status captures target read failures and continues other assignments", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-target-read-"));
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));
@@ -795,6 +838,59 @@ assignmentPaths:
   assert.equal(validAssignment.statuses[0].status, "current");
   assert.equal(brokenAssignment.statuses[0].status, "unknown");
   assert.equal(brokenAssignment.errors[0].code, "target_read_failed");
+});
+
+test("status reports receipt-hash target read failures instead of dirty", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-target-hash-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-target-hash-root-"));
+  const lockedDir = path.join(installRoot, "office-hours", "locked");
+  t.after(async () => {
+    await chmod(lockedDir, 0o700).catch(() => {});
+    await rm(sourceRoot, { recursive: true, force: true });
+    await rm(installRoot, { recursive: true, force: true });
+  });
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await mkdir(lockedDir);
+  await chmod(lockedDir, 0);
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(sourceSkill)
+  });
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.summary.dirty, 0);
+  assert.equal(result.statuses[0].status, "unknown");
+  assert.equal(result.statuses[0].installedHash, await hashDirectory(sourceSkill));
+  assert.equal(result.errors.some((entry) => entry.code === "target_read_failed"), true);
 });
 
 async function writeReceipt({ installRoot, sourceRoot, skillName, version, sourceCommit = "deadbeef", sourceHash }) {

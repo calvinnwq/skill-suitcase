@@ -327,6 +327,18 @@ async function statusSkill({
   const installExists = await targetExists(targetPath);
   const currentCommit = await readRepoCommit(sourceRoot);
 
+  if (installExists.error) {
+    return targetReadFailureStatus({
+      error: installExists.error,
+      sourceVersion,
+      sourceHashValue,
+      currentCommit,
+      installRoot,
+      targetPath,
+      skillName
+    });
+  }
+
   if (!installExists.exists) {
     return {
       status: "missing",
@@ -386,7 +398,23 @@ async function statusSkill({
   const installedCommit = installRecord.sourceCommit ?? null;
 
   if (installedHash) {
-    const targetHash = await hashInstalledTarget(targetPath);
+    let targetHash;
+    try {
+      targetHash = await hashInstalledTarget(targetPath);
+    } catch (error) {
+      return targetReadFailureStatus({
+        error,
+        sourceVersion,
+        sourceHashValue,
+        currentCommit,
+        installRoot,
+        targetPath,
+        skillName,
+        installedVersion,
+        installedHash,
+        installedCommit
+      });
+    }
     if (targetHash !== installedHash) {
       return {
         status: "dirty",
@@ -502,6 +530,40 @@ async function statusSkill({
     currentCommit,
     installedHash,
     currentHash: sourceHashValue
+  };
+}
+
+function targetReadFailureStatus({
+  error,
+  sourceVersion,
+  sourceHashValue,
+  currentCommit,
+  installRoot,
+  targetPath,
+  skillName,
+  installedVersion = null,
+  installedHash = null,
+  installedCommit = null
+}) {
+  return {
+    status: "unknown",
+    reason: `unable to read target skill: ${error.message}`,
+    target: installRoot,
+    targetPath,
+    installedVersion,
+    currentVersion: sourceVersion,
+    installedCommit,
+    currentCommit,
+    installedHash,
+    currentHash: sourceHashValue,
+    errors: [
+      {
+        code: "target_read_failed",
+        message: `Unable to read target skill ${targetPath}: ${error.message}`,
+        skill: skillName,
+        targetPath
+      }
+    ]
   };
 }
 
@@ -688,11 +750,7 @@ async function targetDiffersFromSource(source, target) {
 }
 
 async function hashInstalledTarget(targetPath) {
-  try {
-    return await hashDirectory(targetPath);
-  } catch {
-    return null;
-  }
+  return hashDirectory(targetPath);
 }
 
 async function getSymlinkTarget(target) {
@@ -794,8 +852,11 @@ async function targetExists(candidate) {
       return { exists: true, isDirectory: true, isSymbolicLink: false };
     }
     return { exists: true, isDirectory: false, isSymbolicLink: false };
-  } catch {
-    return { exists: false, isDirectory: false, isSymbolicLink: false };
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return { exists: false, isDirectory: false, isSymbolicLink: false };
+    }
+    return { exists: false, isDirectory: false, isSymbolicLink: false, error };
   }
 }
 
