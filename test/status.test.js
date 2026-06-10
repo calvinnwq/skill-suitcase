@@ -62,12 +62,13 @@ test("status reports manifest-wide statuses for all assignments and respects rec
 
   await mkdir(path.join(behindRoot, "office-hours"), { recursive: true });
   await cp(sourceSkill, path.join(behindRoot, "office-hours"), { recursive: true });
+  await writeFile(path.join(behindRoot, "office-hours", "runtime.js"), "console.log(\"behind\");\n");
   await writeReceipt({
     installRoot: behindRoot,
     sourceRoot,
     skillName: "office-hours",
     version: "2026.06.10",
-    sourceHash: `${currentHash}deadbeef`
+    sourceHash: await hashDirectory(path.join(behindRoot, "office-hours"))
   });
 
   await mkdir(path.join(dirtyRoot, "office-hours"), { recursive: true });
@@ -167,6 +168,191 @@ assignmentPaths:
   assert.equal(byPath.get("version-openclaw"), "version");
   assert.equal(byPath.get("behind-openclaw"), "behind");
   assert.equal(byPath.get("dirty-openclaw"), "dirty");
+});
+
+test("status reports stale installed content as behind instead of dirty", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-stale-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-stale-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"old\");\n");
+
+  const installedHash = await hashDirectory(sourceSkill);
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: installedHash
+  });
+
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"new\");\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.behind, 1);
+  assert.equal(result.summary.dirty, 0);
+  assert.equal(result.statuses[0].status, "behind");
+});
+
+test("status marks compatibility-blocked plan entries", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-blocked-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-blocked-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const officeHours = path.join(sourceRoot, "skills", "office-hours");
+  const blockedSkill = path.join(sourceRoot, "skills", "gnhf-postflight");
+  await mkdir(officeHours, { recursive: true });
+  await mkdir(blockedSkill, { recursive: true });
+  await writeFile(path.join(officeHours, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(blockedSkill, "SKILL.md"), "---\nname: gnhf-postflight\nversion: 2026.06.10\n---\n");
+
+  await cp(officeHours, path.join(installRoot, "office-hours"), { recursive: true });
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(officeHours)
+  });
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+      - gnhf-postflight
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  codex-global:
+    kind: codex-home
+    assignment: codex
+    skillsPath: ${installRoot}
+
+compatibility:
+  gnhf-postflight:
+    blockedAgents:
+      codex: Codex must use the slimmer platform variant.
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.blocked, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "blocked_skill"), true);
+
+  const blocked = result.statuses.find((entry) => entry.skill === "gnhf-postflight");
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.reason, "Codex must use the slimmer platform variant.");
+});
+
+test("status requires codex-home skillsPath as the install root", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-codex-root-"));
+  const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-codex-home-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(codexHome, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  codex-global:
+    kind: codex-home
+    assignment: codex
+    codexHome: ${codexHome}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.statuses.length, 0);
+  assert.equal(result.errors[0].code, "invalid_assignment_path");
+  assert.equal(result.errors[0].path, "assignmentPaths.codex-global.skillsPath");
+});
+
+test("status reports malformed sync receipts as errors", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-receipt-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-receipt-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await writeFile(path.join(installRoot, ".skills-sync.json"), "{ not json\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
 });
 
 test("status reports assignment-level validation errors while still evaluating valid assignments", async (t) => {

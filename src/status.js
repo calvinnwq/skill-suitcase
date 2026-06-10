@@ -10,10 +10,10 @@ const RECEIPT_FILE = ".skills-sync.json";
 const PATH_FIELDS_BY_KIND = {
   "openclaw-skills-root": ["path"],
   "claude-skills-root": ["path"],
-  "codex-home": ["skillsPath", "codexHome"],
+  "codex-home": ["skillsPath"],
   "nested-home-codex": ["skillsPath"]
 };
-const VALID_STATUSES = new Set(["current", "behind", "version", "dirty", "missing", "unknown"]);
+const VALID_STATUSES = new Set(["current", "behind", "version", "dirty", "missing", "unknown", "blocked"]);
 
 export async function status({ source }) {
   if (!source) {
@@ -27,7 +27,8 @@ export async function status({ source }) {
     version: 0,
     dirty: 0,
     missing: 0,
-    unknown: 0
+    unknown: 0,
+    blocked: 0
   };
   const assignments = [];
   const statuses = [];
@@ -98,12 +99,13 @@ export async function status({ source }) {
       const message = kind
         ? `Assignment path ${assignmentPathId} is missing required install-root field.`
         : `Assignment path ${assignmentPathId} is missing or uses an unsupported kind.`;
+      const pathField = kind && PATH_FIELDS_BY_KIND[kind]?.[0] ? PATH_FIELDS_BY_KIND[kind][0] : "kind";
       const assignmentError = {
         code: "invalid_assignment_path",
         message
       };
       assignmentResult.errors.push(assignmentError);
-      errors.push({ ...assignmentError, path: `assignmentPaths.${assignmentPathId}.kind` });
+      errors.push({ ...assignmentError, path: `assignmentPaths.${assignmentPathId}.${pathField}` });
       assignments.push(assignmentResult);
       continue;
     }
@@ -126,7 +128,43 @@ export async function status({ source }) {
       errors.push(...assignmentPlan.errors);
     }
 
-    const receipt = await readReceipt(installRoot);
+    for (const blocked of assignmentPlan.blocked ?? []) {
+      const blockedStatus = blockedStatusFromPlan({
+        blocked,
+        assignmentName,
+        assignmentPathId,
+        kind,
+        installRoot
+      });
+      const blockedError = {
+        code: "blocked_skill",
+        message: `Skill ${blocked.skill} is blocked for ${assignmentName}: ${blocked.reason}`,
+        skill: blocked.skill,
+        scope: "plan"
+      };
+
+      summary.blocked += 1;
+      assignmentResult.statusCount += 1;
+      statuses.push(blockedStatus);
+      assignmentResult.statuses.push(blockedStatus);
+      assignmentResult.errors.push(blockedError);
+      errors.push({
+        ...blockedError,
+        path: `assignmentPaths.${assignmentPathId}.assignment`
+      });
+    }
+
+    const receiptResult = await readReceipt(installRoot);
+    const receipt = receiptResult.receipt;
+    if (receiptResult.errors.length > 0) {
+      assignmentResult.errors.push(...receiptResult.errors);
+      errors.push(
+        ...receiptResult.errors.map((item) => ({
+          ...item,
+          path: path.join(installRoot, RECEIPT_FILE)
+        }))
+      );
+    }
 
     for (const planned of assignmentPlan.planned) {
       const check = await statusSkill({
@@ -182,6 +220,27 @@ export async function status({ source }) {
   };
 }
 
+function blockedStatusFromPlan({ blocked, assignmentName, assignmentPathId, kind, installRoot }) {
+  const targetPath = path.join(installRoot, blocked.skill);
+  return {
+    assignment: assignmentName,
+    assignmentPath: assignmentPathId,
+    kind,
+    skill: blocked.skill,
+    status: "blocked",
+    target: installRoot,
+    targetPath,
+    reason: blocked.reason,
+    installedVersion: null,
+    currentVersion: null,
+    installedCommit: null,
+    currentCommit: null,
+    installedHash: null,
+    currentHash: null,
+    variant: blocked.variant
+  };
+}
+
 async function statusSkill({
   sourceRoot,
   sourceSkillPath,
@@ -225,25 +284,28 @@ async function statusSkill({
     };
   }
 
-  if (await targetDiffersFromSource(sourceSkillPath, targetPath)) {
-    return {
-      status: "dirty",
-      reason: "target files differ from source",
-      target: installRoot,
-      targetPath,
-      installedVersion: installRecord.version ?? null,
-      currentVersion: sourceVersion,
-      installedCommit: installRecord.sourceCommit ?? null,
-      currentCommit,
-      installedHash: installRecord.sourceHash ?? null,
-      currentHash: sourceHashValue
-    };
-  }
-
   const currentVersion = sourceVersion;
   const installedVersion = installRecord.version ?? null;
   const installedHash = installRecord.sourceHash ?? null;
   const installedCommit = installRecord.sourceCommit ?? null;
+
+  if (installedHash) {
+    const targetHash = await hashInstalledTarget(targetPath);
+    if (targetHash !== installedHash) {
+      return {
+        status: "dirty",
+        reason: "target files differ from sync receipt",
+        target: installRoot,
+        targetPath,
+        installedVersion,
+        currentVersion,
+        installedCommit,
+        currentCommit,
+        installedHash,
+        currentHash: sourceHashValue
+      };
+    }
+  }
 
   if (installedVersion !== currentVersion) {
     return {
@@ -252,7 +314,7 @@ async function statusSkill({
       target: installRoot,
       targetPath,
       installedVersion,
-      currentVersion,
+      currentVersion: sourceVersion,
       installedCommit,
       currentCommit,
       installedHash,
@@ -290,6 +352,21 @@ async function statusSkill({
     };
   }
 
+  if (!installedHash && (await targetDiffersFromSource(sourceSkillPath, targetPath))) {
+    return {
+      status: "dirty",
+      reason: "target files differ from source and receipt has no content hash",
+      target: installRoot,
+      targetPath,
+      installedVersion,
+      currentVersion,
+      installedCommit,
+      currentCommit,
+      installedHash,
+      currentHash: sourceHashValue
+    };
+  }
+
   return {
     status: "current",
     reason: "installed skill matches source version and content hash",
@@ -306,16 +383,64 @@ async function statusSkill({
 
 async function readReceipt(installRoot) {
   const receiptPath = path.join(installRoot, RECEIPT_FILE);
+  const emptyReceipt = { schema: SYNC_SCHEMA, installs: {} };
 
   try {
     const text = await readFile(receiptPath, "utf8");
     const record = JSON.parse(text);
-    return record && isRecord(record) ? record : { schema: SYNC_SCHEMA, installs: {} };
+    if (!isRecord(record)) {
+      return {
+        receipt: emptyReceipt,
+        errors: [
+          {
+            code: "invalid_receipt",
+            message: `Sync receipt ${receiptPath} must be a JSON object.`
+          }
+        ]
+      };
+    }
+    if (record.installs !== undefined && !isRecord(record.installs)) {
+      return {
+        receipt: emptyReceipt,
+        errors: [
+          {
+            code: "invalid_receipt",
+            message: `Sync receipt ${receiptPath} has an invalid installs mapping.`
+          }
+        ]
+      };
+    }
+    return {
+      receipt: {
+        ...record,
+        installs: record.installs ?? {}
+      },
+      errors: []
+    };
   } catch (error) {
     if (error.code === "ENOENT") {
-      return { schema: SYNC_SCHEMA, installs: {} };
+      return { receipt: emptyReceipt, errors: [] };
     }
-    return { schema: SYNC_SCHEMA, installs: {} };
+    if (error instanceof SyntaxError) {
+      return {
+        receipt: emptyReceipt,
+        errors: [
+          {
+            code: "invalid_receipt",
+            message: `Sync receipt ${receiptPath} is not valid JSON.`
+          }
+        ]
+      };
+    }
+    return {
+      receipt: emptyReceipt,
+      errors: [
+        {
+          code: "receipt_read_failed",
+          message: `Unable to read sync receipt ${receiptPath}: ${error.message}`
+        }
+      ]
+    };
   }
 }
 
@@ -368,6 +493,14 @@ async function targetDiffersFromSource(source, target) {
   }
 
   return false;
+}
+
+async function hashInstalledTarget(targetPath) {
+  try {
+    return await hashDirectory(targetPath);
+  } catch {
+    return null;
+  }
 }
 
 async function getSymlinkTarget(target) {
