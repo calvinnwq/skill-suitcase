@@ -13,6 +13,7 @@ node src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --
 node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
 node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
 node src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
+node src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
 ```
 
 Targets currently exercised against fixture #1:
@@ -40,6 +41,35 @@ Targets currently exercised against fixture #1:
   ],
   "blocked": [],
   "errors": []
+}
+```
+
+`targets` returns assignment target discovery details instead of install plans:
+
+```json
+{
+  "ok": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "targets": [
+    {
+      "id": "codex-global",
+      "name": "codex-global",
+      "assignment": "codex",
+      "kind": "codex-home",
+      "path": "/tmp/codex",
+      "codexHome": "/tmp/codex",
+      "skillsPath": "/tmp/codex/skills",
+      "exists": {
+        "path": false,
+        "codexHome": false,
+        "skillsPath": false
+      },
+      "safety": {
+        "classification": "missing"
+      }
+    }
+  ],
+  "findings": []
 }
 ```
 

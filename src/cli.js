@@ -2,6 +2,7 @@
 import { plan } from "./planner.js";
 import { pack } from "./packer.js";
 import { validate } from "./validator.js";
+import { targets } from "./targets.js";
 
 function printUsage() {
   console.error("Usage:");
@@ -9,6 +10,7 @@ function printUsage() {
   console.error("  suitcase pack --source <skills-repo> --target <target> --dry-run --json");
   console.error("  suitcase pack --source <skills-repo> --target <target> --output <dir> --json");
   console.error("  suitcase validate --source <skills-repo> --json");
+  console.error("  suitcase targets --source <skills-repo> --json");
 }
 
 function parseArgs(argv) {
@@ -63,15 +65,16 @@ async function main() {
     args.json &&
     (args.dryRun || args.output);
   const isValidate = args.command === "validate" && args.source && !args.target && args.json;
+  const isTargets = args.command === "targets" && args.source && !args.target && args.json;
 
-  if (!isPlan && !isPack && !isValidate) {
+  if (!isPlan && !isPack && !isValidate && !isTargets) {
     printUsage();
     process.exitCode = 2;
     return;
   }
 
   try {
-    const result = await runCommand(args, { isPlan, isPack });
+    const result = await runCommand(args, { isPlan, isPack, isTargets });
     console.log(JSON.stringify(result, null, 2));
     process.exitCode = result.ok ? 0 : 1;
   } catch (error) {
@@ -80,7 +83,7 @@ async function main() {
   }
 }
 
-async function runCommand(args, { isPlan, isPack }) {
+async function runCommand(args, { isPlan, isPack, isTargets }) {
   if (isPlan) {
     return plan({ source: args.source, target: args.target });
   }
@@ -92,6 +95,10 @@ async function runCommand(args, { isPlan, isPack }) {
       dryRun: args.dryRun,
       output: args.output
     });
+  }
+
+  if (isTargets) {
+    return targets({ source: args.source });
   }
 
   return validate({ source: args.source });
