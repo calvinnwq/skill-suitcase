@@ -255,18 +255,19 @@ import { buildPlanLock, assessPlanLock } from "./src/plan-lock.js";
 
 const lock = await buildPlanLock({ source, target, assignmentPath, sourceCommit });
 // lock: { schema, source: { repo, ref, commit }, target, assignmentPath,
-//          selectedSkills, fileHashes, planId }
+//          selectedSkills, planEntries, fileHashes, planId }
 
 const result = await assessPlanLock({ source, target, assignmentPath, lock, sourceCommit });
 // result: { valid: boolean, reasons: string[], current: lock | null }
 ```
 
 `buildPlanLock` produces a deterministic record that captures the source repo,
-commit, selected skills, assignment path, per-file SHA-256 hashes, and a
-`planId` hash over the entire record. `assessPlanLock` rebuilds the lock from
-current state and returns `valid: true` if nothing changed, or `valid: false`
-with one or more `reasons` strings describing what drifted (e.g.
-`file_hashes_changed`, `source_commit_changed`, `selected_skills_changed`).
+commit, selected skills, planned entry metadata, assignment path, per-file
+SHA-256 hashes, and a `planId` hash over the entire record. `assessPlanLock`
+rebuilds the lock from current state and returns `valid: true` if nothing
+changed, or `valid: false` with one or more `reasons` strings describing what
+drifted (e.g. `file_hashes_changed`, `source_commit_changed`,
+`selected_skills_changed`, `plan_entries_changed`).
 
 This module does not write files or require the apply/install layer to exist.
 

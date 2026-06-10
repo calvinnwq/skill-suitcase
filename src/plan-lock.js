@@ -18,6 +18,7 @@ export async function buildPlanLock({ source, target, assignmentPath, sourceComm
   const normalizedAssignmentPath = normalizeValue(assignmentPath);
   const commit = await resolveSourceCommit(sourceCommit, sourceRoot);
   const fileHashes = await collectPlanFileHashes(planResult.planned);
+  const planEntries = planResult.planned.map((item) => stableObject(plannedEntry(item)));
   const selectedSkills = [...new Set(planResult.planned.map((item) => item.skill))].sort();
 
   const lockRecord = {
@@ -30,6 +31,7 @@ export async function buildPlanLock({ source, target, assignmentPath, sourceComm
     target,
     assignmentPath: normalizedAssignmentPath,
     selectedSkills,
+    planEntries,
     fileHashes
   };
 
@@ -44,7 +46,12 @@ export async function assessPlanLock({ source, target, assignmentPath, lock, sou
     return { valid: false, reasons: ["invalid_lock"], current: null };
   }
 
-  const current = await buildPlanLock({ source, target, assignmentPath, sourceCommit });
+  let current;
+  try {
+    current = await buildPlanLock({ source, target, assignmentPath, sourceCommit });
+  } catch {
+    return { valid: false, reasons: ["current_plan_unavailable"], current: null };
+  }
   const reasons = [];
 
   if (!isRecord(current.source) || !isRecord(lock.source)) {
@@ -73,6 +80,10 @@ export async function assessPlanLock({ source, target, assignmentPath, lock, sou
 
   if (!arraysEqual(current.selectedSkills, lock.selectedSkills)) {
     reasons.push("selected_skills_changed");
+  }
+
+  if (!objectHashesEqual(current.planEntries, lock.planEntries)) {
+    reasons.push("plan_entries_changed");
   }
 
   if (!objectHashesEqual(current.fileHashes, lock.fileHashes)) {
@@ -124,6 +135,7 @@ function computePlanId(lockRecord) {
     target: lockRecord.target,
     assignmentPath: lockRecord.assignmentPath,
     selectedSkills: [...lockRecord.selectedSkills],
+    planEntries: stableObject(lockRecord.planEntries),
     fileHashes: stableObject(lockRecord.fileHashes)
   };
 
@@ -153,15 +165,28 @@ async function resolveSourceCommit(explicitSourceCommit, sourceRoot) {
 }
 
 function stableObject(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stableObject(item));
+  }
+
   if (!isRecord(value)) {
     return value;
   }
 
   const ordered = {};
   for (const key of Object.keys(value).sort()) {
-    ordered[key] = isRecord(value[key]) ? stableObject(value[key]) : value[key];
+    ordered[key] = stableObject(value[key]);
   }
   return ordered;
+}
+
+function plannedEntry(item) {
+  return {
+    skill: item.skill,
+    action: item.action,
+    variant: item.variant,
+    evidence: Array.isArray(item.evidence) ? [...item.evidence] : []
+  };
 }
 
 function normalizeValue(value) {
@@ -221,7 +246,9 @@ async function listFiles(root, prefix = "") {
       continue;
     }
 
-    files.push(relativePath);
+    if (entry.isFile()) {
+      files.push(relativePath);
+    }
   }
 
   return files.sort();
