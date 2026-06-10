@@ -2,9 +2,11 @@
 
 Skill Suitcase is a CLI for planning portable skill installs from a catalog repo.
 
-Milestone 1 is deliberately read-only. It reads a catalog manifest, resolves a
-target assignment, and emits a JSON plan. It does not write receipts, copy skill
-files, mutate target install paths, or touch runtime homes.
+Milestone 1 is deliberately non-mutating for live installs. It reads a catalog
+manifest, resolves assignments and assignment paths, and emits JSON plans,
+diffs, target discovery, bundle manifests, or status reports. It does not write
+receipts, copy skill files into target install paths, mutate target install
+paths, or touch runtime homes.
 
 ## Usage
 
@@ -154,13 +156,107 @@ not write files. If target resolution fails (for example ambiguous or missing
 }
 ```
 
+## `status` Output
+
+`status` walks every manifest `assignmentPaths` entry, resolves the referenced
+assignment plan, reads each install root and optional `.skills-sync.json`
+receipt, and reports one status per planned or blocked skill. It uses `path` for
+`openclaw-skills-root` and `claude-skills-root` entries, and `skillsPath` for
+`codex-home` and `nested-home-codex` entries. Install roots must already exist.
+
+```json
+{
+  "ok": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "manifestPath": "/Users/ngxcalvin/repos/skills/skill-suitcase.yaml",
+  "assignments": [
+    {
+      "assignmentPath": "codex-global",
+      "assignment": "codex",
+      "kind": "codex-home",
+      "installRoot": "/tmp/codex/skills",
+      "statusCount": 1,
+      "statuses": [
+        {
+          "assignment": "codex",
+          "assignmentPath": "codex-global",
+          "kind": "codex-home",
+          "skill": "office-hours",
+          "status": "current",
+          "target": "/tmp/codex/skills",
+          "targetPath": "/tmp/codex/skills/office-hours",
+          "reason": "installed skill matches source version and content hash",
+          "installedVersion": "2026.06.10",
+          "currentVersion": "2026.06.10",
+          "installedCommit": "deadbeef",
+          "currentCommit": "42fe414dc8770117bc0c5c3c8c7619d25627898a",
+          "installedHash": "e1c..",
+          "currentHash": "e1c.."
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "statuses": [
+    {
+      "assignment": "codex",
+      "assignmentPath": "codex-global",
+      "kind": "codex-home",
+      "skill": "office-hours",
+      "status": "current",
+      "target": "/tmp/codex/skills",
+      "targetPath": "/tmp/codex/skills/office-hours",
+      "reason": "installed skill matches source version and content hash",
+      "installedVersion": "2026.06.10",
+      "currentVersion": "2026.06.10",
+      "installedCommit": "deadbeef",
+      "currentCommit": "42fe414dc8770117bc0c5c3c8c7619d25627898a",
+      "installedHash": "e1c..",
+      "currentHash": "e1c.."
+    }
+  ],
+  "summary": {
+    "current": 1,
+    "behind": 0,
+    "version": 0,
+    "dirty": 0,
+    "missing": 0,
+    "unknown": 0,
+    "blocked": 0
+  },
+  "errors": []
+}
+```
+
+`status.status` values:
+
+- `current`: installed receipt version and content match the source skill
+- `behind`: source content changed after the recorded install
+- `version`: source `SKILL.md` frontmatter `version` changed
+- `dirty`: target files or symlink differ from the recorded install
+- `missing`: planned target skill directory is absent
+- `unknown`: status could not be proven, such as a missing receipt for an
+  existing target or an unreadable source/target
+- `blocked`: compatibility rules block the skill for that assignment
+
+`status` treats `<installRoot>/.skills-sync.json` as optional. When present, the
+supported schema is `calvinnwq.skills.sync-lock.v0` with an `installs` object
+keyed by skill name. Each install record requires string `agent`, `mode`,
+`sourcePath`, and `targetPath` fields, and at least one of `version`,
+`sourceCommit`, or `sourceHash`.
+
 ## Development
 
 ```bash
 npm test
+npm run lint
+npm run typecheck
+npm run build
+npm run format:check
 ```
 
-CI runs the same test suite on GitHub Actions with Node 24.
+CI runs `npm test` on GitHub Actions with Node 24. The other npm scripts are
+syntax-check aliases over `src` and `test`.
 
 The first milestone has no package dependencies. The manifest reader is strict
 and intentionally scoped to the current `skill-suitcase.yaml` shape from
