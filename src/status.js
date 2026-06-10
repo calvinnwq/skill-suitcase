@@ -217,7 +217,7 @@ export async function status({ source }) {
         errors.push(
           ...check.errors.map((item) => ({
             ...item,
-            path: item.sourcePath ?? planned.sourcePath
+            path: item.sourcePath ?? item.targetPath ?? planned.sourcePath
           }))
         );
       }
@@ -660,6 +660,17 @@ async function readReceipt(installRoot) {
           {
             code: "invalid_receipt",
             message: `Sync receipt ${receiptPath} has an invalid installs mapping.`
+          }
+        ]
+      };
+    }
+    if (record.schema !== SYNC_SCHEMA) {
+      return {
+        receipt: emptyReceipt,
+        errors: [
+          {
+            code: "invalid_receipt",
+            message: `Sync receipt ${receiptPath} has an unsupported schema.`
           }
         ]
       };

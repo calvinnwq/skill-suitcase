@@ -393,6 +393,89 @@ assignmentPaths:
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
 });
 
+test("status rejects sync receipts with missing or unsupported schemas", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-schema-"));
+  const missingSchemaRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-missing-schema-"));
+  const foreignSchemaRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-foreign-schema-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(missingSchemaRoot, { recursive: true, force: true }));
+  t.after(() => rm(foreignSchemaRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(missingSchemaRoot, "office-hours"), { recursive: true });
+  await cp(sourceSkill, path.join(foreignSchemaRoot, "office-hours"), { recursive: true });
+
+  const sourceHash = await hashDirectory(sourceSkill);
+  await writeFile(
+    path.join(missingSchemaRoot, ".skills-sync.json"),
+    `${JSON.stringify({
+      installs: {
+        "office-hours": {
+          agent: "openclaw",
+          mode: "copy",
+          sourcePath: sourceSkill,
+          targetPath: path.join(missingSchemaRoot, "office-hours"),
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10"
+        }
+      }
+    })}\n`
+  );
+  await writeFile(
+    path.join(foreignSchemaRoot, ".skills-sync.json"),
+    `${JSON.stringify({
+      schema: "foreign.schema.v1",
+      installs: {
+        "office-hours": {
+          agent: "openclaw",
+          mode: "copy",
+          sourcePath: sourceSkill,
+          targetPath: path.join(foreignSchemaRoot, "office-hours"),
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10"
+        }
+      }
+    })}\n`
+  );
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  missing:
+    suitcases:
+      - core
+  foreign:
+    suitcases:
+      - core
+
+assignmentPaths:
+  missing:
+    kind: openclaw-skills-root
+    assignment: missing
+    path: ${missingSchemaRoot}
+  foreign:
+    kind: openclaw-skills-root
+    assignment: foreign
+    path: ${foreignSchemaRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 2);
+  assert.equal(result.errors.filter((entry) => entry.code === "invalid_receipt").length, 2);
+  assert.equal(result.statuses.every((entry) => entry.status === "unknown"), true);
+});
+
 test("status rejects malformed per-skill install records", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-install-record-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-install-record-root-"));
@@ -710,7 +793,8 @@ assignmentPaths:
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.summary.missing, 0);
   assert.equal(result.statuses[0].status, "unknown");
-  assert.equal(result.errors.some((entry) => entry.code === "invalid_target"), true);
+  const invalidTargetError = result.errors.find((entry) => entry.code === "invalid_target");
+  assert.equal(invalidTargetError.path, path.join(installRoot, "office-hours"));
 });
 
 test("status reports target access errors instead of missing", async (t) => {
@@ -830,7 +914,8 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.current, 1);
   assert.equal(result.summary.unknown, 1);
-  assert.equal(result.errors.some((entry) => entry.code === "target_read_failed"), true);
+  const targetReadError = result.errors.find((entry) => entry.code === "target_read_failed");
+  assert.equal(targetReadError.path, path.join(brokenRoot, "missing-skill-file"));
 
   const validAssignment = result.assignments.find((entry) => entry.assignmentPath === "openclaw");
   const brokenAssignment = result.assignments.find((entry) => entry.assignmentPath === "broken");
@@ -890,7 +975,8 @@ assignmentPaths:
   assert.equal(result.summary.dirty, 0);
   assert.equal(result.statuses[0].status, "unknown");
   assert.equal(result.statuses[0].installedHash, await hashDirectory(sourceSkill));
-  assert.equal(result.errors.some((entry) => entry.code === "target_read_failed"), true);
+  const targetReadError = result.errors.find((entry) => entry.code === "target_read_failed");
+  assert.equal(targetReadError.path, path.join(installRoot, "office-hours"));
 });
 
 async function writeReceipt({ installRoot, sourceRoot, skillName, version, sourceCommit = "deadbeef", sourceHash }) {
