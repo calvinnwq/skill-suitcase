@@ -398,6 +398,7 @@ compatibility:
 test("diff returns structured errors when source traversal fails", async (t) => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-source-error-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-source-error-target-"));
+  const targetSkillRoot = path.join(targetRoot, "office-hours");
   const privateDir = path.join(source, "skills", "office-hours", "private");
   t.after(async () => {
     await chmod(privateDir, 0o755).catch(() => {});
@@ -412,7 +413,8 @@ test("diff returns structured errors when source traversal fails", async (t) => 
   await writeFile(path.join(privateDir, "secret.txt"), "cannot be read\n");
   await chmod(privateDir, 0o000);
 
-  await mkdir(path.join(targetRoot, "office-hours"), { recursive: true });
+  await mkdir(targetSkillRoot, { recursive: true });
+  await writeFile(path.join(targetSkillRoot, "extra.txt"), "extra file\n");
 
   await createCatalog(
     source,
@@ -447,4 +449,64 @@ compatibility:
   assert.equal(result.summary.create, 0);
   assert.ok(result.errors.some((item) => item.code === "source_entry_list_failed"));
   assert.equal(result.entries.length, 0);
+  assert.equal(result.entries.filter((entry) => entry.action === "extra").length, 0);
+});
+
+test("diff returns ambiguous install-root error for duplicate assignment paths", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-ambiguous-target-"));
+  const primaryRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-ambiguous-primary-"));
+  const secondaryRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-ambiguous-secondary-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(primaryRoot, { recursive: true, force: true }));
+  t.after(() => rm(secondaryRoot, { recursive: true, force: true }));
+
+  const primarySkillsPath = path.join(primaryRoot, "skills");
+  const secondarySkillsPath = path.join(secondaryRoot, "skills");
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "Office Hours\n");
+
+  await createCatalog(
+    source,
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  codex-primary:
+    kind: codex-home
+    assignment: codex
+    codexHome: ${primaryRoot}
+    skillsPath: ${primarySkillsPath}
+
+  codex-secondary:
+    kind: codex-home
+    assignment: codex
+    codexHome: ${secondaryRoot}
+    skillsPath: ${secondarySkillsPath}
+
+compatibility:
+  office-hours:
+    agents:
+      - codex
+`
+  );
+
+  const result = await diff({ source, target: "codex" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.installRoot, null);
+  assert.equal(result.target, "codex");
+  assert.equal(result.assignment, "codex");
+  assert.equal(result.entries.length, 0);
+  const error = result.errors.find((item) => item.code === "ambiguous_install_root");
+  assert.ok(error);
+  assert.equal(error.message.includes("pass a concrete assignmentPath target selector"), true);
+  assert.deepEqual(error.candidates, ["codex-primary", "codex-secondary"]);
 });

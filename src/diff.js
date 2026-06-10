@@ -52,6 +52,8 @@ export async function diff({ source, target }) {
     result.entries.push(blockedEntryFromPlan(blockedEntry));
   }
 
+  const skippedExtraSkillNames = new Set();
+
   for (const plannedSkill of result.planned) {
     const { entries: relativeEntries, errors: compareErrors } = await comparePlannedSkill(
       plannedSkill,
@@ -59,9 +61,16 @@ export async function diff({ source, target }) {
     );
     result.errors.push(...compareErrors);
     result.entries.push(...relativeEntries);
+    if (compareErrors.some((error) => error.code === "source_entry_list_failed")) {
+      skippedExtraSkillNames.add(plannedSkill.skill);
+    }
   }
 
   for (const plannedSkill of result.planned) {
+    if (skippedExtraSkillNames.has(plannedSkill.skill)) {
+      continue;
+    }
+
     const targetSkillPath = path.join(result.installRoot, plannedSkill.skill);
     const extraEntries = await collectExtraEntries(
       plannedSkill.skill,
@@ -329,8 +338,8 @@ async function resolveAssignmentInstallRoot(manifest, target) {
     return { ok: false, errors, installRoot: null, assignment: null };
   }
 
-  const matchingAssignmentPath = findAssignmentPathByAssignment(assignmentPaths, target);
-  if (!matchingAssignmentPath) {
+  const matchingAssignmentPaths = findAssignmentPathByAssignment(assignmentPaths, target);
+  if (matchingAssignmentPaths.length === 0) {
     errors.push({
       code: "missing_install_root",
       message: `No install root declared for assignment ${target}.`
@@ -338,7 +347,16 @@ async function resolveAssignmentInstallRoot(manifest, target) {
     return { ok: false, errors, installRoot: null, assignment: target };
   }
 
-  return resolveSingleAssignmentPath(manifest, matchingAssignmentPath.id, matchingAssignmentPath.path);
+  if (matchingAssignmentPaths.length > 1) {
+    errors.push({
+      code: "ambiguous_install_root",
+      message: `Target ${target} matches multiple assignment paths; pass a concrete assignmentPath target selector.`,
+      candidates: matchingAssignmentPaths.map((candidate) => candidate.id)
+    });
+    return { ok: false, errors, installRoot: null, assignment: target };
+  }
+
+  return resolveSingleAssignmentPath(manifest, matchingAssignmentPaths[0].id, matchingAssignmentPaths[0].path);
 }
 
 async function resolveSingleAssignmentPath(manifest, assignmentPathId, assignmentPath) {
@@ -400,15 +418,18 @@ async function resolveSingleAssignmentPath(manifest, assignmentPathId, assignmen
 }
 
 function findAssignmentPathByAssignment(assignmentPaths, assignment) {
+  const matches = [];
+
   for (const [pathId, assignmentPath] of Object.entries(assignmentPaths)) {
     if (!isRecord(assignmentPath)) {
       continue;
     }
     if (normalizeValue(assignmentPath.assignment) === assignment) {
-      return { id: pathId, path: assignmentPath };
+      matches.push({ id: pathId, path: assignmentPath });
     }
   }
-  return null;
+
+  return matches;
 }
 
 async function isDirectory(candidate) {
