@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -667,19 +667,155 @@ assignmentPaths:
   assert.equal(brokenAssignment.errors[0].code, "source_read_failed");
 });
 
-async function writeReceipt({ installRoot, sourceRoot, skillName, version, sourceHash }) {
+test("status reports file targets as blocking target errors", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-file-target-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-file-target-root-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(installRoot, "office-hours"), "not a directory\n");
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(sourceSkill)
+  });
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.summary.missing, 0);
+  assert.equal(result.statuses[0].status, "unknown");
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_target"), true);
+});
+
+test("status captures target read failures and continues other assignments", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-target-read-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+
+  const validSkill = path.join(sourceRoot, "skills", "office-hours");
+  const brokenSkill = path.join(sourceRoot, "skills", "missing-skill-file");
+  await mkdir(validSkill, { recursive: true });
+  await mkdir(brokenSkill, { recursive: true });
+  await writeFile(path.join(validSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(brokenSkill, "SKILL.md"), "---\nname: missing-skill-file\nversion: 2026.06.10\n---\n");
+
+  const validRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-target-valid-"));
+  const brokenRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-target-broken-"));
+  const lockedDir = path.join(brokenRoot, "missing-skill-file", "locked");
+  t.after(async () => {
+    await chmod(lockedDir, 0o700).catch(() => {});
+    await rm(validRoot, { recursive: true, force: true });
+    await rm(brokenRoot, { recursive: true, force: true });
+  });
+
+  await cp(validSkill, path.join(validRoot, "office-hours"), { recursive: true });
+  await cp(brokenSkill, path.join(brokenRoot, "missing-skill-file"), { recursive: true });
+  await mkdir(lockedDir);
+  await chmod(lockedDir, 0);
+  await writeReceipt({
+    installRoot: validRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(validSkill)
+  });
+  await writeReceipt({
+    installRoot: brokenRoot,
+    sourceRoot,
+    skillName: "missing-skill-file",
+    version: "2026.06.10",
+    sourceCommit: null,
+    sourceHash: null
+  });
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+  broken:
+    skills:
+      - missing-skill-file
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+  broken:
+    suitcases:
+      - broken
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${validRoot}
+  broken:
+    kind: openclaw-skills-root
+    assignment: broken
+    path: ${brokenRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "target_read_failed"), true);
+
+  const validAssignment = result.assignments.find((entry) => entry.assignmentPath === "openclaw");
+  const brokenAssignment = result.assignments.find((entry) => entry.assignmentPath === "broken");
+
+  assert.equal(validAssignment.statuses[0].status, "current");
+  assert.equal(brokenAssignment.statuses[0].status, "unknown");
+  assert.equal(brokenAssignment.errors[0].code, "target_read_failed");
+});
+
+async function writeReceipt({ installRoot, sourceRoot, skillName, version, sourceCommit = "deadbeef", sourceHash }) {
+  const installRecord = {
+    agent: "openclaw",
+    mode: "copy",
+    sourcePath: path.join(sourceRoot, "skills", skillName),
+    targetPath: path.join(installRoot, skillName),
+    version
+  };
+  if (sourceCommit !== null) {
+    installRecord.sourceCommit = sourceCommit;
+  }
+  if (sourceHash !== null) {
+    installRecord.sourceHash = sourceHash;
+  }
+
   const receipt = {
     schema: "calvinnwq.skills.sync-lock.v0",
     installs: {
-      [skillName]: {
-        agent: "openclaw",
-        mode: "copy",
-        sourcePath: path.join(sourceRoot, "skills", skillName),
-        targetPath: path.join(installRoot, skillName),
-        version,
-        sourceCommit: "deadbeef",
-        sourceHash
-      }
+      [skillName]: installRecord
     }
   };
 

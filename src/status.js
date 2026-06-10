@@ -342,6 +342,29 @@ async function statusSkill({
     };
   }
 
+  if (!installExists.isDirectory && !installExists.isSymbolicLink) {
+    return {
+      status: "unknown",
+      reason: "target skill path exists but is not a directory or symlink",
+      target: installRoot,
+      targetPath,
+      installedVersion: null,
+      currentVersion: sourceVersion,
+      installedCommit: null,
+      currentCommit,
+      installedHash: null,
+      currentHash: sourceHashValue,
+      errors: [
+        {
+          code: "invalid_target",
+          message: `Target skill path ${targetPath} exists but is not a directory or symlink.`,
+          skill: skillName,
+          targetPath
+        }
+      ]
+    };
+  }
+
   if (!installRecord) {
     return {
       status: "unknown",
@@ -425,7 +448,35 @@ async function statusSkill({
     };
   }
 
-  if (!installedHash && (await targetDiffersFromSource(sourceSkillPath, targetPath))) {
+  let targetDiffers = false;
+  if (!installedHash) {
+    try {
+      targetDiffers = await targetDiffersFromSource(sourceSkillPath, targetPath);
+    } catch (error) {
+      return {
+        status: "unknown",
+        reason: `unable to read target skill: ${error.message}`,
+        target: installRoot,
+        targetPath,
+        installedVersion,
+        currentVersion,
+        installedCommit,
+        currentCommit,
+        installedHash,
+        currentHash: sourceHashValue,
+        errors: [
+          {
+            code: "target_read_failed",
+            message: `Unable to read target skill ${targetPath}: ${error.message}`,
+            skill: skillName,
+            targetPath
+          }
+        ]
+      };
+    }
+  }
+
+  if (!installedHash && targetDiffers) {
     return {
       status: "dirty",
       reason: "target files differ from source and receipt has no content hash",
@@ -737,14 +788,14 @@ async function targetExists(candidate) {
   try {
     const info = await lstat(candidate);
     if (info.isSymbolicLink()) {
-      return { exists: true, isSymbolicLink: true };
+      return { exists: true, isDirectory: false, isSymbolicLink: true };
     }
     if (info.isDirectory()) {
-      return { exists: true, isSymbolicLink: false };
+      return { exists: true, isDirectory: true, isSymbolicLink: false };
     }
-    return { exists: false, isSymbolicLink: false };
+    return { exists: true, isDirectory: false, isSymbolicLink: false };
   } catch {
-    return { exists: false, isSymbolicLink: false };
+    return { exists: false, isDirectory: false, isSymbolicLink: false };
   }
 }
 
