@@ -346,7 +346,8 @@ are reported as `invalid_receipt`.
 
 ## Receipt Module
 
-`src/receipt.js` provides helpers for building and persisting Suitcase receipts.
+`src/receipt.ts` (and its compiled output at `dist/src/receipt.js`) provides
+helpers for building and persisting Suitcase receipts.
 
 ```js
 import {
@@ -358,7 +359,7 @@ import {
   writeReceipt,
   RECEIPT_FILE,
   RECEIPT_SCHEMA
-} from "./src/receipt.js";
+} from "./dist/src/receipt.js";
 
 // Hash all files under a skill root
 const installedFiles = await buildInstalledFiles(skillRoot);
@@ -399,11 +400,11 @@ an object; multiple installs for the same skill are stored as an array.
 
 ## Plan Lock (internal API)
 
-`src/plan-lock.js` implements the plan identity contract used to detect when a
+`src/plan-lock.ts` (and its compiled output at `dist/src/plan-lock.js`) implements the plan identity contract used to detect when a
 previously computed install plan is still valid or has become stale.
 
 ```js
-import { buildPlanLock, assessPlanLock } from "./src/plan-lock.js";
+import { buildPlanLock, assessPlanLock } from "./dist/src/plan-lock.js";
 
 const lock = await buildPlanLock({ source, target, assignmentPath, sourceCommit });
 // lock: { schema, source: { repo, ref, commit }, target, assignmentPath,
