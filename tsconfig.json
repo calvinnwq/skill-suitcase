@@ -27,6 +27,8 @@
     "tests/packer.test.ts",
     "tests/validator.test.ts",
     "tests/targets.test.ts",
-    "tests/plan-lock.test.ts"
+    "tests/plan-lock.test.ts",
+    "src/receipt.ts",
+    "tests/receipt.test.ts"
   ]
 }

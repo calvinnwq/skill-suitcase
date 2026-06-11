@@ -8,6 +8,8 @@ import {
   LEGACY_RECEIPT_SCHEMA,
   RECEIPT_FILE,
   RECEIPT_SCHEMA,
+  Receipt,
+  ReceiptInstallRecord,
   buildInstallRecord,
   buildReceipt,
   buildInstalledFiles,
@@ -15,6 +17,36 @@ import {
   writeReceipt,
   upsertInstallRecord
 } from "../src/receipt.js";
+
+function getSingleInstallRecord(
+  value: ReceiptInstallRecord | ReceiptInstallRecord[] | undefined,
+  selector: string
+): ReceiptInstallRecord {
+  if (value === undefined) {
+    throw new Error(`Missing install record for ${selector}.`);
+  }
+  if (Array.isArray(value)) {
+    const first = value[0];
+    if (value.length !== 1 || first === undefined) {
+      throw new Error(`Expected single install record for ${selector}.`);
+    }
+    return first;
+  }
+  return value;
+}
+
+function getInstallRecords(
+  value: ReceiptInstallRecord | ReceiptInstallRecord[] | undefined
+): ReceiptInstallRecord[] {
+  if (value === undefined) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+function parseReceipt(data: string): Receipt {
+  return JSON.parse(data) as Receipt;
+}
 
 test("receipt builder captures skill install metadata", () => {
   const base = buildReceipt({
@@ -47,19 +79,31 @@ test("receipt builder captures skill install metadata", () => {
   });
 
   assert.equal(receipt.schema, RECEIPT_SCHEMA);
+  if (receipt.source === undefined) {
+    throw new Error("Expected source metadata on receipt.");
+  }
   assert.equal(receipt.source.repo, "/Users/ngxcalvin/repos/skills");
   assert.equal(receipt.source.ref, "refs/heads/main");
   assert.equal(receipt.source.commit, "deadbeef");
 
-  const entry = receipt.installs["office-hours"];
+  const entry = getSingleInstallRecord(receipt.installs?.["office-hours"], "office-hours");
   assert.equal(entry.skill, "office-hours");
   assert.equal(entry.target, "openclaw");
   assert.equal(entry.mode, "copy");
   assert.equal(entry.sourceCommit, "deadbeef");
   assert.equal(entry.sourceHash, "cafebabe");
-  assert.equal(entry.installedFiles[0].path, "SKILL.md");
-  assert.equal(entry.priorState.status, "missing");
-  assert.ok(Array.isArray(entry.installedFiles));
+  if (!Array.isArray(entry.installedFiles)) {
+    throw new Error("Expected installed files to be an array.");
+  }
+  const firstFile = entry.installedFiles[0];
+  if (firstFile === undefined) {
+    throw new Error("Expected installed file to be present.");
+  }
+  assert.equal(firstFile.path, "SKILL.md");
+  if (entry.priorState === undefined) {
+    throw new Error("Expected priorState on receipt entry.");
+  }
+  assert.equal((entry.priorState as { status: string }).status, "missing");
 });
 
 test("receipt builder supports multi-target records for the same skill", async (t) => {
@@ -113,12 +157,20 @@ test("receipt builder supports multi-target records for the same skill", async (
     "utf8"
   );
 
-  const loaded = JSON.parse(await readFile(path.join(targetRecordDir, RECEIPT_FILE), "utf8"));
-  const entries = loaded.installs["office-hours"];
+  const loaded = parseReceipt(await readFile(path.join(targetRecordDir, RECEIPT_FILE), "utf8"));
+  const entries = getInstallRecords(loaded.installs?.["office-hours"]);
   assert.ok(Array.isArray(entries));
   assert.equal(entries.length, 2);
-  assert.equal(entries[0].targetPath.includes("openclaw"), true);
-  assert.equal(entries[1].targetPath.includes("codex"), true);
+  const firstTarget = entries[0];
+  const secondTarget = entries[1];
+  if (firstTarget === undefined || secondTarget === undefined) {
+    throw new Error("Expected two receipt entries.");
+  }
+  if (firstTarget.targetPath === undefined || secondTarget.targetPath === undefined) {
+    throw new Error("Expected target paths in receipt records.");
+  }
+  assert.equal(firstTarget.targetPath.includes("openclaw"), true);
+  assert.equal(secondTarget.targetPath.includes("codex"), true);
 });
 
 test("upsertInstallRecord replaces existing record for the same skill/target path", () => {
@@ -154,9 +206,10 @@ test("upsertInstallRecord replaces existing record for the same skill/target pat
     })
   });
 
-  const entries = updated.installs["office-hours"];
-  assert.equal(Array.isArray(entries), false);
-  assert.equal(entries.version, "2026.06.11");
+  const rawEntries = updated.installs?.["office-hours"];
+  assert.equal(Array.isArray(rawEntries), false);
+  const entry = getSingleInstallRecord(rawEntries, "office-hours");
+  assert.equal(entry.version, "2026.06.11");
 });
 
 test("upsertInstallRecord appends records when target paths differ", () => {
@@ -192,11 +245,16 @@ test("upsertInstallRecord appends records when target paths differ", () => {
     })
   });
 
-  const entries = current.installs["office-hours"];
+  const entries = getInstallRecords(current.installs?.["office-hours"]);
   assert.equal(Array.isArray(entries), true);
   assert.equal(entries.length, 2);
-  assert.equal(entries[0].targetPath, "/tmp/openclaw/skills/office-hours");
-  assert.equal(entries[1].targetPath, "/tmp/codex/skills/office-hours");
+  const firstTarget = entries[0];
+  const secondTarget = entries[1];
+  if (firstTarget === undefined || secondTarget === undefined) {
+    throw new Error("Expected two install entries.");
+  }
+  assert.equal(firstTarget.targetPath, "/tmp/openclaw/skills/office-hours");
+  assert.equal(secondTarget.targetPath, "/tmp/codex/skills/office-hours");
 });
 
 test("upsertInstallRecord treats equivalent target paths as the same install target", () => {
@@ -232,7 +290,7 @@ test("upsertInstallRecord treats equivalent target paths as the same install tar
     })
   });
 
-  const entry = second.installs["office-hours"];
+  const entry = getSingleInstallRecord(second.installs?.["office-hours"], "office-hours");
   assert.equal(Array.isArray(entry), false);
   assert.equal(entry.version, "2026.06.11");
 });
@@ -471,7 +529,7 @@ test("upsertAndWriteReceipt rejects records with invalid priorState", async (t) 
     version: "2026.06.10",
     sourceCommit: "deadbeef",
     priorState: "bad"
-  };
+  } as unknown as ReceiptInstallRecord;
   const receipt = buildReceipt({
     sourceRoot: "/Users/ngxcalvin/repos/skills",
     sourceRef: "refs/heads/main",
@@ -541,13 +599,19 @@ test("writeReceipt writes a normalized suitcase receipt to the install root", as
   });
 
   const receiptPath = await writeReceipt({ installRoot, receipt });
-  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
+  const persisted = parseReceipt(await readFile(receiptPath, "utf8"));
 
   assert.equal(path.basename(receiptPath), RECEIPT_FILE);
   assert.equal(path.dirname(receiptPath), path.resolve(installRoot));
   assert.equal(persisted.schema, RECEIPT_SCHEMA);
+  if (persisted.source === undefined) {
+    throw new Error("Expected receipt source metadata.");
+  }
   assert.equal(persisted.source.repo, "/Users/ngxcalvin/repos/skills");
-  assert.equal(persisted.installs["office-hours"].version, "2026.06.10");
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").version,
+    "2026.06.10"
+  );
 });
 
 test("upsertAndWriteReceipt writes and upserts install records", async (t) => {
@@ -594,11 +658,14 @@ test("upsertAndWriteReceipt writes and upserts install records", async (t) => {
     skillName: "office-hours",
     installRecord: firstRecord
   });
-  let persisted = JSON.parse(await readFile(receiptPath, "utf8"));
-  let entries = [].concat(persisted.installs["office-hours"]);
+  let persisted = parseReceipt(await readFile(receiptPath, "utf8"));
+  let entries = getInstallRecords(persisted.installs?.["office-hours"]);
   assert.equal(Array.isArray(entries), true);
   assert.equal(entries.length, 1);
-  assert.equal(entries[0].version, "2026.06.10");
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").version,
+    "2026.06.10"
+  );
 
   receiptPath = await upsertAndWriteReceipt({
     installRoot,
@@ -606,11 +673,14 @@ test("upsertAndWriteReceipt writes and upserts install records", async (t) => {
     skillName: "office-hours",
     installRecord: updateRecord
   });
-  persisted = JSON.parse(await readFile(receiptPath, "utf8"));
-  entries = [].concat(persisted.installs["office-hours"]);
+  persisted = parseReceipt(await readFile(receiptPath, "utf8"));
+  entries = getInstallRecords(persisted.installs?.["office-hours"]);
   assert.equal(Array.isArray(entries), true);
   assert.equal(entries.length, 1);
-  assert.equal(entries[0].version, "2026.06.11");
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").version,
+    "2026.06.11"
+  );
 
   await upsertAndWriteReceipt({
     installRoot,
@@ -620,8 +690,8 @@ test("upsertAndWriteReceipt writes and upserts install records", async (t) => {
     receiptPath: ".nested/receipts/.skill-suitcase-receipt.json"
   });
   const altReceiptPath = path.join(installRoot, ".nested/receipts/.skill-suitcase-receipt.json");
-  const altPersisted = JSON.parse(await readFile(altReceiptPath, "utf8"));
-  const altEntries = [].concat(altPersisted.installs["office-hours"]);
+  const altPersisted = parseReceipt(await readFile(altReceiptPath, "utf8"));
+  const altEntries = getInstallRecords(altPersisted.installs?.["office-hours"]);
   assert.equal(Array.isArray(altEntries), true);
   assert.equal(altEntries.length, 2);
 });
@@ -660,9 +730,13 @@ test("upsertAndWriteReceipt normalizes relative target paths for deduplication",
     skillName: "office-hours",
     installRecord: relativeRecord
   });
-  let persisted = JSON.parse(await readFile(receiptPath, "utf8"));
-  assert.equal(Array.isArray(persisted.installs["office-hours"]), false);
-  assert.equal(persisted.installs["office-hours"].targetPath, path.join(installRoot, "office-hours"));
+  let persisted = parseReceipt(await readFile(receiptPath, "utf8"));
+  const relativeEntry = getSingleInstallRecord(
+    persisted.installs?.["office-hours"],
+    "office-hours"
+  );
+  assert.equal(Array.isArray(persisted.installs?.["office-hours"]), false);
+  assert.equal(relativeEntry.targetPath, path.join(installRoot, "office-hours"));
 
   receiptPath = await upsertAndWriteReceipt({
     installRoot,
@@ -670,12 +744,21 @@ test("upsertAndWriteReceipt normalizes relative target paths for deduplication",
     skillName: "office-hours",
     installRecord: absoluteRecord
   });
-  persisted = JSON.parse(await readFile(receiptPath, "utf8"));
-  const entries = [].concat(persisted.installs["office-hours"]);
+  persisted = parseReceipt(await readFile(receiptPath, "utf8"));
+  const entries = getInstallRecords(persisted.installs?.["office-hours"]);
   assert.equal(entries.length, 1);
-  assert.equal(entries[0].version, "2026.06.11");
-  assert.equal(entries[0].sourceCommit, "facefeed");
-  assert.equal(entries[0].targetPath, path.join(installRoot, "office-hours"));
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").version,
+    "2026.06.11"
+  );
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").sourceCommit,
+    "facefeed"
+  );
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").targetPath,
+    path.join(installRoot, "office-hours")
+  );
 });
 
 test("upsertAndWriteReceipt dedupes existing relative receipt targets against install root", async (t) => {
@@ -717,11 +800,17 @@ test("upsertAndWriteReceipt dedupes existing relative receipt targets against in
     installRecord: absoluteRecord
   });
 
-  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
-  const entries = [].concat(persisted.installs["office-hours"]);
+  const persisted = parseReceipt(await readFile(receiptPath, "utf8"));
+  const entries = getInstallRecords(persisted.installs?.["office-hours"]);
   assert.equal(entries.length, 1);
-  assert.equal(entries[0].version, "2026.06.11");
-  assert.equal(entries[0].targetPath, path.join(installRoot, "office-hours"));
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").version,
+    "2026.06.11"
+  );
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").targetPath,
+    path.join(installRoot, "office-hours")
+  );
 });
 
 test("upsertAndWriteReceipt preserves unrelated skill records while adding another skill", async (t) => {
@@ -759,28 +848,34 @@ test("upsertAndWriteReceipt preserves unrelated skill records while adding anoth
   let receiptPath = await upsertAndWriteReceipt({
     installRoot,
     receipt,
-    skillName: officeRecord.skill,
+    skillName: officeRecord.skill ?? "office-hours",
     installRecord: officeRecord
   });
 
-  receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  receipt = parseReceipt(await readFile(receiptPath, "utf8"));
   receiptPath = await upsertAndWriteReceipt({
     installRoot,
     receipt,
-    skillName: gnhfRecord.skill,
+    skillName: gnhfRecord.skill ?? "gnhf-postflight",
     installRecord: gnhfRecord
   });
 
-  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
-  const officeEntries = [].concat(persisted.installs["office-hours"]);
-  const gnhfEntries = [].concat(persisted.installs["gnhf-postflight"]);
+  const persisted = parseReceipt(await readFile(receiptPath, "utf8"));
+  const officeEntries = getInstallRecords(persisted.installs?.["office-hours"]);
+  const gnhfEntries = getInstallRecords(persisted.installs?.["gnhf-postflight"]);
 
   assert.equal(Array.isArray(officeEntries), true);
   assert.equal(Array.isArray(gnhfEntries), true);
   assert.equal(officeEntries.length, 1);
   assert.equal(gnhfEntries.length, 1);
-  assert.equal(officeEntries[0].version, "2026.06.10");
-  assert.equal(gnhfEntries[0].version, "2026.06.11");
+  assert.equal(
+    getSingleInstallRecord(officeEntries, "office-hours").version,
+    "2026.06.10"
+  );
+  assert.equal(
+    getSingleInstallRecord(gnhfEntries, "gnhf-postflight").version,
+    "2026.06.11"
+  );
 
   const updatedOfficeRecord = {
     ...officeRecord,
@@ -791,16 +886,25 @@ test("upsertAndWriteReceipt preserves unrelated skill records while adding anoth
   receiptPath = await upsertAndWriteReceipt({
     installRoot,
     receipt: persisted,
-    skillName: officeRecord.skill,
+    skillName: officeRecord.skill ?? "office-hours",
     installRecord: updatedOfficeRecord
   });
 
-  const refreshed = JSON.parse(await readFile(receiptPath, "utf8"));
-  const refreshedOffice = [].concat(refreshed.installs["office-hours"]);
-  const refreshedGnhf = [].concat(refreshed.installs["gnhf-postflight"]);
-  assert.equal(refreshedOffice[0].version, "2026.06.12");
-  assert.equal(refreshedGnhf[0].version, "2026.06.11");
-  assert.equal(refreshedOffice[0].sourceCommit, "beadfeed");
+  const refreshed = parseReceipt(await readFile(receiptPath, "utf8"));
+  const refreshedOffice = getInstallRecords(refreshed.installs?.["office-hours"]);
+  const refreshedGnhf = getInstallRecords(refreshed.installs?.["gnhf-postflight"]);
+  assert.equal(
+    getSingleInstallRecord(refreshedOffice, "office-hours").version,
+    "2026.06.12"
+  );
+  assert.equal(
+    getSingleInstallRecord(refreshedGnhf, "gnhf-postflight").version,
+    "2026.06.11"
+  );
+  assert.equal(
+    getSingleInstallRecord(refreshedOffice, "office-hours").sourceCommit,
+    "beadfeed"
+  );
 });
 
 test("upsertAndWriteReceipt reads existing receipt from disk when receipt is omitted", async (t) => {
@@ -829,19 +933,25 @@ test("upsertAndWriteReceipt reads existing receipt from disk when receipt is omi
 
   await upsertAndWriteReceipt({
     installRoot,
-    skillName: officeRecord.skill,
+    skillName: officeRecord.skill ?? "office-hours",
     installRecord: officeRecord
   });
 
   const receiptPath = await upsertAndWriteReceipt({
     installRoot,
-    skillName: gnhfRecord.skill,
+    skillName: gnhfRecord.skill ?? "gnhf-postflight",
     installRecord: gnhfRecord
   });
 
-  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
-  assert.equal(persisted.installs["office-hours"].version, "2026.06.10");
-  assert.equal(persisted.installs["gnhf-postflight"].version, "2026.06.11");
+  const persisted = parseReceipt(await readFile(receiptPath, "utf8"));
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").version,
+    "2026.06.10"
+  );
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["gnhf-postflight"], "gnhf-postflight").version,
+    "2026.06.11"
+  );
 });
 
 test("writeReceipt defaults missing schema to modern suitcase schema", async (t) => {
@@ -855,7 +965,7 @@ test("writeReceipt defaults missing schema to modern suitcase schema", async (t)
     }
   });
 
-  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
+  const persisted = parseReceipt(await readFile(receiptPath, "utf8"));
   assert.equal(persisted.schema, RECEIPT_SCHEMA);
   assert.deepEqual(persisted.installs, {});
 });
@@ -889,7 +999,7 @@ test("writeReceipt normalizes legacy schema to modern schema", async (t) => {
     }
   });
 
-  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
+  const persisted = parseReceipt(await readFile(receiptPath, "utf8"));
   assert.equal(persisted.schema, RECEIPT_SCHEMA);
 });
 
@@ -931,15 +1041,21 @@ test("upsertAndWriteReceipt migrates legacy receipt when receipt is omitted", as
 
   const receiptPath = await upsertAndWriteReceipt({
     installRoot,
-    skillName: gnhfRecord.skill,
+    skillName: gnhfRecord.skill ?? "gnhf-postflight",
     installRecord: gnhfRecord
   });
 
-  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
+  const persisted = parseReceipt(await readFile(receiptPath, "utf8"));
   assert.equal(path.basename(receiptPath), RECEIPT_FILE);
   assert.equal(persisted.schema, RECEIPT_SCHEMA);
-  assert.equal(persisted.installs["office-hours"].version, "2026.06.10");
-  assert.equal(persisted.installs["gnhf-postflight"].version, "2026.06.11");
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["office-hours"], "office-hours").version,
+    "2026.06.10"
+  );
+  assert.equal(
+    getSingleInstallRecord(persisted.installs?.["gnhf-postflight"], "gnhf-postflight").version,
+    "2026.06.11"
+  );
 });
 
 test("writeReceipt rejects invalid installs payloads", async (t) => {
@@ -951,7 +1067,7 @@ test("writeReceipt rejects invalid installs payloads", async (t) => {
       writeReceipt({
         installRoot: root,
         receipt: {
-          installs: []
+          installs: [] as unknown as Record<string, ReceiptInstallRecord | ReceiptInstallRecord[]>
         }
       }),
     /Receipt installs must be an object/
@@ -976,7 +1092,7 @@ test("upsertAndWriteReceipt rejects invalid installs payloads", async (t) => {
       upsertAndWriteReceipt({
         installRoot: root,
         receipt: {
-          installs: []
+          installs: [] as unknown as Record<string, ReceiptInstallRecord | ReceiptInstallRecord[]>
         },
         skillName: "office-hours",
         installRecord
@@ -1021,7 +1137,7 @@ test("writeReceipt creates missing parent directories for custom receipt paths",
     }
   });
 
-  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
+  const persisted = parseReceipt(await readFile(receiptPath, "utf8"));
 
   assert.equal(path.dirname(receiptPath), path.join(root, ".nested", "receipts"));
   assert.equal(persisted.schema, RECEIPT_SCHEMA);
