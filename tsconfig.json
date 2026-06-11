@@ -28,6 +28,7 @@
     "tests/validator.test.ts",
     "tests/targets.test.ts",
     "tests/plan-lock.test.ts",
+    "src/cli.ts",
     "src/receipt.ts",
     "tests/receipt.test.ts",
     "src/status.ts",

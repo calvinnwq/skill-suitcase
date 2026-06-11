@@ -1,10 +1,39 @@
 #!/usr/bin/env node
+type CliCommand = "plan" | "diff" | "pack" | "validate" | "targets" | "status" | "help";
+
+type CliParsedArgs = {
+  command: CliCommand | null;
+  dryRun: boolean;
+  json: boolean;
+  source?: string;
+  target?: string;
+  output?: string;
+};
+
+type FlagName = "source" | "target" | "output";
+
 import { plan } from "./planner.js";
 import { pack } from "./packer.js";
 import { diff } from "./diff.js";
 import { validate } from "./validator.js";
 import { targets } from "./targets.js";
 import { status } from "./status.js";
+
+type CliCommandResult =
+  | Awaited<ReturnType<typeof plan>>
+  | Awaited<ReturnType<typeof pack>>
+  | Awaited<ReturnType<typeof diff>>
+  | Awaited<ReturnType<typeof validate>>
+  | Awaited<ReturnType<typeof targets>>
+  | Awaited<ReturnType<typeof status>>;
+
+type CommandFlags = {
+  isPlan: boolean;
+  isDiff: boolean;
+  isPack: boolean;
+  isTargets: boolean;
+  isStatus: boolean;
+};
 
 function printUsage() {
   console.error("Usage:");
@@ -17,12 +46,19 @@ function printUsage() {
   console.error("  suitcase status --source <skills-repo> --json");
 }
 
-function parseArgs(argv) {
-  const [command, ...rest] = argv;
-  const args = { command, dryRun: false, json: false };
+function parseArgs(argv: string[]): CliParsedArgs {
+  const [command = "", ...rest] = argv;
+  const args: CliParsedArgs = {
+    command: isKnownCommand(command) ? command : "help",
+    dryRun: false,
+    json: false
+  };
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
+    if (token === undefined) {
+      break;
+    }
 
     if (token === "--json") {
       args.json = true;
@@ -34,12 +70,13 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (token === "--source" || token === "--target" || token === "--output") {
+    if (isValueArg(token)) {
       const value = rest[index + 1];
-      if (!value || value.startsWith("--")) {
+      if (value === undefined || value === "" || value.startsWith("--")) {
         throw new Error(`${token} requires a value`);
       }
-      args[token.slice(2)] = value;
+      const key = token.slice(2) as FlagName;
+      args[key] = value;
       index += 1;
       continue;
     }
@@ -51,27 +88,33 @@ function parseArgs(argv) {
 }
 
 async function main() {
-  let args;
+  let args: CliParsedArgs;
   try {
     args = parseArgs(process.argv.slice(2));
   } catch (error) {
-    console.error(error.message);
+    if (error instanceof Error) {
+      console.error(error.message);
+    } else {
+      console.error("Failed to parse arguments.");
+    }
     printUsage();
     process.exitCode = 2;
     return;
   }
 
-  const isPlan = args.command === "plan" && args.source && args.target && args.json;
-  const isDiff = args.command === "diff" && args.source && args.target && args.json;
-  const isPack =
-    args.command === "pack" &&
-    args.source &&
-    args.target &&
-    args.json &&
-    (args.dryRun || args.output);
-  const isValidate = args.command === "validate" && args.source && !args.target && args.json;
-  const isTargets = args.command === "targets" && args.source && !args.target && args.json;
-  const isStatus = args.command === "status" && args.source && !args.target && args.json;
+  const hasJson = args.json === true;
+  const hasTarget = typeof args.target === "string";
+  const hasSource = typeof args.source === "string";
+  const hasOutput = typeof args.output === "string";
+  const hasNoTarget = !hasTarget;
+  const hasPackOutputOrDryRun = args.dryRun || hasOutput;
+
+  const isPlan = args.command === "plan" && hasSource && hasTarget && hasJson;
+  const isDiff = args.command === "diff" && hasSource && hasTarget && hasJson;
+  const isPack = args.command === "pack" && hasSource && hasTarget && hasJson && hasPackOutputOrDryRun;
+  const isValidate = args.command === "validate" && hasSource && hasNoTarget && hasJson;
+  const isTargets = args.command === "targets" && hasSource && hasNoTarget && hasJson;
+  const isStatus = args.command === "status" && hasSource && hasNoTarget && hasJson;
 
   if (!isPlan && !isDiff && !isPack && !isValidate && !isTargets && !isStatus) {
     printUsage();
@@ -84,38 +127,69 @@ async function main() {
     console.log(JSON.stringify(result, null, 2));
     process.exitCode = result.ok ? 0 : 1;
   } catch (error) {
-    console.error(error.message);
+    if (error instanceof Error) {
+      console.error(error.message);
+    } else {
+      console.error("Unhandled command failure.");
+    }
     process.exitCode = 1;
   }
 }
 
-async function runCommand(args, { isPlan, isDiff, isPack, isTargets, isStatus }) {
+function isKnownCommand(command: string): command is CliCommand {
+  return command === "plan" || command === "diff" || command === "pack" || command === "validate"
+    || command === "targets" || command === "status";
+}
+
+function isValueArg(token: string): token is `--${FlagName}` {
+  return token === "--source" || token === "--target" || token === "--output";
+}
+
+async function runCommand(
+  args: CliParsedArgs,
+  { isPlan, isDiff, isPack, isTargets, isStatus }: CommandFlags
+): Promise<CliCommandResult> {
   if (isPlan) {
-    return plan({ source: args.source, target: args.target });
+    return plan({
+      source: requireStringValue("source", args.source),
+      target: requireStringValue("target", args.target)
+    });
   }
 
   if (isDiff) {
-    return diff({ source: args.source, target: args.target });
+    return diff({
+      source: requireStringValue("source", args.source),
+      target: requireStringValue("target", args.target)
+    });
   }
 
   if (isPack) {
     return pack({
-      source: args.source,
-      target: args.target,
+      source: requireStringValue("source", args.source),
+      target: requireStringValue("target", args.target),
       dryRun: args.dryRun,
-      output: args.output
+      output: args.output ?? null
     });
   }
 
   if (isTargets) {
-    return targets({ source: args.source });
+    return targets({ source: requireStringValue("source", args.source) });
   }
 
   if (isStatus) {
-    return status({ source: args.source });
+    return status({ source: requireStringValue("source", args.source) });
   }
 
-  return validate({ source: args.source });
+  return validate({
+    source: requireStringValue("source", args.source)
+  });
 }
 
 await main();
+
+function requireStringValue(name: FlagName | "source", value: string | undefined): string {
+  if (typeof value !== "string") {
+    throw new Error(`${name} is required`);
+  }
+  return value;
+}
