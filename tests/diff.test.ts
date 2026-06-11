@@ -5,12 +5,27 @@ import path from "node:path";
 import { test } from "node:test";
 import { diff } from "../src/diff.js";
 
-async function createCatalog(root, manifest) {
+type DiffEntry = {
+  action: string;
+  relativePath: string | null;
+  skill: string;
+  targetPath: string | null;
+  reason?: string | undefined;
+};
+
+async function createCatalog(root: string, manifest: string) {
   await writeFile(path.join(root, "skill-suitcase.yaml"), manifest);
 }
 
-function actionByKey(entries, action, relativePath, skill = "office-hours") {
-  return entries.find((entry) => entry.action === action && entry.relativePath === relativePath && entry.skill === skill);
+function actionByKey(
+  entries: DiffEntry[],
+  action: string,
+  relativePath: string,
+  skill = "office-hours"
+): DiffEntry | undefined {
+  return entries.find((entry: DiffEntry) =>
+    entry.action === action && entry.relativePath === relativePath && entry.skill === skill
+  );
 }
 
 test("diff reports create, update, unchanged, and extra actions", async (t) => {
@@ -77,8 +92,12 @@ compatibility:
   assert.ok(actionByKey(result.entries, "unchanged", "SKILL.md"));
   assert.ok(actionByKey(result.entries, "extra", "extra.md"));
 
+  const unchangedEntry = actionByKey(result.entries, "unchanged", "SKILL.md");
+  assert.ok(unchangedEntry);
+  assert.ok(unchangedEntry.targetPath);
+
   const payload = await readFile(
-    actionByKey(result.entries, "unchanged", "SKILL.md").targetPath,
+    unchangedEntry.targetPath,
     "utf8"
   );
   assert.equal(payload, "Office Hours\n");
@@ -144,6 +163,7 @@ compatibility:
   assert.equal(result.ok, false);
   assert.equal(result.installRoot, skillsPath);
   const blockedEntry = result.entries.find((entry) => entry.action === "blocked");
+  assert.ok(blockedEntry);
   assert.equal(blockedEntry.skill, "gnhf-postflight");
   assert.equal(blockedEntry.reason, "Canonical gnhf-postflight cannot be installed into Codex.");
   assert.equal(result.summary.blocked, 1);
@@ -389,6 +409,7 @@ compatibility:
   assert.equal(result.ok, false);
   const blockedEntries = result.entries.filter((entry) => entry.action === "blocked");
   assert.equal(blockedEntries.length, 1);
+  assert.ok(blockedEntries[0]);
   assert.equal(blockedEntries[0].skill, "gnhf-postflight");
   assert.equal(result.summary.blocked, 1);
   assert.equal(result.summary.update, 1);
