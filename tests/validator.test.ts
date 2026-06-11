@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { validate } from "../src/validator.js";
 
-const fixtureSource = path.join(import.meta.dirname, "fixtures", "skills-catalog");
+const fixtureSource = path.join(process.cwd(), "tests", "fixtures", "skills-catalog");
 
 test("validates the skills repo fixture", async () => {
   const result = await validate({ source: fixtureSource });
