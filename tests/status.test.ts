@@ -289,6 +289,79 @@ assignmentPaths:
   assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
 });
 
+test("status normalizes an empty receipt version to null against a versionless source", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-empty-version-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-empty-version-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  await mkdir(path.join(installRoot, "office-hours"), { recursive: true });
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  const targetInstallPath = path.join(installRoot, "office-hours");
+  const modernReceiptPath = path.join(installRoot, ".skill-suitcase-receipt.json");
+  await writeFile(
+    modernReceiptPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": [
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: sourcePath,
+            targetPath: targetInstallPath,
+            sourceCommit: "deadbeef",
+            sourceHash,
+            version: ""
+          }
+        ]
+      }
+    })}\n`
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  const item = firstItem(result.statuses, "result.statuses");
+  assert.equal(item.installedVersion, null);
+  assert.equal(item.currentVersion, null);
+  assert.equal(item.status, "current");
+});
+
 test("status prefers valid modern install records when one record in array is invalid", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-mixed-modern-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-mixed-modern-target-"));

@@ -447,6 +447,28 @@ test("upsertAndWriteReceipt requires receiptPath", async (t) => {
   );
 });
 
+test("upsertAndWriteReceipt rejects a nullish install record with a clear error", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upsert-write-null-record-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const installRoot = path.join(root, "skills");
+  const receipt = buildReceipt({
+    sourceRoot: "/Users/ngxcalvin/repos/skills",
+    sourceRef: "refs/heads/main",
+    sourceCommit: "cafebabe"
+  });
+
+  await assert.rejects(
+    () =>
+      upsertAndWriteReceipt({
+        installRoot,
+        receipt,
+        skillName: "office-hours",
+        installRecord: null as unknown as ReceiptInstallRecord
+      }),
+    /installRecord must be an object/
+  );
+});
+
 test("upsertAndWriteReceipt rejects records with non-string provenance fields", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upsert-write-invalid-provenance-"));
   t.after(() => rm(root, { recursive: true, force: true }));

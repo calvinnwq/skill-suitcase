@@ -114,6 +114,18 @@ test("pack allows existing output directories and refuses artifact-id overwrite"
   );
 });
 
+test("pack rejects an output path that is an existing file", async (t) => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-output-file-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const output = path.join(parent, "bundle");
+  await writeFile(output, "not a directory");
+
+  await assert.rejects(
+    () => pack({ source: fixtureSource, target: "codex", output }),
+    /pack output path must be a directory/
+  );
+});
+
 test("pack preserves prior artifacts when target differs", async (t) => {
   const output = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-artifact-retention-"));
   t.after(() => rm(output, { recursive: true, force: true }));

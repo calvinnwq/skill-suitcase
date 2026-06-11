@@ -116,6 +116,14 @@ export async function upsertAndWriteReceipt({
     receiptPath: normalizedReceiptPath
   });
 
+  if (typeof skillName !== "string" || skillName.trim().length === 0) {
+    throw new Error("skillName is required.");
+  }
+
+  if (!isRecord(installRecord)) {
+    throw new Error("installRecord must be an object.");
+  }
+
   const currentReceipt = receipt === undefined
     ? await readReceiptForUpsert({
       receiptPath: outputPath,

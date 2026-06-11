@@ -1096,15 +1096,23 @@ function normalizeReceiptInstallRecord(
   };
   if (target !== undefined) {
     canonical.target = target;
+  } else {
+    delete canonical.target;
   }
   if (version !== undefined) {
     canonical.version = version;
+  } else {
+    delete canonical.version;
   }
   if (sourceCommit !== undefined) {
     canonical.sourceCommit = sourceCommit;
+  } else {
+    delete canonical.sourceCommit;
   }
   if (sourceHash !== undefined) {
     canonical.sourceHash = sourceHash;
+  } else {
+    delete canonical.sourceHash;
   }
 
   return {

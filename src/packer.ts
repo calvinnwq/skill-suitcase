@@ -345,7 +345,7 @@ async function ensureOutputDirectory(outputPath: string): Promise<void> {
       throw new Error(`pack output path must be a directory: ${outputPath}`);
     }
   } catch (error) {
-    if (isNodeError(error) && error.code !== "ENOENT") {
+    if (!isNodeError(error) || error.code !== "ENOENT") {
       throw error;
     }
     await mkdir(outputPath, { recursive: false });
