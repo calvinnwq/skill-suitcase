@@ -2,11 +2,11 @@
 
 Skill Suitcase is a CLI for planning portable skill installs from a catalog repo.
 
-Milestone 1 is deliberately non-mutating for live installs. It reads a catalog
-manifest, resolves assignments and assignment paths, and emits JSON plans,
-diffs, target discovery, bundle manifests, or status reports. It does not write
-receipts, copy skill files into target install paths, mutate target install
-paths, or touch runtime homes.
+Milestone 1 CLI commands are deliberately non-mutating for live installs. They
+read a catalog manifest, resolve assignments and assignment paths, and emit JSON
+plans, diffs, target discovery, bundle manifests, or status reports. They do not
+copy skill files into target install paths, mutate target install paths, or
+touch runtime homes.
 
 ## Usage
 
@@ -245,10 +245,11 @@ Retention and cleanup:
 ## `status` Output
 
 `status` walks every manifest `assignmentPaths` entry, resolves the referenced
-assignment plan, reads each install root and optional `.skills-sync.json`
-receipt, and reports one status per planned or blocked skill. It uses `path` for
-`openclaw-skills-root` and `claude-skills-root` entries, and `skillsPath` for
-`codex-home` and `nested-home-codex` entries. Install roots must already exist.
+assignment plan, reads each install root and optional `.skill-suitcase-receipt.json`
+receipt (or `.skills-sync.json` for migration compatibility), and reports one
+status per planned or blocked skill. It uses `path` for `openclaw-skills-root`
+and `claude-skills-root` entries, and `skillsPath` for `codex-home` and
+`nested-home-codex` entries. Install roots must already exist.
 
 ```json
 {
@@ -325,12 +326,75 @@ receipt, and reports one status per planned or blocked skill. It uses `path` for
   existing target or an unreadable source/target
 - `blocked`: compatibility rules block the skill for that assignment
 
-`status` treats `<installRoot>/.skills-sync.json` as optional. When present, the
-supported schema is `calvinnwq.skills.sync-lock.v0` with an `installs` object
-keyed by skill name. Plan locks use a separate schema and are reported as
-`invalid_receipt` if written to `.skills-sync.json`. Each install record requires
-string `agent`, `mode`, `sourcePath`, and `targetPath` fields, and at least one
-of `version`, `sourceCommit`, or `sourceHash`.
+`status` treats `<installRoot>/.skill-suitcase-receipt.json` as optional. The
+preferred schema is `calvinnwq.skills.receipt.v0` with a machine-readable
+`installs` map keyed by skill name. Each install record should include:
+
+- `agent`, `mode`, `source` or `sourcePath`, `targetPath`
+- `version`, `sourceCommit`, or `sourceHash` (at least one)
+- optional `target`, `installedFiles`, and `priorState`
+
+For migration compatibility, `status` also reads legacy `.skills-sync.json` files
+using `calvinnwq.skills.sync-lock.v0` when no modern receipt exists.
+
+Receipt `installs` values may be a single object or an array of records for
+multi-target installs. `status` selects the record whose `targetPath` resolves
+to either the assignment install root or `<installRoot>/<skill-name>`; relative
+`targetPath` values resolve under `installRoot`. Ambiguous or missing matches
+are reported as `invalid_receipt`.
+
+## Receipt Module
+
+`src/receipt.js` provides helpers for building and persisting Suitcase receipts.
+
+```js
+import {
+  buildReceipt,
+  buildInstallRecord,
+  buildInstalledFiles,
+  upsertInstallRecord,
+  upsertAndWriteReceipt,
+  writeReceipt,
+  RECEIPT_FILE,
+  RECEIPT_SCHEMA
+} from "./src/receipt.js";
+
+// Hash all files under a skill root
+const installedFiles = await buildInstalledFiles(skillRoot);
+
+// Build a typed install record
+const installRecord = buildInstallRecord({
+  agent: "claude",
+  mode: "copy",
+  sourcePath: "/path/to/skills/my-skill",
+  targetPath: "/target/root/my-skill",
+  version: "1.2.0",
+  installedFiles
+});
+
+// Upsert the record into an existing receipt (or create one) and write to disk
+await upsertAndWriteReceipt({
+  installRoot: "/target/root",
+  skillName: "my-skill",
+  installRecord
+});
+```
+
+`buildReceipt` produces a bare receipt shell with `schema`, `source`, and
+`installs`. `buildInstalledFiles` hashes regular files under a skill root,
+skipping `__pycache__` directories and `.pyc` files. `upsertInstallRecord` merges
+one install record into an in-memory receipt, replacing an existing record for
+the same resolved `targetPath` or appending a new record when target paths
+differ. `upsertAndWriteReceipt` performs the same merge against the receipt on
+disk (creating it if absent and migrating legacy `.skills-sync.json` receipts
+when needed), then writes `<installRoot>/.skill-suitcase-receipt.json`.
+`writeReceipt` writes the full receipt directly without merging. Both writers
+validate all install records before writing, normalize legacy schemas to
+`calvinnwq.skills.receipt.v0`, and allow custom receipt paths only when they stay
+inside `installRoot`.
+
+Receipt `installs` values are keyed by skill name. A single install is stored as
+an object; multiple installs for the same skill are stored as an array.
 
 ## Plan Lock (internal API)
 
