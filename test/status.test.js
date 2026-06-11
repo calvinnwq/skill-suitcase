@@ -5,6 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { PLAN_LOCK_SCHEMA } from "../src/plan-lock.js";
+import {
+  buildInstalledFiles,
+  buildInstallRecord,
+  buildReceipt,
+  RECEIPT_FILE,
+  upsertAndWriteReceipt
+} from "../src/receipt.js";
 import { status } from "../src/status.js";
 
 test("status reports manifest-wide statuses for all assignments and respects receipt state", async (t) => {
@@ -169,6 +176,753 @@ assignmentPaths:
   assert.equal(byPath.get("version-openclaw"), "version");
   assert.equal(byPath.get("behind-openclaw"), "behind");
   assert.equal(byPath.get("dirty-openclaw"), "dirty");
+
+  const byReason = new Map(result.statuses.map((item) => [item.assignmentPath, item.reason]));
+  assert.equal(byReason.get("unknown-openclaw"), "target exists but has no Suitcase receipt");
+  assert.equal(byReason.get("dirty-openclaw"), "target files differ from receipt");
+});
+
+test("status reads modern suitcase receipts with multi-target install records", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-receipt-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-target-"));
+  const otherRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-target-alt-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+  t.after(() => rm(otherRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  await mkdir(path.join(installRoot, "office-hours"), { recursive: true });
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await mkdir(path.join(otherRoot, "office-hours"), { recursive: true });
+  await cp(sourceSkill, path.join(otherRoot, "office-hours"), { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  const targetInstallPath = path.join(installRoot, "office-hours");
+  const otherInstallPath = path.join(otherRoot, "office-hours");
+  const modernReceiptPath = path.join(installRoot, ".skill-suitcase-receipt.json");
+  await writeFile(
+    modernReceiptPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": [
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: sourcePath,
+            targetPath: targetInstallPath,
+            sourceCommit: "deadbeef",
+            sourceHash,
+            version: "2026.06.10",
+            installedFiles: [{ path: "SKILL.md", hash: "1234" }],
+            priorState: {
+              installedCommit: null,
+              status: "missing"
+            }
+          },
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: sourcePath,
+            targetPath: otherInstallPath,
+            sourceCommit: "deadbeef",
+            sourceHash,
+            version: "2026.06.10"
+          }
+        ]
+      }
+    })}\n`
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.statuses[0].status, "current");
+});
+
+test("status prefers valid modern install records when one record in array is invalid", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-mixed-modern-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-mixed-modern-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  const targetPath = path.join(installRoot, "office-hours");
+  await mkdir(targetPath, { recursive: true });
+  await cp(sourceSkill, targetPath, { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  await writeFile(
+    path.join(installRoot, RECEIPT_FILE),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": [
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: sourcePath,
+            targetPath: targetPath,
+            sourceCommit: "deadbeef",
+            sourceHash,
+            version: "2026.06.10"
+          },
+          "invalid-record"
+        ]
+      }
+    })}\n`,
+    "utf8"
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.unknown, 0);
+  assert.equal(result.statuses[0].status, "current");
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+  const invalidReceiptError = result.errors.find((entry) => entry.code === "invalid_receipt");
+  assert.equal(
+    typeof invalidReceiptError?.message === "string" &&
+      invalidReceiptError.message.includes("invalid install record for office-hours"),
+    true
+  );
+});
+
+test("status prefers valid legacy sync records when one record in array is invalid", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-mixed-legacy-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-mixed-legacy-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  const targetPath = path.join(installRoot, "office-hours");
+  await mkdir(targetPath, { recursive: true });
+  await cp(sourceSkill, targetPath, { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  await writeFile(
+    path.join(installRoot, ".skills-sync.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.sync-lock.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": [
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: sourcePath,
+            targetPath: targetPath,
+            sourceCommit: "deadbeef",
+            sourceHash,
+            version: "2026.06.10"
+          },
+          "invalid-record"
+        ]
+      }
+    })}\n`,
+    "utf8"
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.unknown, 0);
+  assert.equal(result.statuses[0].status, "current");
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+  const invalidReceiptError = result.errors.find((entry) => entry.code === "invalid_receipt");
+  assert.equal(
+    typeof invalidReceiptError?.message === "string" &&
+      invalidReceiptError.message.includes("invalid install record for office-hours"),
+    true
+  );
+});
+
+test("status reads modern receipts with multiple skills sharing multi-target records", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-receipt-multi-skill-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-multi-skill-target-"));
+  const otherRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-multi-skill-alt-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+  t.after(() => rm(otherRoot, { recursive: true, force: true }));
+
+  const officeHoursSource = path.join(sourceRoot, "skills", "office-hours");
+  const gnhfSource = path.join(sourceRoot, "skills", "gnhf-postflight");
+  await mkdir(officeHoursSource, { recursive: true });
+  await mkdir(gnhfSource, { recursive: true });
+  await writeFile(
+    path.join(officeHoursSource, "SKILL.md"),
+    "---\nname: office-hours\nversion: 2026.06.10\n---\n"
+  );
+  await writeFile(
+    path.join(gnhfSource, "SKILL.md"),
+    "---\nname: gnhf-postflight\nversion: 2026.06.10\n---\n"
+  );
+
+  const officeHoursTarget = path.join(installRoot, "office-hours");
+  const gnhfTarget = path.join(installRoot, "gnhf-postflight");
+  await mkdir(officeHoursTarget, { recursive: true });
+  await mkdir(gnhfTarget, { recursive: true });
+  await cp(officeHoursSource, officeHoursTarget, { recursive: true });
+  await cp(gnhfSource, gnhfTarget, { recursive: true });
+
+  const officeHoursHash = await hashDirectory(officeHoursSource);
+  const gnhfHash = await hashDirectory(gnhfSource);
+
+  const officeHoursSourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const gnhfSourcePath = path.join(sourceRoot, "skills", "gnhf-postflight");
+  const modernReceiptPath = path.join(installRoot, ".skill-suitcase-receipt.json");
+  await writeFile(
+    modernReceiptPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": [
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: officeHoursSourcePath,
+            targetPath: officeHoursTarget,
+            sourceCommit: "deadbeef",
+            sourceHash: officeHoursHash,
+            version: "2026.06.10"
+          },
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: officeHoursSourcePath,
+            targetPath: path.join(otherRoot, "office-hours"),
+            sourceCommit: "deadbeef",
+            sourceHash: officeHoursHash,
+            version: "2026.06.10"
+          }
+        ],
+        "gnhf-postflight": [
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: gnhfSourcePath,
+            targetPath: gnhfTarget,
+            sourceCommit: "deadbeef",
+            sourceHash: gnhfHash,
+            version: "2026.06.10"
+          },
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: gnhfSourcePath,
+            targetPath: path.join(otherRoot, "gnhf-postflight"),
+            sourceCommit: "deadbeef",
+            sourceHash: gnhfHash,
+            version: "2026.06.10"
+          }
+        ]
+      }
+    })}\n`,
+    "utf8"
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+      - gnhf-postflight
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 2);
+  assert.equal(result.summary.missing, 0);
+  assert.equal(result.summary.unknown, 0);
+  assert.equal(result.errors.length, 0);
+  const statusesBySkill = new Map(result.statuses.map((entry) => [entry.skill, entry.status]));
+  assert.equal(statusesBySkill.get("office-hours"), "current");
+  assert.equal(statusesBySkill.get("gnhf-postflight"), "current");
+});
+
+test("status rejects ambiguous modern multi-target installs for an active root", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-receipt-ambiguous-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-ambiguous-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await mkdir(path.join(installRoot, "office-hours"), { recursive: true });
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  const modernReceiptPath = path.join(installRoot, ".skill-suitcase-receipt.json");
+  await writeFile(
+    modernReceiptPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": [
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: sourcePath,
+            targetPath: path.join(installRoot, "office-hours"),
+            sourceCommit: "deadbeef",
+            sourceHash,
+            version: "2026.06.10"
+          },
+          {
+            agent: "openclaw",
+            target: "openclaw",
+            mode: "copy",
+            source: sourcePath,
+            targetPath: installRoot,
+            sourceCommit: "deadbeef",
+            sourceHash,
+            version: "2026.06.10"
+          }
+        ]
+      }
+    })}\n`
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.statuses[0].status, "unknown");
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+  const invalidReceiptError = result.errors.find((entry) => entry.code === "invalid_receipt");
+  assert.equal(
+    typeof invalidReceiptError?.message === "string" &&
+      invalidReceiptError.message.includes("ambiguous install records for office-hours"),
+    true
+  );
+});
+
+test("status rejects modern receipts missing source provenance", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-missing-provenance-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-missing-provenance-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+  await mkdir(path.join(installRoot, "office-hours"), { recursive: true });
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const receiptPath = path.join(installRoot, RECEIPT_FILE);
+  const installRecord = buildInstallRecord({
+    skill: "office-hours",
+    agent: "openclaw",
+    mode: "copy",
+    target: "openclaw",
+    sourcePath,
+    targetPath: path.join(installRoot, "office-hours"),
+    installedFiles: [{ path: "SKILL.md", hash: "1234" }]
+  });
+  const receipt = buildReceipt({
+    sourceRoot,
+    sourceCommit: "deadbeef",
+    sourceRef: "refs/heads/main",
+    installs: {
+      "office-hours": installRecord
+    }
+  });
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+});
+
+test("status rejects a single modern receipt when its only record targets another root", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-receipt-mismatch-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-mismatch-target-"));
+  const alternateRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-mismatch-alt-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+  t.after(() => rm(alternateRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await mkdir(path.join(installRoot, "office-hours"), { recursive: true });
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  const altTarget = path.join(alternateRoot, "office-hours");
+  const receiptPath = path.join(installRoot, ".skill-suitcase-receipt.json");
+  await writeFile(
+    receiptPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": {
+          agent: "openclaw",
+          target: "openclaw",
+          mode: "copy",
+          source: sourcePath,
+          targetPath: altTarget,
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10"
+        }
+      }
+    })}\n`,
+    "utf8"
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.statuses[0].status, "unknown");
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.summary.current, 0);
+  assert.equal(result.summary.missing, 0);
+  assert.equal(
+    result.errors.some((entry) =>
+      entry.code === "invalid_receipt" &&
+      entry.message.includes("no matching install record for office-hours")
+    ),
+    true
+  );
+});
+
+test("status reads modern receipts with structured source metadata", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-structured-source-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-structured-source-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  await mkdir(path.join(installRoot, "office-hours"), { recursive: true });
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  const modernReceiptPath = path.join(installRoot, RECEIPT_FILE);
+  await writeFile(
+    modernReceiptPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": {
+          agent: "openclaw",
+          target: "openclaw",
+          mode: "copy",
+          source: { path: sourcePath },
+          targetPath: path.join(installRoot, "office-hours"),
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10",
+          installedFiles: [{ path: "SKILL.md", hash: "1234" }],
+          priorState: {
+            installedCommit: null,
+            status: "current"
+          }
+        }
+      }
+    })}\n`
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.statuses[0].status, "current");
+});
+
+test("status matches modern receipts with installRoot-relative targetPath", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-relative-target-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-relative-target-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  const targetPath = path.join(installRoot, "office-hours");
+  await mkdir(targetPath, { recursive: true });
+  await cp(sourceSkill, targetPath, { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  await writeFile(
+    path.join(installRoot, RECEIPT_FILE),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": {
+          agent: "openclaw",
+          target: "openclaw",
+          mode: "copy",
+          source: sourcePath,
+          targetPath: "office-hours",
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10"
+        }
+      }
+    })}\n`
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.statuses[0].status, "current");
 });
 
 test("status reports stale installed content as behind instead of dirty", async (t) => {
@@ -581,6 +1335,308 @@ assignmentPaths:
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
 });
 
+test("status reads legacy sync receipts with multi-target records", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-legacy-multi-target-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-legacy-target-"));
+  const otherRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-legacy-target-alt-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+  t.after(() => rm(otherRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const primaryTarget = path.join(installRoot, "office-hours");
+  const alternateTarget = path.join(otherRoot, "office-hours");
+
+  await mkdir(primaryTarget, { recursive: true });
+  await mkdir(alternateTarget, { recursive: true });
+  await cp(sourceSkill, primaryTarget, { recursive: true });
+  await cp(sourceSkill, alternateTarget, { recursive: true });
+
+  const sourceHash = await hashDirectory(sourceSkill);
+  const legacyReceipt = {
+    schema: "calvinnwq.skills.sync-lock.v0",
+    source: {
+      repo: sourceRoot,
+      commit: "deadbeef",
+      ref: "refs/heads/main"
+    },
+    installs: {
+      "office-hours": [
+        {
+          agent: "openclaw",
+          mode: "copy",
+          sourcePath,
+          targetPath: primaryTarget,
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10"
+        },
+        {
+          agent: "openclaw",
+          mode: "copy",
+          sourcePath,
+          targetPath: alternateTarget,
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10"
+        }
+      ]
+    }
+  };
+
+  await writeFile(
+    path.join(installRoot, ".skills-sync.json"),
+    `${JSON.stringify(legacyReceipt, null, 2)}\n`,
+    "utf8"
+  );
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.unknown, 0);
+  assert.equal(result.statuses[0].status, "current");
+});
+
+test("status matches legacy sync receipts with installRoot-relative targetPath", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-legacy-relative-target-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-legacy-relative-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+
+  const targetPath = path.join(installRoot, "office-hours");
+  await mkdir(targetPath, { recursive: true });
+  await cp(sourceSkill, targetPath, { recursive: true });
+
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  await writeFile(
+    path.join(installRoot, ".skills-sync.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.sync-lock.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": {
+          agent: "openclaw",
+          mode: "copy",
+          source: sourcePath,
+          targetPath: "office-hours",
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10"
+        }
+      }
+    })}\n`
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.unknown, 0);
+  assert.equal(result.statuses[0].status, "current");
+});
+
+test("status evaluates current state from receipts written by upsertAndWriteReceipt", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-write-status-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-write-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const installedFiles = await buildInstalledFiles(sourceSkill);
+  const sourceHash = await hashDirectory(sourceSkill);
+
+  let receipt = buildReceipt({
+    sourceRoot,
+    sourceRef: "refs/heads/main",
+    sourceCommit: "deadbeef"
+  });
+  const installRecord = buildInstallRecord({
+    skill: "office-hours",
+    agent: "openclaw",
+    mode: "copy",
+    source: sourcePath,
+    targetPath: path.join(installRoot, "office-hours"),
+    sourceCommit: "deadbeef",
+    sourceHash,
+    version: "2026.06.10",
+    installedFiles,
+    priorState: { installedCommit: null, status: "current" }
+  });
+  const receiptPath = await upsertAndWriteReceipt({
+    installRoot,
+    receipt,
+    skillName: "office-hours",
+    installRecord
+  });
+
+  const written = JSON.parse(await readFile(receiptPath, "utf8"));
+  assert.equal(written.installs["office-hours"].version, "2026.06.10");
+  assert.equal(written.installs["office-hours"].source, sourcePath);
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.unknown, 0);
+  assert.equal(result.statuses.length, 1);
+  assert.equal(result.statuses[0].status, "current");
+});
+
+test("status prefers modern receipts over legacy sync receipts", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-over-legacy-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-over-legacy-root-"));
+  const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-modern-over-legacy-alt-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+  t.after(() => rm(legacyRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+
+  const targetPath = path.join(installRoot, "office-hours");
+  await mkdir(targetPath, { recursive: true });
+  await cp(sourceSkill, targetPath, { recursive: true });
+
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceCommit: "modern-commit"
+  });
+
+  const legacyReceipt = {
+    schema: "calvinnwq.skills.sync-lock.v0",
+    source: {
+      repo: sourceRoot,
+      commit: "legacy-commit",
+      ref: "refs/heads/main"
+    },
+    installs: {
+      "office-hours": {
+        agent: "openclaw",
+        mode: "copy",
+        sourcePath: sourceSkill,
+        targetPath: path.join(legacyRoot, "office-hours"),
+        sourceCommit: "legacy-commit",
+        version: "2000.01.01"
+      }
+    }
+  };
+  await writeFile(
+    path.join(installRoot, ".skills-sync.json"),
+    `${JSON.stringify(legacyReceipt, null, 2)}\n`,
+    "utf8"
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.unknown, 0);
+  assert.equal(result.errors.length, 0);
+});
+
 test("status rejects malformed per-skill install records", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-install-record-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-install-record-root-"));
@@ -621,6 +1677,311 @@ assignmentPaths:
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.statuses[0].status, "unknown");
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+});
+
+test("status rejects malformed installedFiles entries in modern receipts", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-installed-files-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-installed-files-root-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(sourceSkill),
+    installedFiles: ["bad-entry"]
+  });
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+});
+
+test("status rejects modern receipts with empty installed file hashes", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-empty-installed-hash-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-empty-installed-hash-root-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(sourceSkill),
+    installedFiles: [{ path: "SKILL.md", hash: "" }]
+  });
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+  const invalid = result.errors.find((entry) => entry.code === "invalid_receipt");
+  assert.equal(
+    typeof invalid?.message === "string" && invalid.message.includes("invalid installedFiles"),
+    true
+  );
+});
+
+test("status rejects modern receipts with invalid structured source metadata", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-source-meta-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-source-meta-root-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  await writeFile(
+    path.join(installRoot, RECEIPT_FILE),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": {
+          agent: "openclaw",
+          target: "openclaw",
+          mode: "copy",
+          sourcePath: path.join(sourceRoot, "skills", "office-hours"),
+          source: { path: 123 },
+          targetPath: path.join(installRoot, "office-hours"),
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10"
+        }
+      }
+    })}\n`,
+    "utf8"
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+  const invalid = result.errors.find((entry) => entry.code === "invalid_receipt");
+  assert.equal(
+    typeof invalid?.message === "string" && invalid.message.includes("invalid source.path"),
+    true
+  );
+});
+
+test("status rejects modern receipts with non-string provenance fields", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-provenance-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-provenance-root-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  await writeFile(
+    path.join(installRoot, RECEIPT_FILE),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": {
+          agent: "openclaw",
+          target: "openclaw",
+          mode: "copy",
+          source: sourcePath,
+          targetPath: path.join(installRoot, "office-hours"),
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: 20260612
+        }
+      }
+    })}\n`,
+    "utf8"
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+  const invalid = result.errors.find((entry) => entry.code === "invalid_receipt");
+  assert.equal(
+    typeof invalid?.message === "string" && invalid.message.includes("invalid version field for office-hours"),
+    true
+  );
+});
+
+test("status rejects modern receipts with invalid priorState", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-priorstate-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-priorstate-root-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  const sourcePath = path.join(sourceRoot, "skills", "office-hours");
+  const sourceHash = await hashDirectory(sourceSkill);
+  await writeFile(
+    path.join(installRoot, RECEIPT_FILE),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      source: {
+        repo: sourceRoot,
+        ref: "refs/heads/main",
+        commit: "deadbeef"
+      },
+      installs: {
+        "office-hours": {
+          agent: "openclaw",
+          target: "openclaw",
+          mode: "copy",
+          source: sourcePath,
+          targetPath: path.join(installRoot, "office-hours"),
+          sourceCommit: "deadbeef",
+          sourceHash,
+          version: "2026.06.10",
+          priorState: "bad"
+        }
+      }
+    })}\n`
+  );
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
+  const invalid = result.errors.find((entry) => entry.code === "invalid_receipt");
+  assert.equal(
+    typeof invalid?.message === "string" && invalid.message.includes("invalid priorState"),
+    true
+  );
 });
 
 test("status reports assignment-level validation errors while still evaluating valid assignments", async (t) => {
@@ -1084,30 +2445,34 @@ assignmentPaths:
   assert.equal(targetReadError.path, path.join(installRoot, "office-hours"));
 });
 
-async function writeReceipt({ installRoot, sourceRoot, skillName, version, sourceCommit = "deadbeef", sourceHash }) {
-  const installRecord = {
+async function writeReceipt({
+  installRoot,
+  sourceRoot,
+  skillName,
+  version,
+  sourceCommit = "deadbeef",
+  sourceHash,
+  installedFiles
+}) {
+  const installRecord = buildInstallRecord({
     agent: "openclaw",
     mode: "copy",
     sourcePath: path.join(sourceRoot, "skills", skillName),
     targetPath: path.join(installRoot, skillName),
-    version
-  };
-  if (sourceCommit !== null) {
-    installRecord.sourceCommit = sourceCommit;
-  }
-  if (sourceHash !== null) {
-    installRecord.sourceHash = sourceHash;
-  }
-
-  const receipt = {
-    schema: "calvinnwq.skills.sync-lock.v0",
-    installs: {
-      [skillName]: installRecord
-    }
-  };
+    version,
+    sourceCommit,
+    sourceHash,
+    installedFiles
+  });
+  const receipt = buildReceipt({
+    sourceRoot,
+    sourceCommit,
+    installs: { [skillName]: installRecord },
+    sourceRef: "refs/heads/main"
+  });
 
   await writeFile(
-    path.join(installRoot, ".skills-sync.json"),
+    path.join(installRoot, RECEIPT_FILE),
     `${JSON.stringify(receipt, null, 2)}\n`,
     "utf8"
   );

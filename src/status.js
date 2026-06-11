@@ -4,9 +4,13 @@ import { lstat, readFile, readlink, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog } from "./catalog.js";
 import { plan } from "./planner.js";
+import {
+  LEGACY_RECEIPT_FILE,
+  LEGACY_RECEIPT_SCHEMA,
+  RECEIPT_FILE,
+  RECEIPT_SCHEMA
+} from "./receipt.js";
 
-const SYNC_SCHEMA = "calvinnwq.skills.sync-lock.v0";
-const RECEIPT_FILE = ".skills-sync.json";
 const PATH_FIELDS_BY_KIND = {
   "openclaw-skills-root": ["path"],
   "claude-skills-root": ["path"],
@@ -22,8 +26,6 @@ const INSTALL_RECORD_SCALAR_FIELDS = [
   "sourceCommit",
   "sourceHash"
 ];
-const INSTALL_RECORD_REQUIRED_FIELDS = ["agent", "mode", "sourcePath", "targetPath"];
-const INSTALL_RECORD_PROVENANCE_FIELDS = ["version", "sourceCommit", "sourceHash"];
 const VALID_STATUSES = new Set(["current", "behind", "version", "dirty", "missing", "unknown", "blocked"]);
 
 export async function status({ source }) {
@@ -179,28 +181,30 @@ export async function status({ source }) {
 
     const receiptResult = await readReceipt(installRoot);
     const receipt = receiptResult.receipt;
+    const receiptPath = receiptResult.receiptPath;
     if (receiptResult.errors.length > 0) {
       assignmentResult.errors.push(...receiptResult.errors);
       errors.push(
         ...receiptResult.errors.map((item) => ({
           ...item,
-          path: path.join(installRoot, RECEIPT_FILE)
+          path: receiptPath
         }))
       );
     }
 
     for (const planned of assignmentPlan.planned) {
-      const installRecordResult = validateInstallRecord({
-        installRecord: receipt.installs?.[planned.skill],
-        receiptPath: path.join(installRoot, RECEIPT_FILE),
-        skillName: planned.skill
+      const installRecordResult = selectInstallRecord({
+        installRecords: receipt.installs?.[planned.skill],
+        installRoot,
+        skillName: planned.skill,
+        receiptPath
       });
       if (installRecordResult.errors.length > 0) {
         assignmentResult.errors.push(...installRecordResult.errors);
         errors.push(
           ...installRecordResult.errors.map((item) => ({
             ...item,
-            path: path.join(installRoot, RECEIPT_FILE)
+            path: receiptPath
           }))
         );
       }
@@ -380,7 +384,7 @@ async function statusSkill({
   if (!installRecord) {
     return {
       status: "unknown",
-      reason: "target exists but has no sync receipt",
+      reason: "target exists but has no Suitcase receipt",
       target: installRoot,
       targetPath,
       installedVersion: null,
@@ -438,7 +442,7 @@ async function statusSkill({
     if (targetHash !== installedHash) {
       return {
         status: "dirty",
-        reason: "target files differ from sync receipt",
+        reason: "target files differ from receipt",
         target: installRoot,
         targetPath,
         installedVersion,
@@ -587,148 +591,454 @@ function targetReadFailureStatus({
   };
 }
 
-function validateInstallRecord({ installRecord, receiptPath, skillName }) {
-  if (installRecord === undefined) {
-    return { installRecord: null, errors: [] };
-  }
-
-  if (!isRecord(installRecord)) {
-    return {
-      installRecord: null,
-      errors: [
-        {
-          code: "invalid_receipt",
-          message: `Sync receipt ${receiptPath} has an invalid install record for ${skillName}.`
-        }
-      ]
-    };
-  }
-
-  const missingField = INSTALL_RECORD_REQUIRED_FIELDS.find(
-    (field) => typeof installRecord[field] !== "string" || installRecord[field].length === 0
-  );
-  if (missingField) {
-    return {
-      installRecord: null,
-      errors: [
-        {
-          code: "invalid_receipt",
-          message: `Sync receipt ${receiptPath} has an invalid ${missingField} field for ${skillName}.`
-        }
-      ]
-    };
-  }
-
-  const invalidField = INSTALL_RECORD_SCALAR_FIELDS.find(
-    (field) =>
-      installRecord[field] !== undefined &&
-      installRecord[field] !== null &&
-      typeof installRecord[field] !== "string"
-  );
-  if (invalidField) {
-    return {
-      installRecord: null,
-      errors: [
-        {
-          code: "invalid_receipt",
-          message: `Sync receipt ${receiptPath} has an invalid ${invalidField} field for ${skillName}.`
-        }
-      ]
-    };
-  }
-
-  const hasProvenance = INSTALL_RECORD_PROVENANCE_FIELDS.some(
-    (field) => typeof installRecord[field] === "string" && installRecord[field].length > 0
-  );
-  if (!hasProvenance) {
-    return {
-      installRecord: null,
-      errors: [
-        {
-          code: "invalid_receipt",
-          message: `Sync receipt ${receiptPath} has no source provenance for ${skillName}.`
-        }
-      ]
-    };
-  }
-
-  return { installRecord, errors: [] };
-}
-
 async function readReceipt(installRoot) {
   const receiptPath = path.join(installRoot, RECEIPT_FILE);
-  const emptyReceipt = { schema: SYNC_SCHEMA, installs: {} };
+  const legacyReceiptPath = path.join(installRoot, LEGACY_RECEIPT_FILE);
+  const emptyReceipt = { schema: RECEIPT_SCHEMA, installs: {} };
 
+  const modernReceipt = await readReceiptFile(receiptPath, { legacy: false });
+  if (modernReceipt.found) {
+    return { receipt: modernReceipt.receipt, errors: modernReceipt.errors, receiptPath };
+  }
+
+  const legacyReceipt = await readReceiptFile(legacyReceiptPath, { legacy: true });
+  if (legacyReceipt.found) {
+    return { receipt: legacyReceipt.receipt, errors: legacyReceipt.errors, receiptPath: legacyReceiptPath };
+  }
+
+  return { receipt: emptyReceipt, errors: [], receiptPath };
+}
+
+async function readReceiptFile(receiptPath, { legacy }) {
+  const emptyReceipt = { schema: RECEIPT_SCHEMA, installs: {} };
   try {
     const text = await readFile(receiptPath, "utf8");
     const record = JSON.parse(text);
     if (!isRecord(record)) {
       return {
+        found: true,
         receipt: emptyReceipt,
         errors: [
           {
             code: "invalid_receipt",
-            message: `Sync receipt ${receiptPath} must be a JSON object.`
+            message: `Suitcase receipt ${receiptPath} must be a JSON object.`
           }
         ]
       };
     }
-    if (record.installs !== undefined && !isRecord(record.installs)) {
+
+    if (legacy) {
+      if (record.schema !== LEGACY_RECEIPT_SCHEMA) {
+        return {
+          found: true,
+          receipt: emptyReceipt,
+          errors: [
+            {
+              code: "invalid_receipt",
+              message: `Suitcase receipt ${receiptPath} has an unsupported legacy schema.`
+            }
+          ]
+        };
+      }
+      const legacyReceipt = normalizeLegacyReceipt(record);
       return {
-        receipt: emptyReceipt,
-        errors: [
-          {
-            code: "invalid_receipt",
-            message: `Sync receipt ${receiptPath} has an invalid installs mapping.`
-          }
-        ]
+        found: true,
+        receipt: legacyReceipt.receipt,
+        errors: legacyReceipt.errors
       };
     }
-    if (record.schema !== SYNC_SCHEMA) {
+
+    if (record.schema !== RECEIPT_SCHEMA) {
       return {
+        found: true,
         receipt: emptyReceipt,
         errors: [
           {
             code: "invalid_receipt",
-            message: `Sync receipt ${receiptPath} has an unsupported schema.`
+            message: `Suitcase receipt ${receiptPath} has an unsupported schema.`
           }
         ]
       };
     }
+
+    const normalized = normalizeReceiptInstalls(record.installs, { receiptPath });
     return {
+      found: true,
       receipt: {
         ...record,
-        installs: record.installs ?? {}
+        installs: normalized.installs
       },
-      errors: []
+      errors: normalized.errors
     };
   } catch (error) {
     if (error.code === "ENOENT") {
-      return { receipt: emptyReceipt, errors: [] };
+      return { found: false, receipt: emptyReceipt, errors: [] };
     }
     if (error instanceof SyntaxError) {
       return {
+        found: true,
         receipt: emptyReceipt,
         errors: [
           {
             code: "invalid_receipt",
-            message: `Sync receipt ${receiptPath} is not valid JSON.`
+            message: `Suitcase receipt ${receiptPath} is not valid JSON.`
           }
         ]
       };
     }
     return {
+      found: true,
       receipt: emptyReceipt,
       errors: [
         {
           code: "receipt_read_failed",
-          message: `Unable to read sync receipt ${receiptPath}: ${error.message}`
+          message: `Unable to read suitcase receipt ${receiptPath}: ${error.message}`
         }
       ]
     };
   }
 }
 
+function normalizeLegacyReceipt(record) {
+  const normalized = {
+    ...record,
+    schema: RECEIPT_SCHEMA,
+    installs: {}
+  };
+  const normalizedEntries = normalizeReceiptInstalls(record.installs, {
+    receiptPath: "legacy suitcase receipt"
+  });
+  normalized.installs = normalizedEntries.installs;
+  return { receipt: normalized, errors: normalizedEntries.errors };
+}
+
+function normalizeReceiptInstalls(installs, { receiptPath }) {
+  const normalized = {};
+  const errors = [];
+  if (installs === undefined) {
+    return { installs: normalized, errors };
+  }
+  if (!isRecord(installs)) {
+    errors.push({
+      code: "invalid_receipt",
+      message: `Suitcase receipt ${receiptPath} has an invalid installs mapping.`
+    });
+    return { installs: normalized, errors };
+  }
+
+  for (const [skillName, installEntries] of Object.entries(installs)) {
+    const entries = Array.isArray(installEntries) ? installEntries : [installEntries];
+    const normalizedEntries = [];
+    for (const entry of entries) {
+      const normalizedEntry = normalizeReceiptInstallRecord(entry, { skillName });
+      if (normalizedEntry.errors.length > 0) {
+        errors.push(...normalizedEntry.errors.map((item) => ({ ...item, skill: skillName })));
+        continue;
+      }
+      normalizedEntries.push(normalizedEntry.record);
+    }
+    if (normalizedEntries.length > 0) {
+      normalized[skillName] = normalizedEntries;
+    }
+  }
+
+  return { installs: normalized, errors };
+}
+
+function normalizeReceiptInstallRecord(installRecord, { skillName }) {
+  if (!isRecord(installRecord)) {
+    return {
+      record: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Suitcase receipt has an invalid install record for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  const source = normalizeValue(installRecord.source);
+  const sourcePath =
+    normalizeValue(installRecord.sourcePath) ??
+    (isRecord(installRecord.source)
+      ? normalizeValue(installRecord.source.path)
+      : normalizeValue(source));
+  const mode = normalizeValue(installRecord.mode);
+  const target = normalizeValue(installRecord.target);
+  const targetPath = normalizeValue(installRecord.targetPath);
+  const version = normalizeValue(installRecord.version);
+  const sourceCommit = normalizeValue(installRecord.sourceCommit);
+  const sourceHash = normalizeValue(installRecord.sourceHash);
+  const installedFiles = Array.isArray(installRecord.installedFiles) ? installRecord.installedFiles : null;
+  const priorState = isRecord(installRecord.priorState) ? installRecord.priorState : null;
+  const agent = normalizeValue(installRecord.agent);
+  const canonicalSkill = normalizeValue(installRecord.skill) ?? skillName;
+
+  const requiredField = ["agent", "mode", "sourcePath", "targetPath"].find((field) => {
+    const value = {
+      agent,
+      mode,
+      sourcePath,
+      targetPath
+    }[field];
+    return typeof value !== "string" || value.length === 0;
+  });
+  if (requiredField) {
+    return {
+      record: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Suitcase receipt has an invalid ${requiredField} field for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  const invalidScalarField = INSTALL_RECORD_SCALAR_FIELDS.find((field) => {
+    const value = installRecord[field];
+    if (value === undefined || value === null) {
+      return false;
+    }
+    return typeof value !== "string";
+  });
+  if (invalidScalarField) {
+    return {
+      record: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Suitcase receipt has an invalid ${invalidScalarField} field for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  const hasProvenance = [version, sourceCommit, sourceHash].some(
+    (value) => typeof value === "string" && value.length > 0
+  );
+  if (!hasProvenance) {
+    return {
+      record: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Suitcase receipt has no source provenance for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  if (installRecord.source !== undefined) {
+    if (isRecord(installRecord.source)) {
+      if (!normalizeValue(installRecord.source.path)) {
+        return {
+          record: null,
+          errors: [
+            {
+              code: "invalid_receipt",
+              message: `Suitcase receipt has an invalid source.path for ${skillName}.`
+            }
+          ]
+        };
+      }
+    } else if (typeof installRecord.source !== "string" && installRecord.source !== null) {
+      return {
+        record: null,
+        errors: [
+          {
+            code: "invalid_receipt",
+            message: `Suitcase receipt has an invalid source for ${skillName}.`
+          }
+        ]
+      };
+    }
+    if (typeof installRecord.source === "string" && normalizeValue(installRecord.source) === null) {
+      return {
+        record: null,
+        errors: [
+          {
+            code: "invalid_receipt",
+            message: `Suitcase receipt has an invalid source for ${skillName}.`
+          }
+        ]
+      };
+    }
+  }
+
+  const normalizedInstalledFiles = validateInstalledFiles(installRecord.installedFiles, {
+    skillName
+  });
+  if (normalizedInstalledFiles.errors.length > 0) {
+    return {
+      record: null,
+      errors: normalizedInstalledFiles.errors
+    };
+  }
+
+  if (installRecord.priorState !== undefined && !isRecord(installRecord.priorState)) {
+    return {
+      record: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Suitcase receipt has an invalid priorState for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  const sourceRecord = source
+    ? isRecord(installRecord.source)
+      ? installRecord.source
+      : { path: source }
+    : { path: sourcePath };
+
+  const canonical = {
+    ...installRecord,
+    skill: canonicalSkill,
+    mode,
+    sourcePath,
+    target,
+    targetPath,
+    version,
+    sourceCommit,
+    sourceHash,
+    installedFiles: normalizedInstalledFiles.files,
+    priorState,
+    source: sourceRecord,
+    agent
+  };
+
+  return {
+    record: canonical,
+    errors: []
+  };
+}
+
+function validateInstalledFiles(installedFiles = [], { skillName }) {
+  if (installedFiles === null || installedFiles === undefined) {
+    return { files: installedFiles, errors: [] };
+  }
+  if (!Array.isArray(installedFiles)) {
+    return {
+      files: [],
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Suitcase receipt has invalid installedFiles for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  for (const file of installedFiles) {
+    if (!isRecord(file)) {
+      return {
+        files: [],
+        errors: [
+          {
+            code: "invalid_receipt",
+            message: `Suitcase receipt has invalid installedFiles for ${skillName}.`
+          }
+        ]
+      };
+    }
+    if (normalizeValue(file.path) === null) {
+      return {
+        files: [],
+        errors: [
+          {
+            code: "invalid_receipt",
+            message: `Suitcase receipt has invalid installedFiles for ${skillName}.`
+          }
+        ]
+      };
+    }
+    if (file.hash !== undefined && normalizeValue(file.hash) === null) {
+      return {
+        files: [],
+        errors: [
+          {
+            code: "invalid_receipt",
+            message: `Suitcase receipt has invalid installedFiles for ${skillName}.`
+          }
+        ]
+      };
+    }
+  }
+
+  return {
+    files: installedFiles,
+    errors: []
+  };
+}
+
+function selectInstallRecord({ installRecords, installRoot, skillName, receiptPath }) {
+  if (installRecords === undefined) {
+    return { installRecord: null, errors: [] };
+  }
+
+  if (!Array.isArray(installRecords)) {
+    return {
+      installRecord: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Suitcase receipt ${receiptPath} has an invalid install record for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  const normalizedRoot = normalizeValue(installRoot);
+  const normalizedRootPath = normalizedRoot ? path.resolve(normalizedRoot) : null;
+  const normalizedSkillTarget =
+    installRoot && skillName ? normalizeValue(path.join(normalizedRootPath, skillName)) : null;
+  const matching = installRecords.filter(
+    (record) => {
+      const candidate = normalizeValue(record?.targetPath);
+      if (!candidate) {
+        return false;
+      }
+      const resolvedCandidate = path.isAbsolute(candidate)
+        ? path.resolve(candidate)
+        : path.resolve(normalizedRootPath ?? "", candidate);
+      const normalizedCandidate = normalizeValue(resolvedCandidate);
+      return (
+        normalizedCandidate === normalizedRootPath ||
+        (normalizedSkillTarget !== null && normalizedCandidate === normalizedSkillTarget)
+      );
+    }
+  );
+
+  if (matching.length > 1) {
+    return {
+      installRecord: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Suitcase receipt ${receiptPath} has ambiguous install records for ${skillName} at ${installRoot}.`
+        }
+      ]
+    };
+  }
+
+  if (matching.length === 1) {
+    return { installRecord: matching[0], errors: [] };
+  }
+
+  return {
+    installRecord: null,
+    errors: [
+      {
+        code: "invalid_receipt",
+        message: `Suitcase receipt ${receiptPath} has no matching install record for ${skillName} at ${installRoot}.`
+      }
+    ]
+  };
+}
 function resolveAssignmentInstallRoot(assignmentPath, kind) {
   const fields = PATH_FIELDS_BY_KIND[kind];
   if (!fields) {
