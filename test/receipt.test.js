@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
+  LEGACY_RECEIPT_SCHEMA,
   RECEIPT_FILE,
   RECEIPT_SCHEMA,
   buildInstallRecord,
@@ -811,6 +812,88 @@ test("writeReceipt defaults missing schema to modern suitcase schema", async (t)
   const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
   assert.equal(persisted.schema, RECEIPT_SCHEMA);
   assert.deepEqual(persisted.installs, {});
+});
+
+test("writeReceipt rejects unsupported schemas", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-write-receipt-schema-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await assert.rejects(
+    () =>
+      writeReceipt({
+        installRoot: root,
+        receipt: {
+          schema: "foreign.schema.v1",
+          installs: {}
+        }
+      }),
+    /Receipt schema is unsupported/
+  );
+});
+
+test("writeReceipt normalizes legacy schema to modern schema", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-write-receipt-legacy-schema-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const receiptPath = await writeReceipt({
+    installRoot: root,
+    receipt: {
+      schema: LEGACY_RECEIPT_SCHEMA,
+      installs: {}
+    }
+  });
+
+  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
+  assert.equal(persisted.schema, RECEIPT_SCHEMA);
+});
+
+test("upsertAndWriteReceipt migrates legacy receipt when receipt is omitted", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upsert-legacy-"));
+  const installRoot = path.join(root, "skills");
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const officeRecord = buildInstallRecord({
+    skill: "office-hours",
+    agent: "openclaw",
+    mode: "copy",
+    targetPath: path.join(installRoot, "office-hours"),
+    sourcePath: "/repo/skills/office-hours",
+    version: "2026.06.10",
+    sourceCommit: "deadbeef"
+  });
+  const gnhfRecord = buildInstallRecord({
+    skill: "gnhf-postflight",
+    agent: "openclaw",
+    mode: "copy",
+    targetPath: path.join(installRoot, "gnhf-postflight"),
+    sourcePath: "/repo/skills/gnhf-postflight",
+    version: "2026.06.11",
+    sourceCommit: "feedface"
+  });
+
+  await mkdir(installRoot, { recursive: true });
+  await writeFile(
+    path.join(installRoot, ".skills-sync.json"),
+    `${JSON.stringify({
+      schema: LEGACY_RECEIPT_SCHEMA,
+      installs: {
+        "office-hours": officeRecord
+      }
+    }, null, 2)}\n`,
+    "utf8"
+  );
+
+  const receiptPath = await upsertAndWriteReceipt({
+    installRoot,
+    skillName: gnhfRecord.skill,
+    installRecord: gnhfRecord
+  });
+
+  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
+  assert.equal(path.basename(receiptPath), RECEIPT_FILE);
+  assert.equal(persisted.schema, RECEIPT_SCHEMA);
+  assert.equal(persisted.installs["office-hours"].version, "2026.06.10");
+  assert.equal(persisted.installs["gnhf-postflight"].version, "2026.06.11");
 });
 
 test("writeReceipt rejects invalid installs payloads", async (t) => {

@@ -46,7 +46,12 @@ export async function upsertAndWriteReceipt({
     throw new Error("installRecord must be an object.");
   }
 
-  const currentReceipt = receipt === undefined ? await readReceiptForUpsert(outputPath) : receipt;
+  const currentReceipt = receipt === undefined
+    ? await readReceiptForUpsert({
+        receiptPath: outputPath,
+        legacyReceiptPath: path.join(normalizedRoot, LEGACY_RECEIPT_FILE)
+      })
+    : receipt;
   if (!isRecord(currentReceipt)) {
     throw new Error("Receipt payload must be an object.");
   }
@@ -69,17 +74,38 @@ export async function upsertAndWriteReceipt({
   return writeReceipt({ installRoot: normalizedRoot, receipt: nextReceipt, receiptPath });
 }
 
-async function readReceiptForUpsert(receiptPath) {
+async function readReceiptForUpsert({ receiptPath, legacyReceiptPath }) {
+  const modernReceipt = await readReceiptFileForUpsert(receiptPath, { legacy: false });
+  if (modernReceipt.found) {
+    return modernReceipt.receipt;
+  }
+
+  const legacyReceipt = await readReceiptFileForUpsert(legacyReceiptPath, { legacy: true });
+  if (legacyReceipt.found) {
+    return legacyReceipt.receipt;
+  }
+
+  return {};
+}
+
+async function readReceiptFileForUpsert(receiptPath, { legacy }) {
   try {
     const text = await readFile(receiptPath, "utf8");
     const receipt = JSON.parse(text);
     if (!isRecord(receipt)) {
       throw new Error("Receipt payload must be an object.");
     }
-    return receipt;
+    const expectedSchema = legacy ? LEGACY_RECEIPT_SCHEMA : RECEIPT_SCHEMA;
+    if (receipt.schema !== expectedSchema) {
+      throw new Error(`Receipt ${receiptPath} has an unsupported schema.`);
+    }
+    return {
+      found: true,
+      receipt: legacy ? { ...receipt, schema: RECEIPT_SCHEMA } : receipt
+    };
   } catch (error) {
     if (error.code === "ENOENT") {
-      return {};
+      return { found: false, receipt: {} };
     }
     if (error instanceof SyntaxError) {
       throw new Error(`Receipt ${receiptPath} must be valid JSON.`);
@@ -394,9 +420,17 @@ function normalizeValue(value) {
 }
 
 function normalizeReceiptPayload(receipt) {
+  if (
+    receipt.schema !== undefined &&
+    receipt.schema !== RECEIPT_SCHEMA &&
+    receipt.schema !== LEGACY_RECEIPT_SCHEMA
+  ) {
+    throw new Error("Receipt schema is unsupported.");
+  }
+
   const normalizedReceipt = {
     ...receipt,
-    schema: receipt.schema ?? RECEIPT_SCHEMA
+    schema: RECEIPT_SCHEMA
   };
 
   if (normalizedReceipt.installs !== undefined && !isRecord(normalizedReceipt.installs)) {
