@@ -154,19 +154,8 @@ export async function apply({
 
   if (hasLock) {
     context = await resolveLockContext({ lockPath: lock, source, target });
-  } else if (hasArtifact) {
-    context = await resolveArtifactContext({ artifactPath: artifact, source, target });
   } else {
-    return failure({
-      source,
-      target,
-      mode: "lock",
-      input: null,
-      errors: [{
-        code: "missing_apply_input",
-        message: "apply requires exactly one of --lock or --artifact"
-      }]
-    });
+    context = await resolveArtifactContext({ artifactPath: artifact!, source, target });
   }
 
   if (!context.ok) {
