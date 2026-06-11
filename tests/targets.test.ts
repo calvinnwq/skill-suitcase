@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { targets } from "../src/targets.js";
 
-const fixtureSource = path.join(import.meta.dirname, "fixtures", "skills-catalog");
+const fixtureSource = path.join(process.cwd(), "tests", "fixtures", "skills-catalog");
 
 test("lists all assignment paths with stability fields from the fixture catalog", async () => {
   const result = await targets({ source: fixtureSource });
@@ -23,6 +23,9 @@ test("lists all assignment paths with stability fields from the fixture catalog"
   assert.deepEqual(result.findings, []);
 
   const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+  if (codexGlobal === undefined) {
+    throw new Error("Expected codex-global target entry in fixture output.");
+  }
   assert.equal(codexGlobal.path, "/tmp/codex");
   assert.equal(codexGlobal.codexHome, "/tmp/codex");
   assert.equal(codexGlobal.skillsPath, "/tmp/codex/skills");
@@ -118,6 +121,9 @@ assignmentPaths:
   const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
 
   assert.equal(result.ok, false);
+  if (codexGlobal === undefined) {
+    throw new Error("Expected codex-global target entry in fixture output.");
+  }
   assert.equal(codexGlobal.safety.classification, "invalid");
   assert.ok(
     result.findings.some(

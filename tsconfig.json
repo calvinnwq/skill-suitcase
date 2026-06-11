@@ -19,10 +19,12 @@
     "src/diff.ts",
     "src/packer.ts",
     "src/validator.ts",
+    "src/targets.ts",
     "tests/suitcase-manifest.test.ts",
     "tests/planner.test.ts",
     "tests/diff.test.ts",
     "tests/packer.test.ts",
-    "tests/validator.test.ts"
+    "tests/validator.test.ts",
+    "tests/targets.test.ts"
   ]
 }
