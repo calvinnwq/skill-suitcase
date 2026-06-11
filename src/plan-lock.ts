@@ -17,9 +17,6 @@ type PlanEntry = {
   skill: string;
   action: "install" | "blocked";
   variant: string;
-  sourcePath: string;
-  target?: string | undefined;
-  reason?: string | undefined;
   evidence: string[];
 };
 
@@ -252,20 +249,12 @@ function stableObject(value: unknown): unknown {
 }
 
 function plannedEntry(item: PlanResult["planned"][number]): PlanEntry {
-  const entry: PlanEntry = {
+  return {
     skill: item.skill,
     action: item.action,
     variant: item.variant,
-    evidence: Array.isArray(item.evidence) ? [...item.evidence] : [],
-    sourcePath: item.sourcePath
+    evidence: Array.isArray(item.evidence) ? [...item.evidence] : []
   };
-  if (item.target !== undefined) {
-    entry.target = item.target;
-  }
-  if (item.reason !== undefined) {
-    entry.reason = item.reason;
-  }
-  return entry;
 }
 
 function normalizeValue(value: string | undefined): string | null {
