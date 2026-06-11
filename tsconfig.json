@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": ".",
+    "outDir": "dist",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/suitcase-manifest.ts",
+    "src/catalog.ts",
+    "src/planner.ts",
+    "src/diff.ts",
+    "src/packer.ts",
+    "src/validator.ts",
+    "src/targets.ts",
+    "src/plan-lock.ts",
+    "tests/suitcase-manifest.test.ts",
+    "tests/planner.test.ts",
+    "tests/diff.test.ts",
+    "tests/packer.test.ts",
+    "tests/validator.test.ts",
+    "tests/targets.test.ts",
+    "tests/plan-lock.test.ts",
+    "src/cli.ts",
+    "src/receipt.ts",
+    "tests/receipt.test.ts",
+    "src/status.ts",
+    "tests/status.test.ts"
+  ]
+}

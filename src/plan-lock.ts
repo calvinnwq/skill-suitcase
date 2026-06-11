@@ -3,25 +3,76 @@ import { spawnSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog } from "./catalog.js";
-import { plan } from "./planner.js";
+import { plan, type PlanResult } from "./planner.js";
 
 export const PLAN_LOCK_SCHEMA = "calvinnwq.skills.plan-lock.v0";
 
-export async function buildPlanLock({ source, target, assignmentPath, sourceCommit }) {
+type PlanLockSource = {
+  repo: string;
+  ref: string | null;
+  commit: string | null;
+};
+
+type PlanEntry = {
+  skill: string;
+  action: "install" | "blocked";
+  variant: string;
+  evidence: string[];
+};
+
+export type PlanLock = {
+  schema: typeof PLAN_LOCK_SCHEMA;
+  source: PlanLockSource;
+  target: string;
+  assignmentPath: string | null;
+  selectedSkills: string[];
+  planEntries: PlanEntry[];
+  fileHashes: Record<string, Record<string, string>>;
+};
+
+type PlanLockRecord = PlanLock & {
+  planId: string;
+};
+
+type PlanLockInput = {
+  source: string;
+  target: string;
+  assignmentPath: string;
+  sourceCommit?: string;
+};
+
+type PlanLockAssessInput = PlanLockInput & {
+  lock: unknown;
+};
+
+export type PlanLockAssessResult = {
+  valid: boolean;
+  reasons: string[];
+  current: PlanLockRecord | null;
+};
+
+export async function buildPlanLock({
+  source,
+  target,
+  assignmentPath,
+  sourceCommit
+}: PlanLockInput): Promise<PlanLockRecord> {
   const { sourceRoot } = await loadCatalog(source);
-  const planResult = await plan({ source: sourceRoot, target });
+  const planResult: PlanResult = await plan({ source: sourceRoot, target });
 
   if (!planResult.ok) {
-    throw new Error(`Cannot create lock for invalid plan target ${target}: ${planResult.errors[0]?.message}`);
+    throw new Error(
+      `Cannot create lock for invalid plan target ${target}: ${planResult.errors[0]?.message}`
+    );
   }
 
   const normalizedAssignmentPath = normalizeValue(assignmentPath);
   const commit = await resolveSourceCommit(sourceCommit, sourceRoot);
   const fileHashes = await collectPlanFileHashes(planResult.planned);
-  const planEntries = planResult.planned.map((item) => stableObject(plannedEntry(item)));
+  const planEntries = planResult.planned.map((item) => stableObject(plannedEntry(item)) as PlanEntry);
   const selectedSkills = [...new Set(planResult.planned.map((item) => item.skill))].sort();
 
-  const lockRecord = {
+  const lockRecord: Omit<PlanLockRecord, "planId"> = {
     schema: PLAN_LOCK_SCHEMA,
     source: {
       repo: sourceRoot,
@@ -41,60 +92,77 @@ export async function buildPlanLock({ source, target, assignmentPath, sourceComm
   };
 }
 
-export async function assessPlanLock({ source, target, assignmentPath, lock, sourceCommit }) {
+export async function assessPlanLock({
+  source,
+  target,
+  assignmentPath,
+  lock,
+  sourceCommit
+}: PlanLockAssessInput): Promise<PlanLockAssessResult> {
   if (!isRecord(lock)) {
     return { valid: false, reasons: ["invalid_lock"], current: null };
   }
 
-  let current;
+  const prior: Partial<PlanLockRecord> = lock;
+
+  let current: PlanLockRecord;
   try {
-    current = await buildPlanLock({ source, target, assignmentPath, sourceCommit });
+    const buildArgs: PlanLockInput = {
+      source,
+      target,
+      assignmentPath
+    };
+    if (sourceCommit !== undefined) {
+      buildArgs.sourceCommit = sourceCommit;
+    }
+    current = await buildPlanLock(buildArgs);
   } catch {
     return { valid: false, reasons: ["current_plan_unavailable"], current: null };
   }
-  const reasons = [];
 
-  if (!isRecord(current.source) || !isRecord(lock.source)) {
+  const reasons: string[] = [];
+
+  if (!isRecord(current.source) || !isRecord(prior.source)) {
     reasons.push("missing_source_metadata");
   }
 
-  if (current.source?.repo !== lock.source?.repo) {
+  if (current.source.repo !== prior.source?.repo) {
     reasons.push("source_repo_changed");
   }
 
-  if (current.source?.ref !== lock.source?.ref) {
+  if (current.source.ref !== prior.source?.ref) {
     reasons.push("source_ref_changed");
   }
 
-  if (current.source?.commit !== lock.source?.commit) {
+  if (current.source.commit !== prior.source?.commit) {
     reasons.push("source_commit_changed");
   }
 
-  if (current.target !== lock.target) {
+  if (current.target !== prior.target) {
     reasons.push("target_changed");
   }
 
-  if (current.assignmentPath !== lock.assignmentPath) {
+  if (current.assignmentPath !== prior.assignmentPath) {
     reasons.push("assignment_path_changed");
   }
 
-  if (!arraysEqual(current.selectedSkills, lock.selectedSkills)) {
+  if (!arraysEqual(current.selectedSkills, prior.selectedSkills ?? [])) {
     reasons.push("selected_skills_changed");
   }
 
-  if (!objectHashesEqual(current.planEntries, lock.planEntries)) {
+  if (!objectHashesEqual(current.planEntries, prior.planEntries ?? null)) {
     reasons.push("plan_entries_changed");
   }
 
-  if (!objectHashesEqual(current.fileHashes, lock.fileHashes)) {
+  if (!objectHashesEqual(current.fileHashes, prior.fileHashes ?? null)) {
     reasons.push("file_hashes_changed");
   }
 
-  if (current.planId !== lock.planId) {
+  if (current.planId !== prior.planId) {
     reasons.push("plan_id_changed");
   }
 
-  if (lock.schema !== current.schema) {
+  if (prior.schema !== current.schema) {
     reasons.push("invalid_lock_schema");
   }
 
@@ -105,12 +173,12 @@ export async function assessPlanLock({ source, target, assignmentPath, lock, sou
   };
 }
 
-async function collectPlanFileHashes(plannedSkills) {
-  const hashes = {};
+async function collectPlanFileHashes(plannedSkills: PlanResult["planned"]): Promise<PlanLock["fileHashes"]> {
+  const hashes: PlanLock["fileHashes"] = {};
 
   for (const item of plannedSkills) {
     const skillFiles = await listFiles(item.sourcePath);
-    const fileHashList = {};
+    const fileHashList: Record<string, string> = {};
 
     for (const relativePath of skillFiles) {
       const filePath = path.join(item.sourcePath, relativePath);
@@ -118,13 +186,13 @@ async function collectPlanFileHashes(plannedSkills) {
       fileHashList[relativePath] = createHash("sha256").update(bytes).digest("hex");
     }
 
-    hashes[item.skill] = stableObject(fileHashList);
+    hashes[item.skill] = stableObject(fileHashList) as Record<string, string>;
   }
 
-  return stableObject(hashes);
+  return stableObject(hashes) as PlanLock["fileHashes"];
 }
 
-function computePlanId(lockRecord) {
+function computePlanId(lockRecord: Omit<PlanLockRecord, "planId">): string {
   const stablePlanRecord = {
     schema: lockRecord.schema,
     source: {
@@ -143,7 +211,7 @@ function computePlanId(lockRecord) {
   return createHash("sha256").update(serialized).digest("hex");
 }
 
-async function resolveSourceCommit(explicitSourceCommit, sourceRoot) {
+async function resolveSourceCommit(explicitSourceCommit: string | undefined, sourceRoot: string) {
   if (typeof explicitSourceCommit === "string" && explicitSourceCommit.trim().length > 0) {
     return explicitSourceCommit.trim();
   }
@@ -164,7 +232,7 @@ async function resolveSourceCommit(explicitSourceCommit, sourceRoot) {
   return null;
 }
 
-function stableObject(value) {
+function stableObject(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => stableObject(item));
   }
@@ -173,14 +241,14 @@ function stableObject(value) {
     return value;
   }
 
-  const ordered = {};
+  const ordered: Record<string, unknown> = {};
   for (const key of Object.keys(value).sort()) {
     ordered[key] = stableObject(value[key]);
   }
   return ordered;
 }
 
-function plannedEntry(item) {
+function plannedEntry(item: PlanResult["planned"][number]): PlanEntry {
   return {
     skill: item.skill,
     action: item.action,
@@ -189,7 +257,7 @@ function plannedEntry(item) {
   };
 }
 
-function normalizeValue(value) {
+function normalizeValue(value: string | undefined): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -198,11 +266,13 @@ function normalizeValue(value) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function arraysEqual(left, right) {
+function arraysEqual(left: string[], right: string[]): boolean;
+function arraysEqual(left: unknown[] | null, right: unknown[] | null): boolean;
+function arraysEqual(left: readonly unknown[] | null, right: readonly unknown[] | null): boolean {
   if (!Array.isArray(left) || !Array.isArray(right)) {
     return left === right;
   }
@@ -220,13 +290,13 @@ function arraysEqual(left, right) {
   return true;
 }
 
-function objectHashesEqual(left, right) {
+function objectHashesEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(stableObject(left)) === JSON.stringify(stableObject(right));
 }
 
-async function listFiles(root, prefix = "") {
+async function listFiles(root: string, prefix = ""): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
-  const files = [];
+  const files: string[] = [];
 
   for (const entry of entries) {
     const relativePath = path.join(prefix, entry.name);

@@ -2,16 +2,101 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog } from "./catalog.js";
-import { plan } from "./planner.js";
+import { type PlanResult, plan } from "./planner.js";
+import type { Catalog } from "./catalog.js";
+
+type DiffSourceFileRead =
+  | {
+      ok: true;
+      bytes: number;
+      sha256: string;
+    }
+  | {
+      ok: false;
+      code: string;
+      bytes: null;
+      sha256: null;
+    };
+
+type DiffResultError = {
+  code: string;
+  message: string;
+  candidates?: string[];
+};
+
+type DiffEntryAction =
+  | "create"
+  | "update"
+  | "unchanged"
+  | "extra"
+  | "missing"
+  | "blocked";
+
+type DiffEntry = {
+  action: DiffEntryAction;
+  skill: string;
+  relativePath: string | null;
+  targetPath: string | null;
+  sourcePath: string | null;
+  sourceSha256: string | null;
+  targetSha256: string | null;
+  bytes: number | null;
+  reason?: string | undefined;
+  variant?: string | undefined;
+};
+
+type DiffSummary = {
+  create: number;
+  update: number;
+  unchanged: number;
+  extra: number;
+  missing: number;
+  blocked: number;
+};
+
+type DiffResult = {
+  ok: boolean;
+  source: string;
+  target: string;
+  assignment: string | null;
+  installRoot: string | null;
+  planned: PlanItem[];
+  blocked: PlanItem[];
+  entries: DiffEntry[];
+  summary: DiffSummary;
+  errors: DiffResultError[];
+};
+
+type PlanItem = PlanResult["planned"][number];
+
+type ResolveAssignmentInstallRootSuccess = {
+  ok: true;
+  errors: DiffResultError[];
+  installRoot: string | null;
+  assignment: string | null;
+};
+
+type ResolveAssignmentInstallRootFailure = {
+  ok: false;
+  errors: DiffResultError[];
+  installRoot: string | null;
+  assignment: string | null;
+};
+
+type ResolveAssignmentInstallRootResult =
+  | ResolveAssignmentInstallRootSuccess
+  | ResolveAssignmentInstallRootFailure;
 
 const KIND_PATH_RULES = {
   "openclaw-skills-root": "path",
   "claude-skills-root": "path",
   "codex-home": "skillsPath",
   "nested-home-codex": "skillsPath"
-};
+} as const;
 
-export async function diff({ source, target }) {
+export async function diff(
+  { source, target }: { source: string; target: string }
+): Promise<DiffResult> {
   if (!source) {
     throw new Error("source is required");
   }
@@ -25,7 +110,7 @@ export async function diff({ source, target }) {
   const planResult = await plan({ source, target: planTarget });
   const sourceRoot = planResult.source;
 
-  const result = {
+  const result: DiffResult = {
     ok: false,
     source: sourceRoot,
     target,
@@ -34,7 +119,14 @@ export async function diff({ source, target }) {
     planned: planResult.planned ?? [],
     blocked: planResult.blocked ?? [],
     entries: [],
-    summary: null,
+    summary: {
+      create: 0,
+      update: 0,
+      unchanged: 0,
+      extra: 0,
+      missing: 0,
+      blocked: 0
+    },
     errors: [...planResult.errors]
   };
 
@@ -48,16 +140,22 @@ export async function diff({ source, target }) {
     return result;
   }
 
+  const installRoot = installation.installRoot;
+  if (!installRoot) {
+    throw new Error(`diff could not resolve install root for target ${target}.`);
+  }
+  result.installRoot = installRoot;
+
   for (const blockedEntry of result.blocked) {
     result.entries.push(blockedEntryFromPlan(blockedEntry));
   }
 
-  const skippedExtraSkillNames = new Set();
+  const skippedExtraSkillNames = new Set<string>();
 
   for (const plannedSkill of result.planned) {
     const { entries: relativeEntries, errors: compareErrors } = await comparePlannedSkill(
       plannedSkill,
-      result.installRoot
+      installRoot
     );
     result.errors.push(...compareErrors);
     result.entries.push(...relativeEntries);
@@ -71,16 +169,18 @@ export async function diff({ source, target }) {
       continue;
     }
 
-    const targetSkillPath = path.join(result.installRoot, plannedSkill.skill);
-    const extraEntries = await collectExtraEntries(
-      plannedSkill.skill,
-      targetSkillPath,
-      new Set(
-        result.entries
-          .filter((entry) => entry.action !== "extra" && entry.action !== "blocked" && entry.skill === plannedSkill.skill)
-          .map((entry) => entry.relativePath)
-      )
+    const targetSkillPath = path.join(installRoot, plannedSkill.skill);
+    const plannedRelativePaths = new Set(
+      result.entries
+        .filter(
+          (entry) =>
+            entry.action !== "extra" && entry.action !== "blocked" && entry.skill === plannedSkill.skill
+        )
+        .map((entry) => entry.relativePath)
+        .filter((entryPath): entryPath is string => typeof entryPath === "string")
     );
+
+    const extraEntries = await collectExtraEntries(plannedSkill.skill, targetSkillPath, plannedRelativePaths);
     result.entries.push(...extraEntries);
   }
 
@@ -90,7 +190,7 @@ export async function diff({ source, target }) {
   return result;
 }
 
-function blockedEntryFromPlan(blockedEntry) {
+function blockedEntryFromPlan(blockedEntry: PlanItem): DiffEntry {
   return {
     action: "blocked",
     skill: blockedEntry.skill,
@@ -105,7 +205,10 @@ function blockedEntryFromPlan(blockedEntry) {
   };
 }
 
-async function comparePlannedSkill(plannedSkill, installRoot) {
+async function comparePlannedSkill(
+  plannedSkill: PlanItem,
+  installRoot: string
+): Promise<{ entries: DiffEntry[]; errors: DiffResultError[] }> {
   const sourceRoot = plannedSkill.sourcePath;
   const targetRoot = path.join(installRoot, plannedSkill.skill);
   const sourceListing = await collectSourceEntries(sourceRoot);
@@ -114,7 +217,7 @@ async function comparePlannedSkill(plannedSkill, installRoot) {
   }
 
   const sourceEntries = sourceListing.entries;
-  const plannedEntries = [];
+  const plannedEntries: DiffEntry[] = [];
 
   for (const sourcePath of sourceEntries) {
     const relativePath = path.relative(sourceRoot, sourcePath);
@@ -187,9 +290,13 @@ async function comparePlannedSkill(plannedSkill, installRoot) {
   return { entries: plannedEntries, errors: [] };
 }
 
-async function collectExtraEntries(skill, targetSkillPath, plannedRelativePaths) {
+async function collectExtraEntries(
+  skill: string,
+  targetSkillPath: string,
+  plannedRelativePaths: Set<string>
+): Promise<DiffEntry[]> {
   const files = await collectTargetEntries(targetSkillPath);
-  const entries = [];
+  const entries: DiffEntry[] = [];
 
   for (const targetPath of files) {
     const relativePath = path.relative(targetSkillPath, targetPath);
@@ -219,10 +326,12 @@ async function collectExtraEntries(skill, targetSkillPath, plannedRelativePaths)
   return entries;
 }
 
-async function collectSourceEntries(root) {
+async function collectSourceEntries(
+  root: string
+): Promise<{ ok: boolean; entries: string[]; errors: DiffResultError[] }> {
   try {
     const files = await listFiles(root);
-    const entries = [];
+    const entries: string[] = [];
 
     for (const entry of files) {
       const info = await stat(entry);
@@ -233,6 +342,19 @@ async function collectSourceEntries(root) {
 
     return { ok: true, entries, errors: [] };
   } catch (error) {
+    if (!(error instanceof Error)) {
+      return {
+        ok: false,
+        entries: [],
+        errors: [
+          {
+            code: "source_entry_list_failed",
+            message: "Failed to list source entries for unknown catalog path."
+          }
+        ]
+      };
+    }
+
     return {
       ok: false,
       entries: [],
@@ -246,7 +368,7 @@ async function collectSourceEntries(root) {
   }
 }
 
-async function collectTargetEntries(targetPath) {
+async function collectTargetEntries(targetPath: string): Promise<string[]> {
   try {
     return await listFiles(targetPath);
   } catch {
@@ -254,9 +376,9 @@ async function collectTargetEntries(targetPath) {
   }
 }
 
-async function listFiles(root) {
+async function listFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
-  const files = [];
+  const files: string[] = [];
 
   for (const entry of entries) {
     const entryPath = path.join(root, entry.name);
@@ -274,7 +396,7 @@ async function listFiles(root) {
   return files.sort();
 }
 
-async function safeReadFile(filePath) {
+async function safeReadFile(filePath: string): Promise<DiffSourceFileRead> {
   try {
     const bytes = await readFile(filePath);
     return {
@@ -285,14 +407,23 @@ async function safeReadFile(filePath) {
   } catch (error) {
     return {
       ok: false,
-      code: error.code,
+      code: error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : "UNKNOWN",
       bytes: null,
       sha256: null
     };
   }
 }
 
-function entry(action, skill, relativePath, targetPath, sourcePath, sourceSha256, targetSha256, bytes) {
+function entry(
+  action: DiffEntryAction,
+  skill: string,
+  relativePath: string,
+  targetPath: string,
+  sourcePath: string | null,
+  sourceSha256: string | null,
+  targetSha256: string | null,
+  bytes: number | null
+): DiffEntry {
   return {
     action,
     skill,
@@ -305,16 +436,19 @@ function entry(action, skill, relativePath, targetPath, sourcePath, sourceSha256
   };
 }
 
-async function resolveAssignmentInstallRoot(manifest, target) {
+async function resolveAssignmentInstallRoot(
+  manifest: Catalog,
+  target: string
+): Promise<ResolveAssignmentInstallRootResult> {
   const assignmentPaths = manifest.assignmentPaths ?? {};
-  const errors = [];
+  const errors: DiffResultError[] = [];
 
   if (!isRecord(assignmentPaths)) {
     errors.push({
       code: "invalid_assignment_paths",
       message: "Manifest assignmentPaths is not a valid mapping."
     });
-    return { ok: false, errors, installRoot: null };
+    return { ok: false, errors, installRoot: null, assignment: null };
   }
 
   const directAssignmentPath = assignmentPaths[target];
@@ -327,7 +461,7 @@ async function resolveAssignmentInstallRoot(manifest, target) {
   }
 
   if (isRecord(directAssignmentPath)) {
-    return await resolveSingleAssignmentPath(manifest, target, directAssignmentPath);
+    return resolveSingleAssignmentPath(manifest, target, directAssignmentPath);
   }
 
   if (!isRecord(manifest.assignments?.[target])) {
@@ -356,11 +490,20 @@ async function resolveAssignmentInstallRoot(manifest, target) {
     return { ok: false, errors, installRoot: null, assignment: target };
   }
 
-  return resolveSingleAssignmentPath(manifest, matchingAssignmentPaths[0].id, matchingAssignmentPaths[0].path);
+  const match = matchingAssignmentPaths[0];
+  if (!match) {
+    return { ok: false, errors, installRoot: null, assignment: target };
+  }
+
+  return resolveSingleAssignmentPath(manifest, match.id, match.path);
 }
 
-async function resolveSingleAssignmentPath(manifest, assignmentPathId, assignmentPath) {
-  const errors = [];
+async function resolveSingleAssignmentPath(
+  manifest: Catalog,
+  assignmentPathId: string,
+  assignmentPath: Record<string, unknown>
+): Promise<ResolveAssignmentInstallRootResult> {
+  const errors: DiffResultError[] = [];
   const assignment = normalizeValue(assignmentPath.assignment);
   if (!assignment) {
     errors.push({
@@ -379,7 +522,7 @@ async function resolveSingleAssignmentPath(manifest, assignmentPathId, assignmen
   }
 
   const kind = normalizeValue(assignmentPath.kind);
-  const field = kind ? KIND_PATH_RULES[kind] : null;
+  const field = kind ? KIND_PATH_RULES[kind as keyof typeof KIND_PATH_RULES] : null;
 
   if (!kind) {
     errors.push({
@@ -417,8 +560,11 @@ async function resolveSingleAssignmentPath(manifest, assignmentPathId, assignmen
   return { ok: true, errors: [], installRoot, assignment };
 }
 
-function findAssignmentPathByAssignment(assignmentPaths, assignment) {
-  const matches = [];
+function findAssignmentPathByAssignment(
+  assignmentPaths: Record<string, unknown>,
+  assignment: string
+): { id: string; path: Record<string, unknown> }[] {
+  const matches: { id: string; path: Record<string, unknown> }[] = [];
 
   for (const [pathId, assignmentPath] of Object.entries(assignmentPaths)) {
     if (!isRecord(assignmentPath)) {
@@ -432,7 +578,7 @@ function findAssignmentPathByAssignment(assignmentPaths, assignment) {
   return matches;
 }
 
-async function isDirectory(candidate) {
+async function isDirectory(candidate: string): Promise<boolean> {
   try {
     const info = await stat(candidate);
     return info.isDirectory();
@@ -441,8 +587,8 @@ async function isDirectory(candidate) {
   }
 }
 
-function summarizeActions(entries) {
-  const summary = {
+function summarizeActions(entries: DiffEntry[]): DiffSummary {
+  const summary: DiffSummary = {
     create: 0,
     update: 0,
     unchanged: 0,
@@ -461,7 +607,7 @@ function summarizeActions(entries) {
   return summary;
 }
 
-function normalizeValue(value) {
+function normalizeValue(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -470,6 +616,6 @@ function normalizeValue(value) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

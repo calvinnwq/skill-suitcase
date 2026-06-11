@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { plan } from "../src/planner.js";
 
-const fixtureSource = path.join(import.meta.dirname, "fixtures", "skills-catalog");
+const fixtureSource = path.join(process.cwd(), "tests", "fixtures", "skills-catalog");
 
 test("openclaw plans the full OpenClaw builder assignment", async () => {
   const result = await plan({ source: fixtureSource, target: "openclaw" });
@@ -56,7 +56,9 @@ test("unknown targets return a machine-readable error", async () => {
 
   assert.equal(result.ok, false);
   assert.deepEqual(result.planned, []);
-  assert.equal(result.errors[0].code, "unknown_target");
+  assert.equal(result.errors.length > 0, true);
+  const [error] = result.errors;
+  assert.equal(error?.code, "unknown_target");
 });
 
 test("blocked canonical installs carry the manifest reason", async () => {
@@ -102,6 +104,11 @@ compatibility:
     result.planned.map((item) => item.skill),
     ["office-hours"]
   );
-  assert.equal(result.blocked[0].skill, "gnhf-postflight");
-  assert.equal(result.blocked[0].reason, "Codex must use the slimmer platform variant.");
+  assert.equal(result.blocked.length > 0, true);
+  const [blockedItem] = result.blocked;
+  assert.equal(blockedItem?.skill, "gnhf-postflight");
+  assert.equal(
+    blockedItem?.reason,
+    "Codex must use the slimmer platform variant."
+  );
 });

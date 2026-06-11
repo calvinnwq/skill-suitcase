@@ -1,24 +1,64 @@
 import { stat } from "node:fs/promises";
-import { loadCatalog } from "./catalog.js";
+import { loadCatalog, type Catalog } from "./catalog.js";
 
 const KIND_PATH_RULES = {
   "openclaw-skills-root": ["path"],
   "claude-skills-root": ["path"],
   "codex-home": ["codexHome", "skillsPath"],
   "nested-home-codex": ["home", "codexHome", "skillsPath"]
+} as const;
+
+type TargetPathField = "path" | "home" | "codexHome" | "skillsPath";
+type TargetPathRuleByKind = keyof typeof KIND_PATH_RULES;
+type TargetSafetyClassification = "invalid" | "missing" | "live-install-root";
+type TargetFindingLevel = "error" | "warning";
+
+type TargetFinding = {
+  level: TargetFindingLevel;
+  code: string;
+  message: string;
+  path: string | null;
 };
 
-const PATH_FIELDS = ["path", "home", "codexHome", "skillsPath"];
-const SUPPORTED_KINDS = new Set(Object.keys(KIND_PATH_RULES));
+type Target = {
+  id: string;
+  name: string;
+  assignment: string | null;
+  kind: string | null;
+  path: string | null;
+  home: string | null;
+  codexHome: string | null;
+  skillsPath: string | null;
+  exists: Record<TargetPathField, boolean>;
+  safety: {
+    classification: TargetSafetyClassification;
+    reason: string | null;
+  };
+};
 
-export async function targets({ source }) {
+type TargetResult = {
+  ok: boolean;
+  source: string;
+  manifestPath: string;
+  targets: Target[];
+  findings: TargetFinding[];
+};
+
+type TargetInput = {
+  source: string;
+};
+
+const PATH_FIELDS = ["path", "home", "codexHome", "skillsPath"] as const;
+const SUPPORTED_KINDS: Set<string> = new Set(Object.keys(KIND_PATH_RULES));
+
+export async function targets({ source }: TargetInput): Promise<TargetResult> {
   if (!source) {
     throw new Error("source is required");
   }
 
   const { sourceRoot, manifestPath, manifest } = await loadCatalog(source);
-  const findings = [];
-  const discovered = [];
+  const findings: TargetFinding[] = [];
+  const discovered: Target[] = [];
 
   const assignmentPaths = manifest.assignmentPaths ?? {};
 
@@ -51,8 +91,13 @@ export async function targets({ source }) {
   };
 }
 
-async function describeTarget(targetId, assignmentPath, manifest, findings) {
-  const target = {
+async function describeTarget(
+  targetId: string,
+  assignmentPath: unknown,
+  manifest: Catalog,
+  findings: TargetFinding[]
+): Promise<Target> {
+  const target: Target = {
     id: targetId,
     name: targetId,
     assignment: null,
@@ -86,9 +131,10 @@ async function describeTarget(targetId, assignmentPath, manifest, findings) {
   }
 
   const assignment = normalizeValue(assignmentPath.assignment);
-  const kind = normalizeValue(assignmentPath.kind);
+  const rawKind = normalizeValue(assignmentPath.kind);
+  const kind = rawKind;
   target.assignment = assignment;
-  target.kind = kind;
+  target.kind = rawKind;
 
   if (!assignment) {
     findings.push(
@@ -116,7 +162,7 @@ async function describeTarget(targetId, assignmentPath, manifest, findings) {
         `assignmentPaths.${targetId}.kind`
       )
     );
-  } else if (!SUPPORTED_KINDS.has(kind)) {
+  } else if (!isSupportedKind(kind)) {
     findings.push(
       error(
         "invalid_assignment_path",
@@ -127,20 +173,22 @@ async function describeTarget(targetId, assignmentPath, manifest, findings) {
   }
 
   for (const field of PATH_FIELDS) {
-    if (assignmentPath[field] !== undefined) {
-      target[field] = normalizeValue(assignmentPath[field]);
-      target.exists[field] = await existsDirectory(target[field]);
+    const candidate = assignmentPath[field];
+    if (candidate !== undefined) {
+      const value = normalizeValue(candidate);
+      target[field] = value;
+      target.exists[field] = await existsDirectory(value);
     }
   }
 
   target.path ??= target.codexHome ?? target.home;
   target.exists.path ||= await existsDirectory(target.path);
 
-  const hasKnownKind = target.kind && SUPPORTED_KINDS.has(target.kind);
+  const hasKnownKind = isSupportedKind(kind);
   let hasMissingPath = false;
 
   if (hasKnownKind) {
-    for (const field of KIND_PATH_RULES[target.kind]) {
+    for (const field of KIND_PATH_RULES[kind]) {
       const value = normalizeValue(assignmentPath[field]);
       if (!value) {
         findings.push(
@@ -153,9 +201,8 @@ async function describeTarget(targetId, assignmentPath, manifest, findings) {
         continue;
       }
 
-      const pathExists = await existsDirectory(value);
-      if (value && !pathExists) {
-        hasMissingPath = true;
+      if (!hasMissingPath) {
+        hasMissingPath = !(await existsDirectory(value));
       }
     }
   }
@@ -163,7 +210,7 @@ async function describeTarget(targetId, assignmentPath, manifest, findings) {
   const requiredErrors = findings.some(
     (finding) =>
       finding.level === "error" &&
-      finding.path &&
+      typeof finding.path === "string" &&
       finding.path.startsWith(`assignmentPaths.${targetId}`)
   );
 
@@ -184,7 +231,7 @@ async function describeTarget(targetId, assignmentPath, manifest, findings) {
   return target;
 }
 
-async function existsDirectory(value) {
+async function existsDirectory(value: string | null): Promise<boolean> {
   if (!value) {
     return false;
   }
@@ -196,7 +243,7 @@ async function existsDirectory(value) {
   }
 }
 
-function normalizeValue(value) {
+function normalizeValue(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -205,15 +252,24 @@ function normalizeValue(value) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function error(code, message, pathName = null) {
+function isSupportedKind(value: string | null): value is TargetPathRuleByKind {
+  return value !== null && SUPPORTED_KINDS.has(value);
+}
+
+function error(code: string, message: string, pathName: string | null = null): TargetFinding {
   return finding("error", code, message, pathName);
 }
 
-function finding(level, code, message, pathName) {
+function finding(
+  level: TargetFindingLevel,
+  code: string,
+  message: string,
+  pathName: string | null
+): TargetFinding {
   return {
     level,
     code,

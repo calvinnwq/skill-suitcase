@@ -1,10 +1,39 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
-import { loadCatalog } from "./catalog.js";
+import { type Catalog, loadCatalog } from "./catalog.js";
 
-export async function validate({ source }) {
+type FindingLevel = "error" | "warning";
+
+type Finding = {
+  level: FindingLevel;
+  code: string;
+  message: string;
+  path: string | null;
+};
+
+type ValidationSummary = {
+  suitcases: number;
+  assignments: number;
+  assignmentPaths: number;
+  referencedSkills: number;
+  findings: number;
+};
+
+type ValidateArgs = {
+  source: string;
+};
+
+type ValidateResult = {
+  ok: boolean;
+  source: string;
+  manifestPath: string;
+  summary: ValidationSummary;
+  findings: Finding[];
+};
+
+export async function validate({ source }: ValidateArgs): Promise<ValidateResult> {
   const { sourceRoot, manifestPath, manifest } = await loadCatalog(source);
-  const findings = [];
+  const findings: Finding[] = [];
   const referencedSkills = collectReferencedSkills(manifest);
 
   if (Object.keys(manifest.suitcases).length === 0) {
@@ -94,8 +123,8 @@ export async function validate({ source }) {
   };
 }
 
-function collectReferencedSkills(manifest) {
-  const skills = new Set();
+function collectReferencedSkills(manifest: Catalog): Set<string> {
+  const skills = new Set<string>();
 
   for (const suitcase of Object.values(manifest.suitcases)) {
     for (const skillName of suitcase.skills) {
@@ -106,7 +135,7 @@ function collectReferencedSkills(manifest) {
   return skills;
 }
 
-async function validateSkill(sourceRoot, skillName, findings) {
+async function validateSkill(sourceRoot: string, skillName: string, findings: Finding[]): Promise<void> {
   const skillPath = path.join(sourceRoot, "skills", skillName);
   const skillFile = path.join(skillPath, "SKILL.md");
 
@@ -132,7 +161,7 @@ async function validateSkill(sourceRoot, skillName, findings) {
   }
 }
 
-async function isDirectory(targetPath) {
+async function isDirectory(targetPath: string): Promise<boolean> {
   try {
     await access(targetPath);
     return (await stat(targetPath)).isDirectory();
@@ -141,7 +170,7 @@ async function isDirectory(targetPath) {
   }
 }
 
-async function isFile(targetPath) {
+async function isFile(targetPath: string): Promise<boolean> {
   try {
     await access(targetPath);
     return (await stat(targetPath)).isFile();
@@ -150,15 +179,15 @@ async function isFile(targetPath) {
   }
 }
 
-function error(code, message, pathName = null) {
+function error(code: string, message: string, pathName: string | null = null): Finding {
   return finding("error", code, message, pathName);
 }
 
-function warning(code, message, pathName = null) {
+function warning(code: string, message: string, pathName: string | null = null): Finding {
   return finding("warning", code, message, pathName);
 }
 
-function finding(level, code, message, pathName) {
+function finding(level: FindingLevel, code: string, message: string, pathName: string | null): Finding {
   return {
     level,
     code,

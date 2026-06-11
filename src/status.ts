@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readlink, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog } from "./catalog.js";
-import { plan } from "./planner.js";
+import { plan, type PlanResult } from "./planner.js";
 import {
   LEGACY_RECEIPT_FILE,
   LEGACY_RECEIPT_SCHEMA,
@@ -11,12 +11,115 @@ import {
   RECEIPT_SCHEMA
 } from "./receipt.js";
 
+type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
+type StatusSummary = {
+  current: number;
+  behind: number;
+  version: number;
+  dirty: number;
+  missing: number;
+  unknown: number;
+  blocked: number;
+};
+type StatusFinding = {
+  code: string;
+  message: string;
+  path?: string;
+  scope?: string;
+  skill?: string;
+  sourcePath?: string;
+  targetPath?: string;
+};
+type StatusItem = {
+  assignment: string;
+  assignmentPath: string;
+  kind: string;
+  skill: string;
+  status: StatusValue;
+  target: string;
+  targetPath: string;
+  reason: string;
+  installedVersion: string | null;
+  currentVersion: string | null;
+  installedCommit: string | null;
+  currentCommit: string | null;
+  installedHash: string | null;
+  currentHash: string | null;
+  variant?: string;
+};
+type StatusAssignment = {
+  assignmentPath: string;
+  assignment: string | null;
+  kind: string | null;
+  installRoot: string;
+  statusCount: number;
+  statuses: StatusItem[];
+  errors: StatusFinding[];
+};
+type StatusResult = {
+  ok: boolean;
+  source: string;
+  manifestPath: string;
+  assignments: StatusAssignment[];
+  statuses: StatusItem[];
+  summary: StatusSummary;
+  errors: StatusFinding[];
+};
+type StatusCheckResult = {
+  status: StatusValue;
+  reason: string;
+  target: string;
+  targetPath: string;
+  installedVersion: string | null;
+  currentVersion: string | null;
+  installedCommit: string | null;
+  currentCommit: string | null;
+  installedHash: string | null;
+  currentHash: string | null;
+  errors: StatusFinding[];
+};
+type ReceiptReadingResult = {
+  found: boolean;
+  receipt: {
+    schema: string;
+    installs: ReceiptInstalls;
+  };
+  errors: StatusFinding[];
+};
+type ReceiptInstalls = Record<string, InstallRecord[]>;
+type InstallRecord = {
+  [key: string]: unknown;
+  agent?: string;
+  mode?: string;
+  source?: string | ({ path: string } & Record<string, unknown>) | null;
+  sourcePath?: string;
+  targetPath?: string;
+  target?: string;
+  version?: string;
+  sourceCommit?: string;
+  sourceHash?: string;
+  installedFiles?: InstalledFileRecord[] | null;
+  priorState?: Record<string, unknown> | null;
+  skill?: string;
+};
+type NormalizedInstallRecordResult = {
+  record: InstallRecord | null;
+  errors: StatusFinding[];
+};
+type InstalledFileRecord = {
+  path?: string;
+  hash?: string;
+  [key: string]: unknown;
+};
+
 const PATH_FIELDS_BY_KIND = {
   "openclaw-skills-root": ["path"],
   "claude-skills-root": ["path"],
   "codex-home": ["skillsPath"],
   "nested-home-codex": ["skillsPath"]
-};
+} as const;
+type AssignmentKind = keyof typeof PATH_FIELDS_BY_KIND;
+type AssignmentPathField = (typeof PATH_FIELDS_BY_KIND)[AssignmentKind][number];
 const INSTALL_RECORD_SCALAR_FIELDS = [
   "agent",
   "mode",
@@ -25,16 +128,22 @@ const INSTALL_RECORD_SCALAR_FIELDS = [
   "version",
   "sourceCommit",
   "sourceHash"
-];
-const VALID_STATUSES = new Set(["current", "behind", "version", "dirty", "missing", "unknown", "blocked"]);
+] as const;
+const VALID_STATUSES = new Set<StatusValue>(["current", "behind", "version", "dirty", "missing", "unknown", "blocked"]);
+type PlanBlockedItem = {
+  skill: string;
+  reason?: string;
+  variant?: string;
+  [key: string]: unknown;
+};
 
-export async function status({ source }) {
+export async function status({ source }: { source: string }): Promise<StatusResult> {
   if (!source) {
     throw new Error("source is required");
   }
 
   const { manifestPath, sourceRoot, manifest } = await loadCatalog(source);
-  const summary = {
+  const summary: StatusSummary = {
     current: 0,
     behind: 0,
     version: 0,
@@ -43,9 +152,9 @@ export async function status({ source }) {
     unknown: 0,
     blocked: 0
   };
-  const assignments = [];
-  const statuses = [];
-  const errors = [];
+  const assignments: StatusAssignment[] = [];
+  const statuses: StatusItem[] = [];
+  const errors: StatusFinding[] = [];
 
   const assignmentPaths = manifest.assignmentPaths ?? {};
   if (!isRecord(assignmentPaths)) {
@@ -65,11 +174,11 @@ export async function status({ source }) {
   }
 
   for (const [assignmentPathId, assignmentPath] of Object.entries(assignmentPaths)) {
-    const assignmentResult = {
+    const assignmentResult: StatusAssignment = {
       assignmentPath: assignmentPathId,
       assignment: null,
       kind: null,
-      installRoot: null,
+      installRoot: "",
       statusCount: 0,
       statuses: [],
       errors: []
@@ -89,13 +198,13 @@ export async function status({ source }) {
       continue;
     }
 
-    const assignmentName = normalizeValue(assignmentPath.assignment);
-    const kind = normalizeValue(assignmentPath.kind);
+    const assignmentName = normalizeValue((assignmentPath as { assignment?: unknown }).assignment);
+    const kind = normalizeValue((assignmentPath as { kind?: unknown }).kind);
     const installRoot = resolveAssignmentInstallRoot(assignmentPath, kind);
 
     assignmentResult.assignment = assignmentName;
     assignmentResult.kind = kind;
-    assignmentResult.installRoot = installRoot;
+    assignmentResult.installRoot = installRoot ?? "";
 
     if (!assignmentName) {
       const assignmentError = {
@@ -112,7 +221,7 @@ export async function status({ source }) {
       const message = kind
         ? `Assignment path ${assignmentPathId} is missing required install-root field.`
         : `Assignment path ${assignmentPathId} is missing or uses an unsupported kind.`;
-      const pathField = kind && PATH_FIELDS_BY_KIND[kind]?.[0] ? PATH_FIELDS_BY_KIND[kind][0] : "kind";
+      const pathField = kind && isSupportedKind(kind) ? PATH_FIELDS_BY_KIND[kind][0] : "kind";
       const assignmentError = {
         code: "invalid_assignment_path",
         message
@@ -123,13 +232,13 @@ export async function status({ source }) {
       continue;
     }
 
-    let assignmentPlan;
+    let assignmentPlan: PlanResult;
     try {
       assignmentPlan = await plan({ source: sourceRoot, target: assignmentName });
     } catch (error) {
       const assignmentError = {
         code: "plan_failed",
-        message: `Unable to create install plan for ${assignmentName}: ${error.message}`
+        message: `Unable to create install plan for ${assignmentName}: ${errorMessage(error)}`
       };
       assignmentResult.errors.push({ ...assignmentError, scope: "plan" });
       errors.push({ ...assignmentError, path: `assignmentPaths.${assignmentPathId}.assignment` });
@@ -146,19 +255,19 @@ export async function status({ source }) {
         code: "missing_install_root",
         message: `Assignment path ${assignmentPathId} points at missing install root: ${installRoot}.`
       };
-      const pathField = PATH_FIELDS_BY_KIND[kind]?.[0] ?? "kind";
+      const pathField = isSupportedKind(kind) ? PATH_FIELDS_BY_KIND[kind][0] : "kind";
       assignmentResult.errors.push(assignmentError);
       errors.push({ ...assignmentError, path: `assignmentPaths.${assignmentPathId}.${pathField}` });
       assignments.push(assignmentResult);
       continue;
     }
 
-    for (const blocked of assignmentPlan.blocked ?? []) {
+    for (const blocked of assignmentPlan.blocked) {
       const blockedStatus = blockedStatusFromPlan({
         blocked,
         assignmentName,
         assignmentPathId,
-        kind,
+      kind,
         installRoot
       });
       const blockedError = {
@@ -216,7 +325,7 @@ export async function status({ source }) {
         skillName: planned.skill,
         installRecord: installRecordResult.installRecord
       });
-      if ((check.errors ?? []).length > 0) {
+      if (check.errors.length > 0) {
         assignmentResult.errors.push(...check.errors);
         errors.push(
           ...check.errors.map((item) => ({
@@ -226,7 +335,7 @@ export async function status({ source }) {
         );
       }
 
-      const resultStatus = {
+      const resultStatus: StatusItem = {
         assignment: assignmentName,
         assignmentPath: assignmentPathId,
         kind,
@@ -271,9 +380,23 @@ export async function status({ source }) {
   };
 }
 
-function blockedStatusFromPlan({ blocked, assignmentName, assignmentPathId, kind, installRoot }) {
+type BlockedStatusInput = {
+  blocked: PlanBlockedItem;
+  assignmentName: string;
+  assignmentPathId: string;
+  kind: string;
+  installRoot: string;
+};
+
+function blockedStatusFromPlan({
+  blocked,
+  assignmentName,
+  assignmentPathId,
+  kind,
+  installRoot
+}: BlockedStatusInput): StatusItem {
   const targetPath = path.join(installRoot, blocked.skill);
-  return {
+  const status: StatusItem = {
     assignment: assignmentName,
     assignmentPath: assignmentPathId,
     kind,
@@ -281,15 +404,18 @@ function blockedStatusFromPlan({ blocked, assignmentName, assignmentPathId, kind
     status: "blocked",
     target: installRoot,
     targetPath,
-    reason: blocked.reason,
+    reason: blocked.reason ?? "blocked",
     installedVersion: null,
     currentVersion: null,
     installedCommit: null,
     currentCommit: null,
     installedHash: null,
-    currentHash: null,
-    variant: blocked.variant
+    currentHash: null
   };
+  if (blocked.variant !== undefined) {
+    status.variant = blocked.variant;
+  }
+  return status;
 }
 
 async function statusSkill({
@@ -298,10 +424,16 @@ async function statusSkill({
   installRoot,
   skillName,
   installRecord
-}) {
+}: {
+  sourceRoot: string;
+  sourceSkillPath: string;
+  installRoot: string;
+  skillName: string;
+  installRecord: InstallRecord | null;
+}): Promise<StatusCheckResult> {
   const targetPath = path.join(installRoot, skillName);
-  let sourceVersion;
-  let sourceHashValue;
+  let sourceVersion: string | null;
+  let sourceHashValue = "";
   try {
     sourceVersion = await skillVersion(sourceSkillPath);
     sourceHashValue = await hashDirectory(sourceSkillPath);
@@ -309,7 +441,7 @@ async function statusSkill({
     const currentCommit = await readRepoCommit(sourceRoot);
     return {
       status: "unknown",
-      reason: `unable to read source skill: ${error.message}`,
+      reason: `unable to read source skill: ${errorMessage(error)}`,
       target: installRoot,
       targetPath,
       installedVersion: null,
@@ -321,7 +453,7 @@ async function statusSkill({
       errors: [
         {
           code: "source_read_failed",
-          message: `Unable to read source skill ${sourceSkillPath}: ${error.message}`,
+          message: `Unable to read source skill ${sourceSkillPath}: ${errorMessage(error)}`,
           skill: skillName,
           sourcePath: sourceSkillPath
         }
@@ -354,7 +486,8 @@ async function statusSkill({
       installedCommit: null,
       currentCommit,
       installedHash: null,
-      currentHash: sourceHashValue
+      currentHash: sourceHashValue,
+      errors: []
     };
   }
 
@@ -392,7 +525,8 @@ async function statusSkill({
       installedCommit: null,
       currentCommit,
       installedHash: null,
-      currentHash: sourceHashValue
+      currentHash: sourceHashValue,
+      errors: []
     };
   }
 
@@ -416,13 +550,14 @@ async function statusSkill({
         installedCommit,
         currentCommit,
         installedHash,
-        currentHash: sourceHashValue
+        currentHash: sourceHashValue,
+        errors: []
       };
     }
   }
 
   if (installedHash && !targetIsSourceSymlink) {
-    let targetHash;
+    let targetHash: string;
     try {
       targetHash = await hashInstalledTarget(targetPath);
     } catch (error) {
@@ -450,7 +585,8 @@ async function statusSkill({
         installedCommit,
         currentCommit,
         installedHash,
-        currentHash: sourceHashValue
+        currentHash: sourceHashValue,
+        errors: []
       };
     }
   }
@@ -466,7 +602,8 @@ async function statusSkill({
       installedCommit,
       currentCommit,
       installedHash,
-      currentHash: sourceHashValue
+      currentHash: sourceHashValue,
+      errors: []
     };
   }
 
@@ -481,7 +618,8 @@ async function statusSkill({
       installedCommit,
       currentCommit,
       installedHash,
-      currentHash: sourceHashValue
+      currentHash: sourceHashValue,
+      errors: []
     };
   }
 
@@ -496,7 +634,8 @@ async function statusSkill({
       installedCommit,
       currentCommit,
       installedHash,
-      currentHash: sourceHashValue
+      currentHash: sourceHashValue,
+      errors: []
     };
   }
 
@@ -507,7 +646,7 @@ async function statusSkill({
     } catch (error) {
       return {
         status: "unknown",
-        reason: `unable to read target skill: ${error.message}`,
+        reason: `unable to read target skill: ${errorMessage(error)}`,
         target: installRoot,
         targetPath,
         installedVersion,
@@ -519,7 +658,7 @@ async function statusSkill({
         errors: [
           {
             code: "target_read_failed",
-            message: `Unable to read target skill ${targetPath}: ${error.message}`,
+            message: `Unable to read target skill ${targetPath}: ${errorMessage(error)}`,
             skill: skillName,
             targetPath
           }
@@ -539,7 +678,8 @@ async function statusSkill({
       installedCommit,
       currentCommit,
       installedHash,
-      currentHash: sourceHashValue
+      currentHash: sourceHashValue,
+      errors: []
     };
   }
 
@@ -553,7 +693,8 @@ async function statusSkill({
     installedCommit,
     currentCommit,
     installedHash,
-    currentHash: sourceHashValue
+    currentHash: sourceHashValue,
+    errors: []
   };
 }
 
@@ -568,10 +709,21 @@ function targetReadFailureStatus({
   installedVersion = null,
   installedHash = null,
   installedCommit = null
-}) {
+}: {
+  error: unknown;
+  sourceVersion: string | null;
+  sourceHashValue: string;
+  currentCommit: string | null;
+  installRoot: string;
+  targetPath: string;
+  skillName: string;
+  installedVersion?: string | null;
+  installedHash?: string | null;
+  installedCommit?: string | null;
+}): StatusCheckResult {
   return {
     status: "unknown",
-    reason: `unable to read target skill: ${error.message}`,
+    reason: `unable to read target skill: ${errorMessage(error)}`,
     target: installRoot,
     targetPath,
     installedVersion,
@@ -581,20 +733,20 @@ function targetReadFailureStatus({
     installedHash,
     currentHash: sourceHashValue,
     errors: [
-      {
-        code: "target_read_failed",
-        message: `Unable to read target skill ${targetPath}: ${error.message}`,
-        skill: skillName,
-        targetPath
-      }
+        {
+          code: "target_read_failed",
+          message: `Unable to read target skill ${targetPath}: ${errorMessage(error)}`,
+          skill: skillName,
+          targetPath
+        }
     ]
   };
 }
 
-async function readReceipt(installRoot) {
+async function readReceipt(installRoot: string): Promise<{ receipt: { schema: string; installs: ReceiptInstalls }; errors: StatusFinding[]; receiptPath: string }> {
   const receiptPath = path.join(installRoot, RECEIPT_FILE);
   const legacyReceiptPath = path.join(installRoot, LEGACY_RECEIPT_FILE);
-  const emptyReceipt = { schema: RECEIPT_SCHEMA, installs: {} };
+  const emptyReceipt = { schema: RECEIPT_SCHEMA, installs: {} as ReceiptInstalls };
 
   const modernReceipt = await readReceiptFile(receiptPath, { legacy: false });
   if (modernReceipt.found) {
@@ -609,11 +761,14 @@ async function readReceipt(installRoot) {
   return { receipt: emptyReceipt, errors: [], receiptPath };
 }
 
-async function readReceiptFile(receiptPath, { legacy }) {
-  const emptyReceipt = { schema: RECEIPT_SCHEMA, installs: {} };
+type ReadReceiptFileInput = {
+  legacy: boolean;
+};
+async function readReceiptFile(receiptPath: string, { legacy }: ReadReceiptFileInput): Promise<ReceiptReadingResult> {
+  const emptyReceipt = { schema: RECEIPT_SCHEMA, installs: {} as ReceiptInstalls };
   try {
     const text = await readFile(receiptPath, "utf8");
-    const record = JSON.parse(text);
+    const record = JSON.parse(text) as unknown;
     if (!isRecord(record)) {
       return {
         found: true,
@@ -666,12 +821,14 @@ async function readReceiptFile(receiptPath, { legacy }) {
       found: true,
       receipt: {
         ...record,
+        schema: RECEIPT_SCHEMA,
         installs: normalized.installs
       },
       errors: normalized.errors
     };
   } catch (error) {
-    if (error.code === "ENOENT") {
+    const maybeNodeError = error as { code?: string };
+    if (maybeNodeError.code === "ENOENT") {
       return { found: false, receipt: emptyReceipt, errors: [] };
     }
     if (error instanceof SyntaxError) {
@@ -692,18 +849,18 @@ async function readReceiptFile(receiptPath, { legacy }) {
       errors: [
         {
           code: "receipt_read_failed",
-          message: `Unable to read suitcase receipt ${receiptPath}: ${error.message}`
+          message: `Unable to read suitcase receipt ${receiptPath}: ${errorMessage(error)}`
         }
       ]
     };
   }
 }
 
-function normalizeLegacyReceipt(record) {
+function normalizeLegacyReceipt(record: Record<string, unknown>): { receipt: { schema: string; installs: ReceiptInstalls; [key: string]: unknown }; errors: StatusFinding[] } {
   const normalized = {
     ...record,
     schema: RECEIPT_SCHEMA,
-    installs: {}
+    installs: {} as ReceiptInstalls
   };
   const normalizedEntries = normalizeReceiptInstalls(record.installs, {
     receiptPath: "legacy suitcase receipt"
@@ -712,9 +869,12 @@ function normalizeLegacyReceipt(record) {
   return { receipt: normalized, errors: normalizedEntries.errors };
 }
 
-function normalizeReceiptInstalls(installs, { receiptPath }) {
-  const normalized = {};
-  const errors = [];
+function normalizeReceiptInstalls(
+  installs: unknown,
+  { receiptPath }: { receiptPath: string }
+): { installs: ReceiptInstalls; errors: StatusFinding[] } {
+  const normalized: ReceiptInstalls = {};
+  const errors: StatusFinding[] = [];
   if (installs === undefined) {
     return { installs: normalized, errors };
   }
@@ -728,14 +888,18 @@ function normalizeReceiptInstalls(installs, { receiptPath }) {
 
   for (const [skillName, installEntries] of Object.entries(installs)) {
     const entries = Array.isArray(installEntries) ? installEntries : [installEntries];
-    const normalizedEntries = [];
+    const normalizedEntries: InstallRecord[] = [];
     for (const entry of entries) {
-      const normalizedEntry = normalizeReceiptInstallRecord(entry, { skillName });
-      if (normalizedEntry.errors.length > 0) {
-        errors.push(...normalizedEntry.errors.map((item) => ({ ...item, skill: skillName })));
-        continue;
-      }
-      normalizedEntries.push(normalizedEntry.record);
+    const normalizedEntry = normalizeReceiptInstallRecord(entry, { skillName });
+    if (normalizedEntry.errors.length > 0) {
+      errors.push(...normalizedEntry.errors.map((item) => ({ ...item, skill: skillName })));
+      continue;
+    }
+    const { record } = normalizedEntry;
+    if (record === null) {
+      continue;
+    }
+    normalizedEntries.push(record);
     }
     if (normalizedEntries.length > 0) {
       normalized[skillName] = normalizedEntries;
@@ -745,7 +909,10 @@ function normalizeReceiptInstalls(installs, { receiptPath }) {
   return { installs: normalized, errors };
 }
 
-function normalizeReceiptInstallRecord(installRecord, { skillName }) {
+function normalizeReceiptInstallRecord(
+  installRecord: unknown,
+  { skillName }: { skillName: string }
+): NormalizedInstallRecordResult {
   if (!isRecord(installRecord)) {
     return {
       record: null,
@@ -763,16 +930,17 @@ function normalizeReceiptInstallRecord(installRecord, { skillName }) {
     normalizeValue(installRecord.sourcePath) ??
     (isRecord(installRecord.source)
       ? normalizeValue(installRecord.source.path)
-      : normalizeValue(source));
-  const mode = normalizeValue(installRecord.mode);
-  const target = normalizeValue(installRecord.target);
-  const targetPath = normalizeValue(installRecord.targetPath);
-  const version = normalizeValue(installRecord.version);
-  const sourceCommit = normalizeValue(installRecord.sourceCommit);
-  const sourceHash = normalizeValue(installRecord.sourceHash);
+      : normalizeValue(source))
+    ?? undefined;
+  const mode = normalizeValue(installRecord.mode) ?? undefined;
+  const target = normalizeValue(installRecord.target) ?? undefined;
+  const targetPath = normalizeValue(installRecord.targetPath) ?? undefined;
+  const version = normalizeValue(installRecord.version) ?? undefined;
+  const sourceCommit = normalizeValue(installRecord.sourceCommit) ?? undefined;
+  const sourceHash = normalizeValue(installRecord.sourceHash) ?? undefined;
   const installedFiles = Array.isArray(installRecord.installedFiles) ? installRecord.installedFiles : null;
   const priorState = isRecord(installRecord.priorState) ? installRecord.priorState : null;
-  const agent = normalizeValue(installRecord.agent);
+  const agent = normalizeValue(installRecord.agent) ?? undefined;
   const canonicalSkill = normalizeValue(installRecord.skill) ?? skillName;
 
   const requiredField = ["agent", "mode", "sourcePath", "targetPath"].find((field) => {
@@ -796,7 +964,24 @@ function normalizeReceiptInstallRecord(installRecord, { skillName }) {
     };
   }
 
-  const invalidScalarField = INSTALL_RECORD_SCALAR_FIELDS.find((field) => {
+  if (sourcePath === undefined || mode === undefined || targetPath === undefined || agent === undefined) {
+    return {
+      record: null,
+      errors: [
+        {
+          code: "invalid_receipt",
+          message: `Suitcase receipt has an invalid install record for ${skillName}.`
+        }
+      ]
+    };
+  }
+
+  const normalizedSourcePath = sourcePath;
+  const normalizedMode = mode;
+  const normalizedTargetPath = targetPath;
+  const normalizedAgent = agent;
+
+  const invalidScalarField = Array.from(INSTALL_RECORD_SCALAR_FIELDS).find((field) => {
     const value = installRecord[field];
     if (value === undefined || value === null) {
       return false;
@@ -889,27 +1074,46 @@ function normalizeReceiptInstallRecord(installRecord, { skillName }) {
     };
   }
 
-  const sourceRecord = source
-    ? isRecord(installRecord.source)
-      ? installRecord.source
-      : { path: source }
-    : { path: sourcePath };
+  const sourceRecord = isRecord(installRecord.source)
+    ? ({
+      ...(installRecord.source as Record<string, unknown>),
+      path: source ?? normalizedSourcePath
+    } as ({ path: string } & Record<string, unknown>))
+    : {
+      path: source ?? normalizedSourcePath
+    };
 
-  const canonical = {
+  const canonical: InstallRecord = {
     ...installRecord,
     skill: canonicalSkill,
-    mode,
-    sourcePath,
-    target,
-    targetPath,
-    version,
-    sourceCommit,
-    sourceHash,
+    mode: normalizedMode,
+    sourcePath: normalizedSourcePath,
+    targetPath: normalizedTargetPath,
     installedFiles: normalizedInstalledFiles.files,
     priorState,
     source: sourceRecord,
-    agent
+    agent: normalizedAgent
   };
+  if (target !== undefined) {
+    canonical.target = target;
+  } else {
+    delete canonical.target;
+  }
+  if (version !== undefined) {
+    canonical.version = version;
+  } else {
+    delete canonical.version;
+  }
+  if (sourceCommit !== undefined) {
+    canonical.sourceCommit = sourceCommit;
+  } else {
+    delete canonical.sourceCommit;
+  }
+  if (sourceHash !== undefined) {
+    canonical.sourceHash = sourceHash;
+  } else {
+    delete canonical.sourceHash;
+  }
 
   return {
     record: canonical,
@@ -917,9 +1121,12 @@ function normalizeReceiptInstallRecord(installRecord, { skillName }) {
   };
 }
 
-function validateInstalledFiles(installedFiles = [], { skillName }) {
+function validateInstalledFiles(
+  installedFiles: unknown,
+  { skillName }: { skillName: string }
+): { files: InstalledFileRecord[] | null; errors: StatusFinding[] } {
   if (installedFiles === null || installedFiles === undefined) {
-    return { files: installedFiles, errors: [] };
+    return { files: null, errors: [] };
   }
   if (!Array.isArray(installedFiles)) {
     return {
@@ -970,12 +1177,22 @@ function validateInstalledFiles(installedFiles = [], { skillName }) {
   }
 
   return {
-    files: installedFiles,
+    files: installedFiles as InstalledFileRecord[],
     errors: []
   };
 }
 
-function selectInstallRecord({ installRecords, installRoot, skillName, receiptPath }) {
+function selectInstallRecord({
+  installRecords,
+  installRoot,
+  skillName,
+  receiptPath
+}: {
+  installRecords: unknown;
+  installRoot: string;
+  skillName: string;
+  receiptPath: string;
+}): { installRecord: InstallRecord | null; errors: StatusFinding[] } {
   if (installRecords === undefined) {
     return { installRecord: null, errors: [] };
   }
@@ -992,26 +1209,28 @@ function selectInstallRecord({ installRecords, installRoot, skillName, receiptPa
     };
   }
 
-  const normalizedRoot = normalizeValue(installRoot);
-  const normalizedRootPath = normalizedRoot ? path.resolve(normalizedRoot) : null;
+  const normalizedRootPath = path.resolve(installRoot);
   const normalizedSkillTarget =
-    installRoot && skillName ? normalizeValue(path.join(normalizedRootPath, skillName)) : null;
-  const matching = installRecords.filter(
-    (record) => {
-      const candidate = normalizeValue(record?.targetPath);
-      if (!candidate) {
-        return false;
-      }
-      const resolvedCandidate = path.isAbsolute(candidate)
-        ? path.resolve(candidate)
-        : path.resolve(normalizedRootPath ?? "", candidate);
-      const normalizedCandidate = normalizeValue(resolvedCandidate);
-      return (
-        normalizedCandidate === normalizedRootPath ||
-        (normalizedSkillTarget !== null && normalizedCandidate === normalizedSkillTarget)
-      );
+    normalizeValue(path.join(normalizedRootPath, skillName));
+  const matching: InstallRecord[] = [];
+
+  for (const entry of installRecords) {
+    if (!isRecord(entry)) {
+      continue;
     }
-  );
+    const candidate = normalizeValue(entry.targetPath);
+    if (!candidate) {
+      continue;
+    }
+    const resolvedCandidate = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(normalizedRootPath, candidate);
+    const normalizedCandidate = normalizeValue(resolvedCandidate);
+    if (
+      normalizedCandidate === normalizedRootPath ||
+      (normalizedSkillTarget !== null && normalizedCandidate === normalizedSkillTarget)
+    ) {
+      matching.push(entry as InstallRecord);
+    }
+  }
 
   if (matching.length > 1) {
     return {
@@ -1026,7 +1245,8 @@ function selectInstallRecord({ installRecords, installRoot, skillName, receiptPa
   }
 
   if (matching.length === 1) {
-    return { installRecord: matching[0], errors: [] };
+    const [matchingRecord] = matching;
+    return { installRecord: matchingRecord ?? null, errors: [] };
   }
 
   return {
@@ -1039,7 +1259,10 @@ function selectInstallRecord({ installRecords, installRoot, skillName, receiptPa
     ]
   };
 }
-function resolveAssignmentInstallRoot(assignmentPath, kind) {
+function resolveAssignmentInstallRoot(assignmentPath: Record<string, unknown>, kind: string | null): string | null {
+  if (!isSupportedKind(kind)) {
+    return null;
+  }
   const fields = PATH_FIELDS_BY_KIND[kind];
   if (!fields) {
     return null;
@@ -1054,7 +1277,7 @@ function resolveAssignmentInstallRoot(assignmentPath, kind) {
   return null;
 }
 
-async function targetDiffersFromSource(source, target) {
+async function targetDiffersFromSource(source: string, target: string): Promise<boolean> {
   try {
     const targetStats = await lstat(target);
     if (targetStats.isSymbolicLink()) {
@@ -1090,11 +1313,11 @@ async function targetDiffersFromSource(source, target) {
   return false;
 }
 
-async function hashInstalledTarget(targetPath) {
+async function hashInstalledTarget(targetPath: string): Promise<string> {
   return hashDirectory(targetPath);
 }
 
-async function getSymlinkTarget(target) {
+async function getSymlinkTarget(target: string): Promise<string | null> {
   const linkPath = await readlinkSafe(target);
   if (!linkPath) {
     return null;
@@ -1102,7 +1325,7 @@ async function getSymlinkTarget(target) {
   return path.resolve(path.dirname(target), linkPath);
 }
 
-async function readlinkSafe(target) {
+async function readlinkSafe(target: string): Promise<string | null> {
   try {
     return await readlink(target);
   } catch {
@@ -1110,23 +1333,27 @@ async function readlinkSafe(target) {
   }
 }
 
-function buffersEqual(left, right) {
+function buffersEqual(left: Buffer, right: Buffer): boolean {
   return left.compare(right) === 0;
 }
 
-async function skillVersion(skillPath) {
+async function skillVersion(skillPath: string): Promise<string | null> {
   const sourceSkill = await readFile(path.join(skillPath, "SKILL.md"), "utf8");
   return parseFrontmatterVersion(sourceSkill);
 }
 
-function parseFrontmatterVersion(text) {
+function parseFrontmatterVersion(text: string): string | null {
   const lines = text.split(/\r?\n/);
   if (lines[0] !== "---") {
     return null;
   }
 
   for (let index = 1; index < lines.length; index += 1) {
-    const trimmed = lines[index].trim();
+    const line = lines[index];
+    if (line === undefined) {
+      continue;
+    }
+    const trimmed = line.trim();
     if (trimmed === "---") {
       break;
     }
@@ -1138,7 +1365,7 @@ function parseFrontmatterVersion(text) {
   return null;
 }
 
-async function hashDirectory(root) {
+async function hashDirectory(root: string): Promise<string> {
   const files = await listFiles(root);
   const digest = createHash("sha256");
 
@@ -1153,7 +1380,7 @@ async function hashDirectory(root) {
   return digest.digest("hex");
 }
 
-async function listFiles(root) {
+async function listFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files = [];
 
@@ -1175,7 +1402,7 @@ async function listFiles(root) {
   return files.sort();
 }
 
-async function isDirectory(candidate) {
+async function isDirectory(candidate: string): Promise<boolean> {
   try {
     return (await stat(candidate)).isDirectory();
   } catch {
@@ -1183,7 +1410,13 @@ async function isDirectory(candidate) {
   }
 }
 
-async function targetExists(candidate) {
+type TargetExistsResult = {
+  exists: boolean;
+  isDirectory: boolean;
+  isSymbolicLink: boolean;
+  error?: unknown;
+};
+async function targetExists(candidate: string): Promise<TargetExistsResult> {
   try {
     const info = await lstat(candidate);
     if (info.isSymbolicLink()) {
@@ -1194,14 +1427,15 @@ async function targetExists(candidate) {
     }
     return { exists: true, isDirectory: false, isSymbolicLink: false };
   } catch (error) {
-    if (error.code === "ENOENT") {
+    const maybeFsError = error as { code?: string };
+    if (maybeFsError.code === "ENOENT") {
       return { exists: false, isDirectory: false, isSymbolicLink: false };
     }
     return { exists: false, isDirectory: false, isSymbolicLink: false, error };
   }
 }
 
-async function readRepoCommit(sourceRoot) {
+async function readRepoCommit(sourceRoot: string): Promise<string | null> {
   try {
     const result = spawnSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",
@@ -1218,7 +1452,7 @@ async function readRepoCommit(sourceRoot) {
   }
 }
 
-function arraysEqual(left, right) {
+function arraysEqual(left: string[], right: string[]): boolean {
   if (left.length !== right.length) {
     return false;
   }
@@ -1230,7 +1464,7 @@ function arraysEqual(left, right) {
   return true;
 }
 
-function normalizeValue(value) {
+function normalizeValue(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -1239,6 +1473,20 @@ function normalizeValue(value) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSupportedKind(value: string | null): value is AssignmentKind {
+  return value !== null && Object.hasOwn(PATH_FIELDS_BY_KIND, value);
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return "An unexpected error occurred";
 }

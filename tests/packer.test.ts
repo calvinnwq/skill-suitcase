@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { pack } from "../src/packer.js";
 
-const fixtureSource = path.join(import.meta.dirname, "fixtures", "skills-catalog");
+const fixtureSource = path.join(process.cwd(), "tests", "fixtures", "skills-catalog");
 
 test("dry-run pack reports OpenClaw skill files without an output path", async () => {
   const result = await pack({ source: fixtureSource, target: "openclaw", dryRun: true });
@@ -55,13 +55,36 @@ test("pack writes an explicit staging bundle under managed artifact storage", as
   assert.equal(result.ok, true);
   assert.equal(result.dryRun, false);
   assert.equal(result.bundle.outputPath, output);
+
+  if (result.bundle.artifactId === null) {
+    throw new Error("pack with output should set an artifactId");
+  }
+  if (result.bundle.artifactPath === null) {
+    throw new Error("pack with output should set an artifactPath");
+  }
+  if (result.bundle.manifestPath === null) {
+    throw new Error("pack with output should set a manifestPath");
+  }
+
+  const { artifactId, artifactPath, manifestPath } = result.bundle;
+
   assert.equal(
     result.bundle.artifactPath,
-    path.join(output, ".skill-suitcase", "artifacts", result.bundle.artifactId)
+    path.join(output, ".skill-suitcase", "artifacts", artifactId)
   );
-  assert.equal(result.bundle.manifestPath, path.join(result.bundle.artifactPath, "skill-suitcase-bundle.json"));
+  assert.equal(result.bundle.manifestPath, path.join(artifactPath, "skill-suitcase-bundle.json"));
 
-  const manifest = JSON.parse(await readFile(result.bundle.manifestPath, "utf8"));
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+    schema: string;
+    artifactId: string;
+    source: {
+      repo: string;
+      commit: string;
+      ref: string;
+      manifestPath: string;
+    };
+    files: Array<{ sha256: string }>;
+  };
   assert.equal(manifest.schema, "calvinnwq.skills.pack-bundle.v0");
   assert.equal(manifest.artifactId, result.bundle.artifactId);
   assert.equal(manifest.source.repo, fixtureSource);
@@ -91,6 +114,18 @@ test("pack allows existing output directories and refuses artifact-id overwrite"
   );
 });
 
+test("pack rejects an output path that is an existing file", async (t) => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-output-file-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const output = path.join(parent, "bundle");
+  await writeFile(output, "not a directory");
+
+  await assert.rejects(
+    () => pack({ source: fixtureSource, target: "codex", output }),
+    /pack output path must be a directory/
+  );
+});
+
 test("pack preserves prior artifacts when target differs", async (t) => {
   const output = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-artifact-retention-"));
   t.after(() => rm(output, { recursive: true, force: true }));
@@ -101,9 +136,22 @@ test("pack preserves prior artifacts when target differs", async (t) => {
 
   const artifactDirs = await readdir(artifactRoot);
   assert.equal(artifactDirs.length, 2);
+
+  if (codexArtifact.bundle.artifactId === null) {
+    throw new Error("codex pack with output should set an artifactId");
+  }
+  if (openclawArtifact.bundle.artifactId === null) {
+    throw new Error("openclaw pack with output should set an artifactId");
+  }
+
   assert.ok(artifactDirs.includes(codexArtifact.bundle.artifactId));
   assert.ok(artifactDirs.includes(openclawArtifact.bundle.artifactId));
-  const openclawManifest = JSON.parse(await readFile(path.join(openclawArtifact.bundle.manifestPath), "utf8"));
+
+  assert.ok(openclawArtifact.bundle.manifestPath);
+  const openclawManifestPath = openclawArtifact.bundle.manifestPath;
+  const openclawManifest = JSON.parse(await readFile(openclawManifestPath, "utf8")) as {
+    artifactId: string;
+  };
   assert.equal(openclawManifest.artifactId, openclawArtifact.bundle.artifactId);
 });
 
@@ -155,6 +203,7 @@ compatibility:
   const result = await pack({ source, target: "codex", dryRun: true });
 
   assert.equal(result.ok, false);
+  assert.ok(result.blocked[0], "blocked list should include first item");
   assert.equal(result.blocked[0].skill, "gnhf-postflight");
   assert.equal(result.summary.files, 0);
   assert.deepEqual(result.files, []);

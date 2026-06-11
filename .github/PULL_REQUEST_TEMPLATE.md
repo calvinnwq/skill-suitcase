@@ -4,8 +4,8 @@
 
 ## Verification
 
-- [ ] `npm test`
-- [ ] `npm run lint`
+- [ ] `pnpm test`
+- [ ] `pnpm run lint`
 - [ ] `git diff --check`
 
 ## Risk / Rollback

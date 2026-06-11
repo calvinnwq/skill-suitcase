@@ -11,13 +11,14 @@ touch runtime homes.
 ## Usage
 
 ```bash
-node src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --json
-node src/cli.js diff --source /Users/ngxcalvin/repos/skills --target openclaw --json
-node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
-node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
-node src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
-node src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
-node src/cli.js status --source /Users/ngxcalvin/repos/skills --json
+pnpm run build
+node dist/src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --json
+node dist/src/cli.js diff --source /Users/ngxcalvin/repos/skills --target openclaw --json
+node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
+node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
+node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
+node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
+node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
 ```
 
 Targets currently exercised against fixture #1:
@@ -345,7 +346,8 @@ are reported as `invalid_receipt`.
 
 ## Receipt Module
 
-`src/receipt.js` provides helpers for building and persisting Suitcase receipts.
+`src/receipt.ts` (and its compiled output at `dist/src/receipt.js`) provides
+helpers for building and persisting Suitcase receipts.
 
 ```js
 import {
@@ -357,7 +359,7 @@ import {
   writeReceipt,
   RECEIPT_FILE,
   RECEIPT_SCHEMA
-} from "./src/receipt.js";
+} from "./dist/src/receipt.js";
 
 // Hash all files under a skill root
 const installedFiles = await buildInstalledFiles(skillRoot);
@@ -398,11 +400,11 @@ an object; multiple installs for the same skill are stored as an array.
 
 ## Plan Lock (internal API)
 
-`src/plan-lock.js` implements the plan identity contract used to detect when a
+`src/plan-lock.ts` (and its compiled output at `dist/src/plan-lock.js`) implements the plan identity contract used to detect when a
 previously computed install plan is still valid or has become stale.
 
 ```js
-import { buildPlanLock, assessPlanLock } from "./src/plan-lock.js";
+import { buildPlanLock, assessPlanLock } from "./dist/src/plan-lock.js";
 
 const lock = await buildPlanLock({ source, target, assignmentPath, sourceCommit });
 // lock: { schema, source: { repo, ref, commit }, target, assignmentPath,
@@ -433,16 +435,17 @@ This module does not write files or require the apply/install layer to exist.
 ## Development
 
 ```bash
-npm test
-npm run lint
-npm run typecheck
-npm run build
-npm run format:check
+pnpm test
+pnpm run lint
+pnpm run typecheck
+pnpm run build
+pnpm run format:check
 ```
 
-CI runs `npm test` on GitHub Actions with Node 24. The other npm scripts are
-syntax-check aliases over `src` and `test`.
+CI runs `pnpm test` on GitHub Actions with Node 24. The script pipeline now builds
+TypeScript output to `dist`, then runs Node's built-in test runner against
+`dist/tests/*.test.js`.
 
-The first milestone has no package dependencies. The manifest reader is strict
-and intentionally scoped to the current `skill-suitcase.yaml` shape from
-`/Users/ngxcalvin/repos/skills`.
+The first milestone has no runtime package dependencies (only the TypeScript dev
+toolchain). The manifest reader is strict and intentionally scoped to the current
+`skill-suitcase.yaml` shape from `/Users/ngxcalvin/repos/skills`.

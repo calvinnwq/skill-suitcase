@@ -3,15 +3,17 @@
 ## Development
 
 ```bash
-npm test
-npm run lint
-npm run typecheck
-npm run build
-npm run format:check
+pnpm test
+pnpm run lint
+pnpm run typecheck
+pnpm run build
+pnpm run format:check
 ```
 
-`lint`, `typecheck`, `build`, and `format:check` currently run the same
-JavaScript syntax check over `src` and `test`.
+`build` compiles the TypeScript sources to `dist` with `tsc`. `typecheck` runs
+`tsc --noEmit`, and `lint` is an alias for `typecheck`. `test` builds first, then
+runs Node's built-in test runner against `dist/tests/*.test.js`. `format:check`
+runs `git diff --check`.
 
 ## Releases
 

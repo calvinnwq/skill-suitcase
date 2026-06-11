@@ -7,19 +7,93 @@ export const RECEIPT_FILE = ".skill-suitcase-receipt.json";
 export const LEGACY_RECEIPT_SCHEMA = "calvinnwq.skills.sync-lock.v0";
 export const LEGACY_RECEIPT_FILE = ".skills-sync.json";
 
-export async function buildInstalledFiles(skillRoot) {
+type UnknownRecord = Record<string, unknown>;
+
+type ReceiptSourceInfo = {
+  repo: string;
+  ref?: string | null;
+  commit?: string | null;
+  [key: string]: unknown;
+};
+
+export type ReceiptInstalledFile = {
+  path: string;
+  hash: string;
+};
+
+export type ReceiptInstallRecord = {
+  [key: string]: unknown;
+  skill?: string;
+  agent?: string;
+  mode?: string;
+  source?: string | { path: string } | null;
+  sourcePath?: string;
+  targetPath?: string;
+  target?: string;
+  version?: string;
+  sourceCommit?: string;
+  sourceHash?: string;
+  installedFiles?: unknown;
+  priorState?: UnknownRecord;
+};
+
+export interface Receipt {
+  schema?: string;
+  source?: ReceiptSourceInfo;
+  installs?: Record<string, ReceiptInstallRecord | ReceiptInstallRecord[]>;
+  [key: string]: unknown;
+}
+
+type UpsertAndWriteReceiptInput = {
+  installRoot?: string;
+  receipt?: Receipt;
+  skillName: string;
+  installRecord: ReceiptInstallRecord;
+  receiptPath?: string;
+};
+
+type WriteReceiptInput = {
+  installRoot: string;
+  receipt: Receipt;
+  receiptPath?: string;
+};
+
+type UpsertInstallRecordInput = {
+  skillName: string;
+  installRecord: ReceiptInstallRecord;
+  installRoot?: string;
+};
+
+type ReceiptFileReadInput = {
+  legacy: boolean;
+};
+
+type ReadReceiptFileOutput = {
+  found: boolean;
+  receipt: Receipt;
+};
+
+export async function buildInstalledFiles(skillRoot: string): Promise<ReceiptInstalledFile[]> {
   const root = path.resolve(skillRoot);
   const files = await collectInstalledFiles(root, root);
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-export async function writeReceipt({ installRoot, receipt, receiptPath = RECEIPT_FILE }) {
+export async function writeReceipt({
+  installRoot,
+  receipt,
+  receiptPath = RECEIPT_FILE
+}: WriteReceiptInput): Promise<string> {
   if (!isRecord(receipt)) {
     throw new Error("Receipt payload must be an object.");
   }
 
   const normalizedRoot = normalizeInstallRoot(installRoot);
-  const outputPath = resolveReceiptPath({ installRoot: normalizedRoot, receiptPath });
+  const normalizedReceiptPath = receiptPath ?? RECEIPT_FILE;
+  const outputPath = resolveReceiptPath({
+    installRoot: normalizedRoot,
+    receiptPath: normalizedReceiptPath
+  });
   await mkdir(normalizedRoot, { recursive: true });
 
   const payload = normalizeReceiptPayload(receipt);
@@ -34,9 +108,13 @@ export async function upsertAndWriteReceipt({
   skillName,
   installRecord,
   receiptPath = RECEIPT_FILE
-}) {
+}: UpsertAndWriteReceiptInput): Promise<string> {
   const normalizedRoot = normalizeInstallRoot(installRoot);
-  const outputPath = resolveReceiptPath({ installRoot: normalizedRoot, receiptPath });
+  const normalizedReceiptPath = receiptPath ?? RECEIPT_FILE;
+  const outputPath = resolveReceiptPath({
+    installRoot: normalizedRoot,
+    receiptPath: normalizedReceiptPath
+  });
 
   if (typeof skillName !== "string" || skillName.trim().length === 0) {
     throw new Error("skillName is required.");
@@ -48,9 +126,9 @@ export async function upsertAndWriteReceipt({
 
   const currentReceipt = receipt === undefined
     ? await readReceiptForUpsert({
-        receiptPath: outputPath,
-        legacyReceiptPath: path.join(normalizedRoot, LEGACY_RECEIPT_FILE)
-      })
+      receiptPath: outputPath,
+      legacyReceiptPath: path.join(normalizedRoot, LEGACY_RECEIPT_FILE)
+    })
     : receipt;
   if (!isRecord(currentReceipt)) {
     throw new Error("Receipt payload must be an object.");
@@ -64,18 +142,29 @@ export async function upsertAndWriteReceipt({
     ? { ...installRecord, targetPath: normalizedTargetPath }
     : installRecord;
 
-  const nextReceipt = upsertInstallRecord({
-    ...currentReceipt,
-    installs: cloneReceiptInstalls(currentReceipt)
-  }, {
-    skillName,
-    installRecord: nextInstallRecord,
-    installRoot: normalizedRoot
+  const nextReceipt = upsertInstallRecord(
+    {
+      ...currentReceipt,
+      installs: cloneReceiptInstalls(currentReceipt)
+    },
+    {
+      skillName,
+      installRecord: nextInstallRecord,
+      installRoot: normalizedRoot
+    }
+  );
+
+  return writeReceipt({
+    installRoot: normalizedRoot,
+    receipt: nextReceipt,
+    receiptPath: normalizedReceiptPath
   });
-  return writeReceipt({ installRoot: normalizedRoot, receipt: nextReceipt, receiptPath });
 }
 
-async function readReceiptForUpsert({ receiptPath, legacyReceiptPath }) {
+async function readReceiptForUpsert({ receiptPath, legacyReceiptPath }: {
+  receiptPath: string;
+  legacyReceiptPath: string;
+}): Promise<Receipt> {
   const modernReceipt = await readReceiptFileForUpsert(receiptPath, { legacy: false });
   if (modernReceipt.found) {
     return modernReceipt.receipt;
@@ -89,23 +178,35 @@ async function readReceiptForUpsert({ receiptPath, legacyReceiptPath }) {
   return {};
 }
 
-async function readReceiptFileForUpsert(receiptPath, { legacy }) {
+async function readReceiptFileForUpsert(
+  receiptPath: string,
+  { legacy }: ReceiptFileReadInput
+): Promise<ReadReceiptFileOutput> {
   try {
     const text = await readFile(receiptPath, "utf8");
-    const receipt = JSON.parse(text);
-    if (!isRecord(receipt)) {
+    const parsed = JSON.parse(text);
+    if (!isRecord(parsed)) {
       throw new Error("Receipt payload must be an object.");
     }
+
+    const receipt = parsed as Receipt;
     const expectedSchema = legacy ? LEGACY_RECEIPT_SCHEMA : RECEIPT_SCHEMA;
     if (receipt.schema !== expectedSchema) {
       throw new Error(`Receipt ${receiptPath} has an unsupported schema.`);
     }
+
     return {
       found: true,
-      receipt: legacy ? { ...receipt, schema: RECEIPT_SCHEMA } : receipt
+      receipt: legacy
+        ? {
+          ...receipt,
+          schema: RECEIPT_SCHEMA
+        }
+        : receipt
     };
   } catch (error) {
-    if (error.code === "ENOENT") {
+    const maybeFsError = error as { code?: string };
+    if (maybeFsError.code === "ENOENT") {
       return { found: false, receipt: {} };
     }
     if (error instanceof SyntaxError) {
@@ -115,14 +216,17 @@ async function readReceiptFileForUpsert(receiptPath, { legacy }) {
   }
 }
 
-function normalizeInstallRoot(installRoot) {
+function normalizeInstallRoot(installRoot?: string): string {
   if (typeof installRoot !== "string" || installRoot.trim().length === 0) {
     throw new Error("installRoot is required.");
   }
   return path.resolve(installRoot);
 }
 
-function resolveReceiptPath({ installRoot, receiptPath }) {
+function resolveReceiptPath({ installRoot, receiptPath }: {
+  installRoot: string;
+  receiptPath: string;
+}): string {
   if (typeof receiptPath !== "string" || receiptPath.trim().length === 0) {
     throw new Error("receiptPath must be a non-empty string.");
   }
@@ -135,7 +239,7 @@ function resolveReceiptPath({ installRoot, receiptPath }) {
   return outputPath;
 }
 
-function cloneReceiptInstalls(receipt) {
+function cloneReceiptInstalls(receipt: Receipt): Record<string, ReceiptInstallRecord | ReceiptInstallRecord[]> {
   if (receipt.installs === undefined) {
     return {};
   }
@@ -145,9 +249,9 @@ function cloneReceiptInstalls(receipt) {
   return { ...receipt.installs };
 }
 
-async function collectInstalledFiles(root, baseRoot) {
+async function collectInstalledFiles(root: string, baseRoot: string): Promise<ReceiptInstalledFile[]> {
   const entries = await readdir(root, { withFileTypes: true });
-  const files = [];
+  const files: ReceiptInstalledFile[] = [];
 
   for (const entry of entries) {
     if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
@@ -159,22 +263,29 @@ async function collectInstalledFiles(root, baseRoot) {
       files.push(...(await collectInstalledFiles(entryPath, baseRoot)));
       continue;
     }
-
-    if (!entry.isFile()) {
-      continue;
+    if (entry.isFile()) {
+      const content = await readFile(entryPath);
+      files.push({
+        path: path.relative(baseRoot, entryPath),
+        hash: createHash("sha256").update(content).digest("hex")
+      });
     }
-
-    const content = await readFile(entryPath);
-    files.push({
-      path: path.relative(baseRoot, entryPath),
-      hash: createHash("sha256").update(content).digest("hex")
-    });
   }
 
   return files;
 }
 
-export function buildReceipt({ sourceRoot, sourceCommit = null, sourceRef = null, installs = {} }) {
+export function buildReceipt({
+  sourceRoot,
+  sourceCommit = null,
+  sourceRef = null,
+  installs = {}
+}: {
+  sourceRoot: string;
+  sourceCommit?: string | null;
+  sourceRef?: string | null;
+  installs?: Record<string, ReceiptInstallRecord | ReceiptInstallRecord[]>;
+}): Receipt {
   return {
     schema: RECEIPT_SCHEMA,
     source: {
@@ -186,69 +297,81 @@ export function buildReceipt({ sourceRoot, sourceCommit = null, sourceRef = null
   };
 }
 
-export function buildInstallRecord({
-  skill,
-  agent,
-  mode,
-  target,
-  source,
-  sourcePath,
-  targetPath,
-  version,
-  sourceCommit,
-  sourceHash,
-  installedFiles,
-  priorState
-}) {
-  const record = {
+export function buildInstallRecord(
+  installRecord: UnknownRecord
+): ReceiptInstallRecord {
+  const {
+    skill,
     agent,
     mode,
     target,
+    source,
+    sourcePath,
     targetPath,
-    version
-  };
+    version,
+    sourceCommit,
+    sourceHash,
+    installedFiles,
+    priorState
+  } = installRecord;
 
-  if (source !== undefined) {
-    record.source = source;
+  const record: ReceiptInstallRecord = {};
+
+  if (agent !== undefined) {
+    record.agent = agent as string;
   }
-
-  if (sourcePath !== undefined) {
-    record.sourcePath = sourcePath;
+  if (mode !== undefined) {
+    record.mode = mode as string;
   }
-
-  if (skill !== undefined) {
-    record.skill = skill;
+  if (target !== undefined) {
+    record.target = target as string;
   }
-
+  if (targetPath !== undefined) {
+    record.targetPath = targetPath as string;
+  }
+  if (version !== undefined) {
+    record.version = version as string;
+  }
   if (sourceCommit !== undefined) {
-    record.sourceCommit = sourceCommit;
+    record.sourceCommit = sourceCommit as string;
   }
-
   if (sourceHash !== undefined) {
-    record.sourceHash = sourceHash;
+    record.sourceHash = sourceHash as string;
   }
-
-  if (Array.isArray(installedFiles)) {
+  if (source !== undefined) {
+    record.source = source as Exclude<ReceiptInstallRecord["source"], undefined>;
+  }
+  if (sourcePath !== undefined) {
+    record.sourcePath = sourcePath as string;
+  }
+  if (skill !== undefined) {
+    record.skill = skill as string;
+  }
+  if (installedFiles !== undefined) {
     record.installedFiles = installedFiles;
   }
-
   if (priorState !== undefined && priorState !== null && typeof priorState === "object") {
-    record.priorState = priorState;
+    record.priorState = priorState as UnknownRecord;
   }
 
   return record;
 }
 
-export function upsertInstallRecord(receipt, { skillName, installRecord, installRoot }) {
+export function upsertInstallRecord(
+  receipt: Receipt,
+  { skillName, installRecord, installRoot }: UpsertInstallRecordInput
+): Receipt {
   if (typeof skillName !== "string" || skillName.trim().length === 0) {
     throw new Error("skillName is required.");
   }
 
   assertReceiptInstallRecord(installRecord);
 
-  const existing = receipt?.installs?.[skillName];
-  const installs = { ...(receipt?.installs ?? {}) };
-  const targetPath = installRecord?.targetPath;
+  const existing = receipt.installs?.[skillName];
+  const installs: Receipt["installs"] = {
+    ...(receipt.installs ?? {})
+  };
+  const targetPath = installRecord.targetPath;
   const normalizedTargetPath = normalizeTargetPathForInstallRoot({
     installRoot,
     targetPath
@@ -272,10 +395,14 @@ export function upsertInstallRecord(receipt, { skillName, installRecord, install
   }
 
   const nextRecords = [...existingArray];
-  const matchIndex = nextRecords.findIndex((entry) => normalizeTargetPathForInstallRoot({
-    installRoot,
-    targetPath: entry?.targetPath
-  }) === normalizedTargetPath);
+  const matchIndex = nextRecords.findIndex(
+    (entry) =>
+      normalizeTargetPathForInstallRoot({
+        installRoot,
+        targetPath: (entry as ReceiptInstallRecord).targetPath
+      }) === normalizedTargetPath
+  );
+
   if (matchIndex === -1) {
     nextRecords.push(installRecord);
   } else {
@@ -283,14 +410,19 @@ export function upsertInstallRecord(receipt, { skillName, installRecord, install
   }
 
   if (nextRecords.length === 1) {
-    installs[skillName] = nextRecords[0];
-    return {
-      ...receipt,
-      installs
-    };
+    const only = nextRecords[0];
+    if (only !== undefined) {
+      installs[skillName] = only;
+      return {
+        ...receipt,
+        installs
+      };
+    }
   }
 
-  installs[skillName] = nextRecords;
+  if (nextRecords.length > 1) {
+    installs[skillName] = nextRecords;
+  }
 
   return {
     ...receipt,
@@ -298,7 +430,7 @@ export function upsertInstallRecord(receipt, { skillName, installRecord, install
   };
 }
 
-function normalizeTargetPath(targetPath) {
+function normalizeTargetPath(targetPath: string | null | undefined): string | null {
   const value = normalizeValue(targetPath);
   if (value === null) {
     return null;
@@ -306,22 +438,29 @@ function normalizeTargetPath(targetPath) {
   return path.resolve(value);
 }
 
-function normalizeTargetPathForInstallRoot({ installRoot, targetPath }) {
+function normalizeTargetPathForInstallRoot({
+  installRoot,
+  targetPath
+}: {
+  installRoot?: string | undefined;
+  targetPath?: unknown;
+}): string | null {
   const value = normalizeValue(targetPath);
   if (value === null) {
     return null;
   }
-  const root = normalizeValue(installRoot);
-  if (root === null) {
+
+  const normalizedInstallRoot = normalizeValue(installRoot);
+  if (normalizedInstallRoot === null) {
     return normalizeTargetPath(value);
   }
   if (path.isAbsolute(value)) {
     return path.resolve(value);
   }
-  return path.resolve(path.resolve(root), value);
+  return path.resolve(path.resolve(normalizedInstallRoot), value);
 }
 
-function assertReceiptInstallRecord(installRecord) {
+function assertReceiptInstallRecord(installRecord: unknown): asserts installRecord is ReceiptInstallRecord {
   if (!isRecord(installRecord)) {
     throw new Error("installRecord must be an object.");
   }
@@ -349,6 +488,7 @@ function assertReceiptInstallRecord(installRecord) {
     const value = installRecord[field];
     return typeof value !== "string" || value.trim().length === 0;
   });
+
   if (requiredField) {
     throw new Error(`installRecord is missing required field: ${requiredField}.`);
   }
@@ -357,6 +497,7 @@ function assertReceiptInstallRecord(installRecord) {
     const value = installRecord[field];
     return typeof value === "string" && value.trim().length > 0;
   });
+
   if (!hasProvenance) {
     throw new Error("installRecord must include version, sourceCommit, or sourceHash.");
   }
@@ -383,7 +524,7 @@ function assertReceiptInstallRecord(installRecord) {
   }
 }
 
-function normalizeReceiptSourcePath(installRecord) {
+function normalizeReceiptSourcePath(installRecord: ReceiptInstallRecord): boolean {
   if (normalizeValue(installRecord.sourcePath)) {
     return true;
   }
@@ -399,7 +540,10 @@ function normalizeReceiptSourcePath(installRecord) {
   return false;
 }
 
-function validateInstalledFiles(installedFiles, { skillName }) {
+function validateInstalledFiles(
+  installedFiles: unknown,
+  { skillName }: { skillName: string }
+): { isValid: boolean } {
   if (installedFiles === null || installedFiles === undefined) {
     return { isValid: true };
   }
@@ -422,15 +566,7 @@ function validateInstalledFiles(installedFiles, { skillName }) {
   return { isValid: true };
 }
 
-function normalizeValue(value) {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizeReceiptPayload(receipt) {
+function normalizeReceiptPayload(receipt: Receipt): Receipt {
   if (
     receipt.schema !== undefined &&
     receipt.schema !== RECEIPT_SCHEMA &&
@@ -439,7 +575,7 @@ function normalizeReceiptPayload(receipt) {
     throw new Error("Receipt schema is unsupported.");
   }
 
-  const normalizedReceipt = {
+  const normalizedReceipt: Receipt = {
     ...receipt,
     schema: RECEIPT_SCHEMA
   };
@@ -449,10 +585,10 @@ function normalizeReceiptPayload(receipt) {
   }
 
   const rawInstalls = normalizedReceipt.installs ?? {};
-  const normalizedInstalls = {};
+  const normalizedInstalls: Record<string, ReceiptInstallRecord | ReceiptInstallRecord[]> = {};
 
   for (const [skillName, records] of Object.entries(rawInstalls)) {
-    const nextRecords = [];
+    const nextRecords: ReceiptInstallRecord[] = [];
     const value = Array.isArray(records) ? records : [records];
     if (!value.every((record) => isRecord(record))) {
       throw new Error(`install record for ${skillName} in installs mapping must be an object.`);
@@ -463,7 +599,13 @@ function normalizeReceiptPayload(receipt) {
       nextRecords.push(installRecord);
     }
 
-    normalizedInstalls[skillName] = nextRecords.length === 1 ? nextRecords[0] : nextRecords;
+    if (nextRecords.length === 0) {
+      continue;
+    }
+
+    normalizedInstalls[skillName] = nextRecords.length === 1
+      ? nextRecords[0]!
+      : nextRecords;
   }
 
   normalizedReceipt.installs = normalizedInstalls;
@@ -471,6 +613,15 @@ function normalizeReceiptPayload(receipt) {
   return normalizedReceipt;
 }
 
-function isRecord(value) {
+function normalizeValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

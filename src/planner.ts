@@ -1,8 +1,37 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
-import { loadCatalog } from "./catalog.js";
+import { type Catalog, loadCatalog } from "./catalog.js";
 
-export async function plan({ source, target }) {
+type PlannerInput = {
+  source: string;
+  target: string;
+};
+
+type PlanItem = {
+  skill: string;
+  action: "install" | "blocked";
+  target?: string;
+  reason?: string;
+  variant: string;
+  sourcePath: string;
+  evidence: string[];
+};
+
+type PlanError = {
+  code: string;
+  message: string;
+};
+
+export type PlanResult = {
+  ok: boolean;
+  source: string;
+  target: string;
+  planned: PlanItem[];
+  blocked: PlanItem[];
+  errors: PlanError[];
+};
+
+export async function plan({ source, target }: PlannerInput): Promise<PlanResult> {
   if (!source) {
     throw new Error("source is required");
   }
@@ -31,8 +60,8 @@ export async function plan({ source, target }) {
 
   const plannedSkills = resolveAssignmentSkills(manifest, assignment);
   const compatibilityTargets = targetCompatibilityNames(target);
-  const planned = [];
-  const blocked = [];
+  const planned: PlanItem[] = [];
+  const blocked: PlanItem[] = [];
 
   for (const skillName of plannedSkills) {
     const compatibility = manifest.compatibility[skillName] ?? {};
@@ -73,8 +102,8 @@ export async function plan({ source, target }) {
   };
 }
 
-function resolveAssignmentSkills(manifest, assignment) {
-  const skills = [];
+function resolveAssignmentSkills(manifest: Catalog, assignment: Catalog["assignments"][string]): string[] {
+  const skills: string[] = [];
   const seen = new Set();
 
   for (const suitcaseName of assignment.suitcases) {
@@ -94,7 +123,7 @@ function resolveAssignmentSkills(manifest, assignment) {
   return skills;
 }
 
-function targetCompatibilityNames(target) {
+function targetCompatibilityNames(target: string): string[] {
   const names = [target];
 
   if (target.includes("codex") && target !== "codex") {
@@ -107,7 +136,7 @@ function targetCompatibilityNames(target) {
   return names;
 }
 
-function firstMatchingValue(record, keys) {
+function firstMatchingValue(record: Catalog["compatibility"][string]["blockedAgents"], keys: string[]): string | null {
   if (!record) {
     return null;
   }
@@ -121,7 +150,11 @@ function firstMatchingValue(record, keys) {
   return null;
 }
 
-async function plannedSkill(sourceRoot, skillName, compatibility) {
+async function plannedSkill(
+  sourceRoot: string,
+  skillName: string,
+  compatibility: Catalog["compatibility"][string]
+): Promise<PlanItem> {
   const skillPath = path.join(sourceRoot, "skills", skillName);
   await assertDirectory(skillPath, `Missing skill directory for ${skillName}`);
 
@@ -134,7 +167,13 @@ async function plannedSkill(sourceRoot, skillName, compatibility) {
   };
 }
 
-function blockedSkill(sourceRoot, skillName, target, reason, compatibility) {
+function blockedSkill(
+  sourceRoot: string,
+  skillName: string,
+  target: string,
+  reason: string,
+  compatibility: Catalog["compatibility"][string]
+): PlanItem {
   return {
     skill: skillName,
     action: "blocked",
@@ -146,7 +185,7 @@ function blockedSkill(sourceRoot, skillName, target, reason, compatibility) {
   };
 }
 
-async function assertDirectory(targetPath, message) {
+async function assertDirectory(targetPath: string, message: string): Promise<void> {
   try {
     await access(targetPath);
     const info = await stat(targetPath);
