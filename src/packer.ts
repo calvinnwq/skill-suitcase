@@ -2,14 +2,100 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { loadCatalog } from "./catalog.js";
+import { loadCatalog, type LoadedCatalog } from "./catalog.js";
 import { plan } from "./planner.js";
+import { type PlanResult } from "./planner.js";
 
 const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_MANIFEST = "skill-suitcase-bundle.json";
 const BUNDLE_ROOT = ".skill-suitcase";
 
-export async function pack({ source, target, dryRun = false, output = null }) {
+type PlanLike = PlanResult["planned"][number];
+type ErrorLike = PlanResult["errors"][number];
+
+type PackInput = {
+  source: string;
+  target: string;
+  dryRun?: boolean;
+  output?: string | null;
+};
+
+type PackResult = {
+  ok: boolean;
+  dryRun: boolean;
+  source: string;
+  target: string;
+  bundle: PackBundle;
+  planned: PlanLike[];
+  blocked: PlanLike[];
+  files: PackedFile[];
+  summary: PackArtifactSummary;
+  errors: ErrorLike[];
+};
+
+type PackBundle = {
+  action: "pack";
+  outputPath: string | null;
+  artifactId: string | null;
+  artifactPath: string | null;
+  manifestPath: string | null;
+  schema: string;
+  reason: "dry-run" | "written";
+};
+
+type PackArtifactSummary = {
+  skills: number;
+  blocked: number;
+  files: number;
+  bytes: number;
+};
+
+type PackedFile = {
+  skill: string;
+  relativePath: string;
+  sourcePath: string;
+  bundlePath: string;
+  bytes: number;
+  sha256: string;
+};
+
+type PackArtifact = {
+  id: string;
+  source: {
+    repo: string;
+    manifestPath: string;
+    commit: string | null;
+    ref: string | null;
+  };
+  target: string;
+  action: "pack";
+  planned: PlanLike[];
+  blocked: PlanLike[];
+  files: PackedFile[];
+  summary: PackArtifactSummary;
+  createdAt: string;
+};
+
+type PackResultManifest = {
+  sourceRoot: string;
+  manifestPath: string;
+  target: string;
+  sourceCommit: string | null;
+  planned: PlanLike[];
+  blocked: PlanLike[];
+  files: PackedFile[];
+};
+
+type WriteBundleInput = {
+  outputPath: string;
+  sourceRoot: string;
+  manifest: LoadedCatalog["manifest"];
+  artifact: PackArtifact;
+  manifestPath: string | null;
+  files: PackedFile[];
+};
+
+export async function pack({ source, target, dryRun = false, output = null }: PackInput): Promise<PackResult> {
   if (dryRun && output) {
     throw new Error("pack accepts either --dry-run or --output, not both");
   }
@@ -19,8 +105,8 @@ export async function pack({ source, target, dryRun = false, output = null }) {
   }
 
   const { sourceRoot, manifestPath, manifest } = await loadCatalog(source);
-  const planResult = await plan({ source: sourceRoot, target });
-  const files = [];
+  const planResult: PlanResult = await plan({ source: sourceRoot, target });
+  const files: PackedFile[] = [];
 
   if (planResult.ok) {
     for (const plannedSkill of planResult.planned) {
@@ -39,7 +125,7 @@ export async function pack({ source, target, dryRun = false, output = null }) {
     files
   });
 
-  const result = {
+  const result: PackResult = {
     ok: planResult.ok,
     dryRun,
     source: sourceRoot,
@@ -70,7 +156,7 @@ export async function pack({ source, target, dryRun = false, output = null }) {
     };
   }
 
-  if (!dryRun && result.ok) {
+  if (!dryRun && output && result.ok) {
     await writeBundle({
       outputPath: path.resolve(output),
       sourceRoot,
@@ -92,15 +178,15 @@ function buildArtifactRecord({
   planned,
   blocked,
   files
-}) {
-  const summary = {
+}: PackResultManifest): PackArtifact {
+  const summary: PackArtifactSummary = {
     skills: planned.length,
     blocked: blocked.length,
     files: files.length,
     bytes: files.reduce((total, file) => total + file.bytes, 0)
   };
 
-  const artifact = {
+  const artifact: Omit<PackArtifact, "id"> = {
     source: {
       repo: sourceRoot,
       manifestPath,
@@ -116,11 +202,13 @@ function buildArtifactRecord({
     createdAt: new Date().toISOString()
   };
 
-  artifact.id = computeArtifactId(artifact);
-  return artifact;
+  return {
+    ...artifact,
+    id: computeArtifactId(artifact)
+  };
 }
 
-function computeArtifactId(artifact) {
+function computeArtifactId(artifact: Omit<PackArtifact, "id">): string {
   const stableArtifact = {
     source: artifact.source,
     target: artifact.target,
@@ -154,7 +242,7 @@ function computeArtifactId(artifact) {
   return createHash("sha256").update(JSON.stringify(stableObject(stableArtifact))).digest("hex");
 }
 
-async function writeBundle({ outputPath, sourceRoot, manifest, artifact, manifestPath, files }) {
+async function writeBundle({ outputPath, sourceRoot, manifest, artifact, manifestPath, files }: WriteBundleInput): Promise<void> {
   assertOutputIsNotInstallRoot(outputPath, manifest);
   await ensureOutputDirectory(outputPath);
 
@@ -170,11 +258,14 @@ async function writeBundle({ outputPath, sourceRoot, manifest, artifact, manifes
   }
 
   const storedManifest = buildStoredManifest(artifact, sourceRoot);
+  if (manifestPath === null) {
+    throw new Error("manifestPath must be available before writing bundle.");
+  }
   await mkdir(path.dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, `${JSON.stringify(storedManifest, null, 2)}\n`, "utf8");
 }
 
-function buildStoredManifest(artifact, sourceRoot) {
+function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {
   return {
     schema: BUNDLE_SCHEMA,
     artifactId: artifact.id,
@@ -210,7 +301,7 @@ function buildStoredManifest(artifact, sourceRoot) {
   };
 }
 
-function resolveSourceCommit(sourceRoot) {
+function resolveSourceCommit(sourceRoot: string): string | null {
   const result = spawnSync("git", ["rev-parse", "HEAD"], {
     encoding: "utf8",
     cwd: sourceRoot,
@@ -227,7 +318,7 @@ function resolveSourceCommit(sourceRoot) {
   return null;
 }
 
-function stableObject(value) {
+function stableObject(value: unknown): unknown {
   if (!isRecord(value)) {
     return value;
   }
@@ -236,50 +327,52 @@ function stableObject(value) {
     return value.map((item) => stableObject(item));
   }
 
-  const ordered = {};
+  const ordered: Record<string, unknown> = {};
   for (const key of Object.keys(value).sort()) {
     ordered[key] = stableObject(value[key]);
   }
   return ordered;
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-async function ensureOutputDirectory(outputPath) {
+async function ensureOutputDirectory(outputPath: string): Promise<void> {
   try {
     const candidate = await stat(outputPath);
     if (!candidate.isDirectory()) {
       throw new Error(`pack output path must be a directory: ${outputPath}`);
     }
-    return;
   } catch (error) {
-    if (error.code !== "ENOENT") {
+    if (isNodeError(error) && error.code !== "ENOENT") {
       throw error;
     }
+    await mkdir(outputPath, { recursive: false });
   }
-
-  await mkdir(outputPath, { recursive: false });
 }
 
-async function pathExists(candidatePath) {
+async function pathExists(candidatePath: string): Promise<boolean> {
   try {
     await stat(candidatePath);
     return true;
   } catch (error) {
-    if (error.code === "ENOENT") {
+    if (isNodeError(error) && error.code === "ENOENT") {
       return false;
     }
     throw error;
   }
 }
 
-function assertOutputIsNotInstallRoot(outputPath, manifest) {
-  const installRoots = [];
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
+function assertOutputIsNotInstallRoot(outputPath: string, manifest: LoadedCatalog["manifest"]): void {
+  const installRoots: string[] = [];
 
   for (const assignmentPath of Object.values(manifest.assignmentPaths)) {
-    for (const key of ["path", "skillsPath"]) {
+    for (const key of ["path", "skillsPath"] as const) {
       if (assignmentPath[key]) {
         installRoots.push(path.resolve(assignmentPath[key]));
       }
@@ -293,15 +386,15 @@ function assertOutputIsNotInstallRoot(outputPath, manifest) {
   }
 }
 
-function isInsideOrEqual(candidate, root) {
+function isInsideOrEqual(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-async function collectSkillFiles(plannedSkill) {
+async function collectSkillFiles(plannedSkill: PlanLike): Promise<PackedFile[]> {
   const sourceRoot = plannedSkill.sourcePath;
   const filePaths = await listFiles(sourceRoot);
-  const files = [];
+  const files: PackedFile[] = [];
 
   for (const filePath of filePaths) {
     const bytes = await readFile(filePath);
@@ -319,9 +412,9 @@ async function collectSkillFiles(plannedSkill) {
   return files;
 }
 
-async function listFiles(root) {
+async function listFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
-  const files = [];
+  const files: string[] = [];
 
   for (const entry of entries) {
     const entryPath = path.join(root, entry.name);

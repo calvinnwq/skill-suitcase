@@ -17,10 +17,12 @@
     "src/catalog.ts",
     "src/planner.ts",
     "src/diff.ts",
+    "src/packer.ts",
     "src/validator.ts",
     "tests/suitcase-manifest.test.ts",
     "tests/planner.test.ts",
     "tests/diff.test.ts",
+    "tests/packer.test.ts",
     "tests/validator.test.ts"
   ]
 }
