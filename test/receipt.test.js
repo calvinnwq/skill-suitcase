@@ -678,6 +678,52 @@ test("upsertAndWriteReceipt normalizes relative target paths for deduplication",
   assert.equal(entries[0].targetPath, path.join(installRoot, "office-hours"));
 });
 
+test("upsertAndWriteReceipt dedupes existing relative receipt targets against install root", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upsert-existing-relative-target-"));
+  const installRoot = path.join(root, "skills");
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const relativeRecord = buildInstallRecord({
+    skill: "office-hours",
+    agent: "openclaw",
+    mode: "copy",
+    targetPath: "office-hours",
+    sourcePath: "/repo/skills/office-hours",
+    version: "2026.06.10",
+    sourceCommit: "deadbeef"
+  });
+  const absoluteRecord = buildInstallRecord({
+    ...relativeRecord,
+    targetPath: path.join(installRoot, "office-hours"),
+    version: "2026.06.11",
+    sourceCommit: "facefeed"
+  });
+
+  await writeReceipt({
+    installRoot,
+    receipt: buildReceipt({
+      sourceRoot: "/Users/ngxcalvin/repos/skills",
+      sourceRef: "refs/heads/main",
+      sourceCommit: "cafebabe",
+      installs: {
+        "office-hours": relativeRecord
+      }
+    })
+  });
+
+  const receiptPath = await upsertAndWriteReceipt({
+    installRoot,
+    skillName: "office-hours",
+    installRecord: absoluteRecord
+  });
+
+  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
+  const entries = [].concat(persisted.installs["office-hours"]);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].version, "2026.06.11");
+  assert.equal(entries[0].targetPath, path.join(installRoot, "office-hours"));
+});
+
 test("upsertAndWriteReceipt preserves unrelated skill records while adding another skill", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upsert-multi-skill-"));
   const installRoot = path.join(root, "skills");

@@ -69,7 +69,8 @@ export async function upsertAndWriteReceipt({
     installs: cloneReceiptInstalls(currentReceipt)
   }, {
     skillName,
-    installRecord: nextInstallRecord
+    installRecord: nextInstallRecord,
+    installRoot: normalizedRoot
   });
   return writeReceipt({ installRoot: normalizedRoot, receipt: nextReceipt, receiptPath });
 }
@@ -238,7 +239,7 @@ export function buildInstallRecord({
   return record;
 }
 
-export function upsertInstallRecord(receipt, { skillName, installRecord }) {
+export function upsertInstallRecord(receipt, { skillName, installRecord, installRoot }) {
   if (typeof skillName !== "string" || skillName.trim().length === 0) {
     throw new Error("skillName is required.");
   }
@@ -248,7 +249,10 @@ export function upsertInstallRecord(receipt, { skillName, installRecord }) {
   const existing = receipt?.installs?.[skillName];
   const installs = { ...(receipt?.installs ?? {}) };
   const targetPath = installRecord?.targetPath;
-  const normalizedTargetPath = normalizeTargetPath(targetPath);
+  const normalizedTargetPath = normalizeTargetPathForInstallRoot({
+    installRoot,
+    targetPath
+  });
   const existingArray = Array.isArray(existing) ? existing : existing ? [existing] : [];
   if (existingArray.length === 0) {
     installs[skillName] = installRecord;
@@ -268,7 +272,10 @@ export function upsertInstallRecord(receipt, { skillName, installRecord }) {
   }
 
   const nextRecords = [...existingArray];
-  const matchIndex = nextRecords.findIndex((entry) => normalizeTargetPath(entry?.targetPath) === normalizedTargetPath);
+  const matchIndex = nextRecords.findIndex((entry) => normalizeTargetPathForInstallRoot({
+    installRoot,
+    targetPath: entry?.targetPath
+  }) === normalizedTargetPath);
   if (matchIndex === -1) {
     nextRecords.push(installRecord);
   } else {
@@ -304,10 +311,14 @@ function normalizeTargetPathForInstallRoot({ installRoot, targetPath }) {
   if (value === null) {
     return null;
   }
+  const root = normalizeValue(installRoot);
+  if (root === null) {
+    return normalizeTargetPath(value);
+  }
   if (path.isAbsolute(value)) {
     return path.resolve(value);
   }
-  return path.resolve(path.resolve(installRoot), value);
+  return path.resolve(path.resolve(root), value);
 }
 
 function assertReceiptInstallRecord(installRecord) {
