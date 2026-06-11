@@ -127,6 +127,92 @@ not write files. If target resolution fails (for example ambiguous or missing
 `errors` includes structured codes like `ambiguous_install_root` and
 `missing_install_root`.
 
+## `pack` Output
+
+`pack --dry-run` reports the skill files that would be copied into a staging
+bundle, including byte counts and SHA-256 checksums, but creates no bundle
+directory and writes no receipts.
+
+```json
+{
+  "ok": true,
+  "dryRun": false,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "target": "openclaw",
+  "bundle": {
+    "action": "pack",
+    "outputPath": "/tmp/skill-suitcase-openclaw",
+    "artifactId": "d4e5..",
+    "artifactPath": "/tmp/skill-suitcase-openclaw/.skill-suitcase/artifacts/d4e5..",
+    "manifestPath": "/tmp/skill-suitcase-openclaw/.skill-suitcase/artifacts/d4e5../skill-suitcase-bundle.json",
+    "schema": "calvinnwq.skills.pack-bundle.v0",
+    "reason": "written"
+  },
+  "planned": [
+    {
+      "skill": "office-hours",
+      "action": "install",
+      "variant": "canonical",
+      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours",
+      "evidence": ["docs/install-smoke.md"]
+    }
+  ],
+  "blocked": [],
+  "files": [
+    {
+      "skill": "office-hours",
+      "relativePath": "SKILL.md",
+      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours/SKILL.md",
+      "bundlePath": "skills/office-hours/SKILL.md",
+      "bytes": 123,
+      "sha256": "e1c.."
+    }
+  ],
+  "summary": {
+    "skills": 1,
+    "blocked": 0,
+    "files": 1,
+    "bytes": 123
+  },
+  "errors": []
+}
+```
+
+For dry runs, `bundle.outputPath`, `bundle.artifactId`,
+`bundle.artifactPath`, and `bundle.manifestPath` are `null`, and
+`bundle.reason` is `dry-run`.
+
+`pack --output <dir>` writes managed immutable artifacts under:
+
+`<dir>/.skill-suitcase/artifacts/<artifactId>/`
+
+Each artifact directory contains:
+
+- `skill-suitcase-bundle.json` (provenance, checksums, manifest metadata)
+- staged skill files under `skills/<skill-name>/...`
+
+The stored manifest uses schema `calvinnwq.skills.pack-bundle.v0` and records
+`artifactId`, `source`, `target`, `action`, `createdAt`, `summary`, `files`,
+`planned`, and `blocked`. `source` includes the resolved catalog repo,
+`skill-suitcase.yaml` path, and best-effort `git rev-parse HEAD` commit/ref;
+the commit and ref are `null` when the source is not a Git checkout. Stored
+manifest `sourcePath` values are relative to the catalog source root.
+
+The artifact id is computed from the complete packed contents and source
+provenance, so repeated runs with the same source/plan produce the same id.
+`pack` refuses to overwrite an existing artifact id directory, which protects
+existing snapshots from mutation.
+
+`pack --output <dir>` still validates that output is outside manifest-declared
+install target paths and will keep writing under `<dir>` if that output directory
+already exists. If the output path exists and is not a directory, `pack` fails.
+
+Retention and cleanup:
+
+- `.skill-suitcase/artifacts` is a write-once history of pack snapshots.
+- This CLI does not auto-delete artifacts; operators must prune old snapshot
+  directories explicitly when retention policy requires it.
+
 `targets` returns assignment target discovery details instead of install plans:
 
 ```json
@@ -296,31 +382,3 @@ syntax-check aliases over `src` and `test`.
 The first milestone has no package dependencies. The manifest reader is strict
 and intentionally scoped to the current `skill-suitcase.yaml` shape from
 `/Users/ngxcalvin/repos/skills`.
-
-`pack --dry-run` reports the skill files that would be copied into a staging
-bundle, including byte counts and SHA-256 checksums, but creates no bundle
-directory and writes no receipts.
-
-`pack --output <dir>` writes managed immutable artifacts under:
-
-`<dir>/.skill-suitcase/artifacts/<artifactId>/`
-
-Each artifact directory contains:
-
-- `skill-suitcase-bundle.json` (provenance, checksums, manifest metadata)
-- staged skill files under `skills/<skill-name>/...`
-
-The artifact id is computed from the complete packed contents and source
-provenance, so repeated runs with the same source/plan produce the same id.
-`pack` refuses to overwrite an existing artifact id directory, which protects
-existing snapshots from mutation.
-
-`pack --output <dir>` still validates that output is outside manifest-declared
-install target paths and will keep writing under `<dir>` if that output directory
-already exists.
-
-Retention and cleanup:
-
-- `.skill-suitcase/artifacts` is a write-once history of pack snapshots.
-- This CLI does not auto-delete artifacts; operators must prune old snapshot
-  directories explicitly when retention policy requires it.

@@ -64,7 +64,7 @@ test("pack writes an explicit staging bundle under managed artifact storage", as
   const manifest = JSON.parse(await readFile(result.bundle.manifestPath, "utf8"));
   assert.equal(manifest.schema, "calvinnwq.skills.pack-bundle.v0");
   assert.equal(manifest.artifactId, result.bundle.artifactId);
-  assert.ok(manifest.source.repo.includes("skill-suitcase"));
+  assert.equal(manifest.source.repo, fixtureSource);
   assert.ok(/^[a-f0-9]{40}$/.test(manifest.source.commit));
   assert.equal(manifest.source.commit, manifest.source.ref);
   assert.equal(manifest.source.manifestPath, path.join(fixtureSource, "skill-suitcase.yaml"));
