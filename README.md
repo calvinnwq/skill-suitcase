@@ -446,6 +446,6 @@ CI runs `pnpm test` on GitHub Actions with Node 24. The script pipeline now buil
 TypeScript output to `dist`, then runs Node's built-in test runner against
 `dist/tests/*.test.js`.
 
-The first milestone has no package dependencies. The manifest reader is strict
-and intentionally scoped to the current `skill-suitcase.yaml` shape from
-`/Users/ngxcalvin/repos/skills`.
+The first milestone has no runtime package dependencies (only the TypeScript dev
+toolchain). The manifest reader is strict and intentionally scoped to the current
+`skill-suitcase.yaml` shape from `/Users/ngxcalvin/repos/skills`.
