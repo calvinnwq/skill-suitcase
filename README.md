@@ -11,13 +11,14 @@ touch runtime homes.
 ## Usage
 
 ```bash
-node src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --json
-node src/cli.js diff --source /Users/ngxcalvin/repos/skills --target openclaw --json
-node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
-node src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
-node src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
-node src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
-node src/cli.js status --source /Users/ngxcalvin/repos/skills --json
+pnpm run build
+node dist/src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --json
+node dist/src/cli.js diff --source /Users/ngxcalvin/repos/skills --target openclaw --json
+node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
+node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
+node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
+node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
+node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
 ```
 
 Targets currently exercised against fixture #1:
@@ -433,15 +434,16 @@ This module does not write files or require the apply/install layer to exist.
 ## Development
 
 ```bash
-npm test
-npm run lint
-npm run typecheck
-npm run build
-npm run format:check
+pnpm test
+pnpm run lint
+pnpm run typecheck
+pnpm run build
+pnpm run format:check
 ```
 
-CI runs `npm test` on GitHub Actions with Node 24. The other npm scripts are
-syntax-check aliases over `src` and `test`.
+CI runs `pnpm test` on GitHub Actions with Node 24. The script pipeline now builds
+TypeScript output to `dist`, then runs Node's built-in test runner against
+`dist/tests/*.test.js`.
 
 The first milestone has no package dependencies. The manifest reader is strict
 and intentionally scoped to the current `skill-suitcase.yaml` shape from

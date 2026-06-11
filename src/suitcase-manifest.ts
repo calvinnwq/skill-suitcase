@@ -1,5 +1,24 @@
-export function parseSuitcaseManifest(text) {
-  const manifest = {
+type ManifestSuitcase = { skills: string[] };
+type ManifestAssignment = { suitcases: string[] };
+type ManifestCompatibility = {
+  agents?: string[];
+  evidence?: string[];
+  blockedAgents?: Record<string, string>;
+  variant?: string;
+  reason?: string;
+};
+type ParsedManifest = {
+  suitcases: Record<string, ManifestSuitcase>;
+  assignments: Record<string, ManifestAssignment>;
+  assignmentPaths: Record<string, Record<string, string>>;
+  compatibility: Record<string, ManifestCompatibility>;
+};
+
+type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "compatibility" | null;
+type CompatibilityField = "agents" | "evidence" | "blockedAgents" | null;
+
+export function parseSuitcaseManifest(text: string): ParsedManifest {
+  const manifest: ParsedManifest = {
     suitcases: {},
     assignments: {},
     assignmentPaths: {},
@@ -7,9 +26,9 @@ export function parseSuitcaseManifest(text) {
   };
 
   const lines = text.split(/\r?\n/);
-  let section = null;
-  let currentName = null;
-  let currentField = null;
+  let section: ParsedSection = null;
+  let currentName: string | null = null;
+  let currentField: CompatibilityField = null;
 
   for (const rawLine of lines) {
     const line = rawLine.replace(/\s+$/, "");
@@ -22,13 +41,26 @@ export function parseSuitcaseManifest(text) {
     const indent = rawLine.length - rawLine.trimStart().length;
 
     if (indent === 0 && trimmed.endsWith(":")) {
-      section = trimmed.slice(0, -1);
+      const sectionValue = trimmed.slice(0, -1);
+      section = (
+        sectionValue === "suitcases" ||
+        sectionValue === "assignments" ||
+        sectionValue === "assignmentPaths" ||
+        sectionValue === "compatibility"
+      )
+        ? sectionValue
+        : null;
       currentName = null;
       currentField = null;
       continue;
     }
 
-    if (!["suitcases", "assignments", "assignmentPaths", "compatibility"].includes(section)) {
+    if (
+      section !== "suitcases" &&
+      section !== "assignments" &&
+      section !== "assignmentPaths" &&
+      section !== "compatibility"
+    ) {
       continue;
     }
 
@@ -51,25 +83,34 @@ export function parseSuitcaseManifest(text) {
     if (!currentName) {
       continue;
     }
+    const name = currentName;
 
     if (section === "suitcases") {
-      parseSuitcaseLine(manifest.suitcases[currentName], indent, trimmed);
+      const suitcase = manifest.suitcases[name];
+      if (!suitcase) continue;
+      parseSuitcaseLine(suitcase, indent, trimmed);
       continue;
     }
 
     if (section === "assignments") {
-      parseAssignmentLine(manifest.assignments[currentName], indent, trimmed);
+      const assignment = manifest.assignments[name];
+      if (!assignment) continue;
+      parseAssignmentLine(assignment, indent, trimmed);
       continue;
     }
 
     if (section === "assignmentPaths") {
-      parseMappingLine(manifest.assignmentPaths[currentName], indent, trimmed);
+      const assignmentPath = manifest.assignmentPaths[name];
+      if (!assignmentPath) continue;
+      parseMappingLine(assignmentPath, indent, trimmed);
       continue;
     }
 
     if (section === "compatibility") {
+      const compatibility = manifest.compatibility[name];
+      if (!compatibility) continue;
       currentField = parseCompatibilityLine(
-        manifest.compatibility[currentName],
+        compatibility,
         indent,
         trimmed,
         currentField
@@ -80,7 +121,7 @@ export function parseSuitcaseManifest(text) {
   return manifest;
 }
 
-function parseMappingLine(record, indent, trimmed) {
+function parseMappingLine(record: Record<string, string>, indent: number, trimmed: string): void {
   if (indent !== 4 || !trimmed.includes(":")) {
     return;
   }
@@ -91,7 +132,7 @@ function parseMappingLine(record, indent, trimmed) {
   record[key] = value;
 }
 
-function parseSuitcaseLine(suitcase, indent, trimmed) {
+function parseSuitcaseLine(suitcase: ManifestSuitcase, indent: number, trimmed: string): void {
   if (indent === 4 && trimmed === "skills:") {
     return;
   }
@@ -101,7 +142,7 @@ function parseSuitcaseLine(suitcase, indent, trimmed) {
   }
 }
 
-function parseAssignmentLine(assignment, indent, trimmed) {
+function parseAssignmentLine(assignment: ManifestAssignment, indent: number, trimmed: string): void {
   if (indent === 4 && trimmed === "suitcases:") {
     return;
   }
@@ -111,7 +152,12 @@ function parseAssignmentLine(assignment, indent, trimmed) {
   }
 }
 
-function parseCompatibilityLine(compatibility, indent, trimmed, currentField) {
+function parseCompatibilityLine(
+  compatibility: ManifestCompatibility,
+  indent: number,
+  trimmed: string,
+  currentField: CompatibilityField
+): CompatibilityField {
   if (indent === 4 && trimmed === "agents:") {
     compatibility.agents = [];
     return "agents";
@@ -138,12 +184,12 @@ function parseCompatibilityLine(compatibility, indent, trimmed, currentField) {
   }
 
   if (indent === 6 && trimmed.startsWith("- ") && currentField === "agents") {
-    compatibility.agents.push(trimmed.slice(2));
+    compatibility.agents?.push(trimmed.slice(2));
     return currentField;
   }
 
   if (indent === 6 && trimmed.startsWith("- ") && currentField === "evidence") {
-    compatibility.evidence.push(trimmed.slice(2));
+    compatibility.evidence?.push(trimmed.slice(2));
     return currentField;
   }
 
@@ -152,6 +198,7 @@ function parseCompatibilityLine(compatibility, indent, trimmed, currentField) {
     if (separator !== -1) {
       const agent = trimmed.slice(0, separator).trim();
       const reason = trimmed.slice(separator + 1).trim();
+      compatibility.blockedAgents = compatibility.blockedAgents ?? {};
       compatibility.blockedAgents[agent] = reason;
     }
     return currentField;
@@ -160,6 +207,6 @@ function parseCompatibilityLine(compatibility, indent, trimmed, currentField) {
   return currentField;
 }
 
-function valueAfterColon(line) {
+function valueAfterColon(line: string): string {
   return line.slice(line.indexOf(":") + 1).trim();
 }

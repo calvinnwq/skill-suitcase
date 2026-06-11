@@ -2,7 +2,15 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parseSuitcaseManifest } from "./suitcase-manifest.js";
 
-export async function loadCatalog(source) {
+export type Catalog = ReturnType<typeof parseSuitcaseManifest>;
+
+export type LoadedCatalog = {
+  sourceRoot: string;
+  manifestPath: string;
+  manifest: Catalog;
+};
+
+export async function loadCatalog(source: string): Promise<LoadedCatalog> {
   if (!source) {
     throw new Error("source is required");
   }

@@ -5,14 +5,18 @@
   "description": "Read-only skill install planner for portable agent skill catalogs.",
   "type": "module",
   "bin": {
-    "suitcase": "./src/cli.js"
+    "suitcase": "./dist/src/cli.js"
   },
   "scripts": {
-    "test": "node --test",
-    "typecheck": "node ./scripts/check-js-syntax.mjs src test",
-    "lint": "node ./scripts/check-js-syntax.mjs src test",
-    "build": "node ./scripts/check-js-syntax.mjs src test",
-    "format:check": "node ./scripts/check-js-syntax.mjs src test"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "pnpm run typecheck",
+    "test": "rm -rf dist && pnpm run build && node --test dist/tests/*.test.js",
+    "format:check": "git diff --check"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typescript": "^5.9.3"
   },
   "engines": {
     "node": ">=20"
