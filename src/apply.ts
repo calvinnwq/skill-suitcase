@@ -383,6 +383,9 @@ export async function apply({
   const previousReceiptText = await readFileSafeText(receiptPath);
 
   const sourceCommit = context.sourceCommit;
+  const backupPaths = restorePlan
+    .map((plannedRestore) => plannedRestore.backupPath)
+    .filter((value): value is string => value !== null);
   let receiptWriteCount = 0;
   try {
     for (const [skill] of filesAppliedBySkill) {
@@ -431,7 +434,7 @@ export async function apply({
         };
       }
 
-      nextRecord.installedFiles = await buildInstalledFiles(targetPath);
+      nextRecord.installedFiles = await buildInstalledFiles(targetPath, { exclude: backupPaths });
 
       receiptWriteCount += 1;
       if (failAfterReceiptWrites !== null && receiptWriteCount === failAfterReceiptWrites) {
@@ -949,15 +952,15 @@ async function restoreOriginalReceipt({
   previousReceiptText: string | null;
 }): Promise<void> {
   if (previousReceiptText === null) {
-    try {
-      await unlinkSafe(receiptPath);
-    } catch {
-      // best effort
-    }
+    await unlinkSafe(receiptPath);
     return;
   }
 
-  await writeFile(receiptPath, previousReceiptText, "utf8");
+  try {
+    await writeFile(receiptPath, previousReceiptText, "utf8");
+  } catch {
+    // best effort
+  }
 }
 
 async function readFileSafeText(filePath: string): Promise<string | null> {

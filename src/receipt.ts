@@ -73,9 +73,16 @@ type ReadReceiptFileOutput = {
   receipt: Receipt;
 };
 
-export async function buildInstalledFiles(skillRoot: string): Promise<ReceiptInstalledFile[]> {
+export async function buildInstalledFiles(
+  skillRoot: string,
+  { exclude }: { exclude?: Iterable<string> } = {}
+): Promise<ReceiptInstalledFile[]> {
   const root = path.resolve(skillRoot);
-  const files = await collectInstalledFiles(root, root);
+  const excluded = new Set<string>();
+  for (const candidate of exclude ?? []) {
+    excluded.add(path.resolve(candidate));
+  }
+  const files = await collectInstalledFiles(root, root, excluded);
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
@@ -249,7 +256,11 @@ function cloneReceiptInstalls(receipt: Receipt): Record<string, ReceiptInstallRe
   return { ...receipt.installs };
 }
 
-async function collectInstalledFiles(root: string, baseRoot: string): Promise<ReceiptInstalledFile[]> {
+async function collectInstalledFiles(
+  root: string,
+  baseRoot: string,
+  excluded: Set<string>
+): Promise<ReceiptInstalledFile[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files: ReceiptInstalledFile[] = [];
 
@@ -259,8 +270,11 @@ async function collectInstalledFiles(root: string, baseRoot: string): Promise<Re
     }
 
     const entryPath = path.join(root, entry.name);
+    if (excluded.has(path.resolve(entryPath))) {
+      continue;
+    }
     if (entry.isDirectory()) {
-      files.push(...(await collectInstalledFiles(entryPath, baseRoot)));
+      files.push(...(await collectInstalledFiles(entryPath, baseRoot, excluded)));
       continue;
     }
     if (entry.isFile()) {
