@@ -20,6 +20,7 @@
     "src/packer.ts",
     "src/validator.ts",
     "src/targets.ts",
+    "src/apply.ts",
     "src/plan-lock.ts",
     "tests/suitcase-manifest.test.ts",
     "tests/planner.test.ts",
@@ -32,6 +33,8 @@
     "src/receipt.ts",
     "tests/receipt.test.ts",
     "src/status.ts",
-    "tests/status.test.ts"
+    "tests/status.test.ts",
+    "tests/apply.test.ts",
+    "tests/cli.test.ts"
   ]
 }
