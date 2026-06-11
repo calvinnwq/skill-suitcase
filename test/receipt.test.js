@@ -756,6 +756,47 @@ test("upsertAndWriteReceipt preserves unrelated skill records while adding anoth
   assert.equal(refreshedOffice[0].sourceCommit, "beadfeed");
 });
 
+test("upsertAndWriteReceipt reads existing receipt from disk when receipt is omitted", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upsert-read-existing-"));
+  const installRoot = path.join(root, "skills");
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const officeRecord = buildInstallRecord({
+    skill: "office-hours",
+    agent: "openclaw",
+    mode: "copy",
+    targetPath: path.join(installRoot, "office-hours"),
+    sourcePath: "/repo/skills/office-hours",
+    version: "2026.06.10",
+    sourceCommit: "deadbeef"
+  });
+  const gnhfRecord = buildInstallRecord({
+    skill: "gnhf-postflight",
+    agent: "openclaw",
+    mode: "copy",
+    targetPath: path.join(installRoot, "gnhf-postflight"),
+    sourcePath: "/repo/skills/gnhf-postflight",
+    version: "2026.06.11",
+    sourceCommit: "feedface"
+  });
+
+  await upsertAndWriteReceipt({
+    installRoot,
+    skillName: officeRecord.skill,
+    installRecord: officeRecord
+  });
+
+  const receiptPath = await upsertAndWriteReceipt({
+    installRoot,
+    skillName: gnhfRecord.skill,
+    installRecord: gnhfRecord
+  });
+
+  const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
+  assert.equal(persisted.installs["office-hours"].version, "2026.06.10");
+  assert.equal(persisted.installs["gnhf-postflight"].version, "2026.06.11");
+});
+
 test("writeReceipt defaults missing schema to modern suitcase schema", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-write-receipt-default-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -770,6 +811,49 @@ test("writeReceipt defaults missing schema to modern suitcase schema", async (t)
   const persisted = JSON.parse(await readFile(receiptPath, "utf8"));
   assert.equal(persisted.schema, RECEIPT_SCHEMA);
   assert.deepEqual(persisted.installs, {});
+});
+
+test("writeReceipt rejects invalid installs payloads", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-write-receipt-invalid-installs-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await assert.rejects(
+    () =>
+      writeReceipt({
+        installRoot: root,
+        receipt: {
+          installs: []
+        }
+      }),
+    /Receipt installs must be an object/
+  );
+});
+
+test("upsertAndWriteReceipt rejects invalid installs payloads", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upsert-invalid-installs-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const installRecord = buildInstallRecord({
+    skill: "office-hours",
+    agent: "openclaw",
+    mode: "copy",
+    targetPath: path.join(root, "office-hours"),
+    sourcePath: "/repo/skills/office-hours",
+    version: "2026.06.10"
+  });
+
+  await assert.rejects(
+    () =>
+      upsertAndWriteReceipt({
+        installRoot: root,
+        receipt: {
+          installs: []
+        },
+        skillName: "office-hours",
+        installRecord
+      }),
+    /Receipt installs must be an object/
+  );
 });
 
 test("writeReceipt rejects invalid install records in existing installs mapping", async (t) => {
@@ -814,4 +898,42 @@ test("writeReceipt creates missing parent directories for custom receipt paths",
   assert.equal(persisted.schema, RECEIPT_SCHEMA);
   assert.deepEqual(persisted.installs, {});
   assert.equal(path.basename(receiptPath), ".skill-suitcase-receipt.json");
+});
+
+test("receipt writers reject custom receipt paths outside install root", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-path-escape-"));
+  const installRoot = path.join(root, "skills");
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const installRecord = buildInstallRecord({
+    skill: "office-hours",
+    agent: "openclaw",
+    mode: "copy",
+    targetPath: path.join(installRoot, "office-hours"),
+    sourcePath: "/repo/skills/office-hours",
+    version: "2026.06.10"
+  });
+
+  await assert.rejects(
+    () =>
+      writeReceipt({
+        installRoot,
+        receiptPath: "../receipt.json",
+        receipt: {
+          installs: {}
+        }
+      }),
+    /receiptPath must stay within installRoot/
+  );
+
+  await assert.rejects(
+    () =>
+      upsertAndWriteReceipt({
+        installRoot,
+        receiptPath: "../receipt.json",
+        skillName: "office-hours",
+        installRecord
+      }),
+    /receiptPath must stay within installRoot/
+  );
 });
