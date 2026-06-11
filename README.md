@@ -301,5 +301,26 @@ and intentionally scoped to the current `skill-suitcase.yaml` shape from
 bundle, including byte counts and SHA-256 checksums, but creates no bundle
 directory and writes no receipts.
 
-`pack --output <dir>` writes only to an explicit staging directory. It refuses
-existing output directories and manifest-declared install target paths.
+`pack --output <dir>` writes managed immutable artifacts under:
+
+`<dir>/.skill-suitcase/artifacts/<artifactId>/`
+
+Each artifact directory contains:
+
+- `skill-suitcase-bundle.json` (provenance, checksums, manifest metadata)
+- staged skill files under `skills/<skill-name>/...`
+
+The artifact id is computed from the complete packed contents and source
+provenance, so repeated runs with the same source/plan produce the same id.
+`pack` refuses to overwrite an existing artifact id directory, which protects
+existing snapshots from mutation.
+
+`pack --output <dir>` still validates that output is outside manifest-declared
+install target paths and will keep writing under `<dir>` if that output directory
+already exists.
+
+Retention and cleanup:
+
+- `.skill-suitcase/artifacts` is a write-once history of pack snapshots.
+- This CLI does not auto-delete artifacts; operators must prune old snapshot
+  directories explicitly when retention policy requires it.
