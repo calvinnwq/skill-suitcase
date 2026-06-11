@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -41,7 +41,7 @@ test("pack refuses non dry-run mode", async () => {
   );
 });
 
-test("pack writes an explicit staging bundle", async (t) => {
+test("pack writes an explicit staging bundle under managed artifact storage", async (t) => {
   const parent = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-output-"));
   t.after(() => rm(parent, { recursive: true, force: true }));
   const output = path.join(parent, "bundle");
@@ -55,22 +55,56 @@ test("pack writes an explicit staging bundle", async (t) => {
   assert.equal(result.ok, true);
   assert.equal(result.dryRun, false);
   assert.equal(result.bundle.outputPath, output);
-  assert.equal(result.bundle.manifestPath, path.join(output, "skill-suitcase-bundle.json"));
+  assert.equal(
+    result.bundle.artifactPath,
+    path.join(output, ".skill-suitcase", "artifacts", result.bundle.artifactId)
+  );
+  assert.equal(result.bundle.manifestPath, path.join(result.bundle.artifactPath, "skill-suitcase-bundle.json"));
 
-  await access(path.join(output, "skills", "office-hours", "SKILL.md"));
   const manifest = JSON.parse(await readFile(result.bundle.manifestPath, "utf8"));
-  assert.equal(manifest.summary.files, 3);
-  assert.equal(manifest.files[0].skill, "office-hours");
+  assert.equal(manifest.schema, "calvinnwq.skills.pack-bundle.v0");
+  assert.equal(manifest.artifactId, result.bundle.artifactId);
+  assert.ok(manifest.source.repo.includes("skill-suitcase"));
+  assert.ok(/^[a-f0-9]{40}$/.test(manifest.source.commit));
+  assert.equal(manifest.source.commit, manifest.source.ref);
+  assert.equal(manifest.source.manifestPath, path.join(fixtureSource, "skill-suitcase.yaml"));
+  assert.ok(Array.isArray(manifest.files));
+  assert.ok(manifest.files.length > 0);
+  assert.ok(manifest.files.every((file) => /^[a-f0-9]{64}$/.test(file.sha256)));
+  assert.equal(manifest.source.repo, result.source);
+
+  await access(path.join(result.bundle.artifactPath, "skills", "office-hours", "SKILL.md"));
 });
 
-test("pack refuses existing output directories", async (t) => {
+test("pack allows existing output directories and refuses artifact-id overwrite", async (t) => {
   const output = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-existing-output-"));
+  await mkdir(path.join(output, "seed"), { recursive: true });
+  await writeFile(path.join(output, "seed", "note.txt"), "keep this file");
   t.after(() => rm(output, { recursive: true, force: true }));
+
+  const first = await pack({ source: fixtureSource, target: "codex", output });
+  assert.equal(first.ok, true);
 
   await assert.rejects(
     () => pack({ source: fixtureSource, target: "codex", output }),
-    /EEXIST/
+    /existing artifact id/
   );
+});
+
+test("pack preserves prior artifacts when target differs", async (t) => {
+  const output = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-artifact-retention-"));
+  t.after(() => rm(output, { recursive: true, force: true }));
+
+  const codexArtifact = await pack({ source: fixtureSource, target: "codex", output });
+  const openclawArtifact = await pack({ source: fixtureSource, target: "openclaw", output });
+  const artifactRoot = path.join(output, ".skill-suitcase", "artifacts");
+
+  const artifactDirs = await readdir(artifactRoot);
+  assert.equal(artifactDirs.length, 2);
+  assert.ok(artifactDirs.includes(codexArtifact.bundle.artifactId));
+  assert.ok(artifactDirs.includes(openclawArtifact.bundle.artifactId));
+  const openclawManifest = JSON.parse(await readFile(path.join(openclawArtifact.bundle.manifestPath), "utf8"));
+  assert.equal(openclawManifest.artifactId, openclawArtifact.bundle.artifactId);
 });
 
 test("pack refuses manifest-declared install roots", async () => {
