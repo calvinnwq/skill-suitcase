@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { assessPlanLock, buildPlanLock } from "../src/plan-lock.js";
 
-const fixtureSource = path.join(import.meta.dirname, "fixtures", "skills-catalog");
+const fixtureSource = path.join(process.cwd(), "tests", "fixtures", "skills-catalog");
 
 test("buildPlanLock output is deterministic for the same source and plan context", async () => {
   const first = await buildPlanLock({
@@ -81,10 +81,9 @@ assignmentPaths:
   });
 
   assert.equal(status.valid, false);
-  assert.equal(
-    status.current.fileHashes["office-hours"]["runtime.js"] !== lock.fileHashes["office-hours"]["runtime.js"],
-    true
-  );
+  const currentRuntime = status.current?.fileHashes["office-hours"]?.["runtime.js"];
+  const lockRuntime = lock.fileHashes["office-hours"]?.["runtime.js"];
+  assert.equal(status.current !== null && currentRuntime !== undefined && lockRuntime !== undefined && currentRuntime !== lockRuntime, true);
   assert.ok(status.reasons.includes("file_hashes_changed"));
   assert.ok(status.reasons.includes("plan_id_changed"));
 });
@@ -246,7 +245,7 @@ assignments:
     sourceCommit: "deadbeef"
   });
 
-  assert.deepEqual(Object.keys(lock.fileHashes["office-hours"]), ["SKILL.md"]);
+  assert.deepEqual(Object.keys(lock.fileHashes["office-hours"] ?? {}), ["SKILL.md"]);
 });
 
 test("assessPlanLock returns valid when the lock matches the current plan state", async (t) => {
@@ -295,7 +294,7 @@ assignmentPaths:
 
   assert.equal(status.valid, true);
   assert.deepEqual(status.reasons, []);
-  assert.equal(status.current.planId, lock.planId);
+  assert.equal(status.current?.planId, lock.planId);
 });
 
 test("assessPlanLock detects source commit drift even without file changes", async (t) => {
