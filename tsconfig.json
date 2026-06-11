@@ -29,6 +29,8 @@
     "tests/targets.test.ts",
     "tests/plan-lock.test.ts",
     "src/receipt.ts",
-    "tests/receipt.test.ts"
+    "tests/receipt.test.ts",
+    "src/status.ts",
+    "tests/status.test.ts"
   ]
 }

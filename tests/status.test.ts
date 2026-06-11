@@ -9,10 +9,26 @@ import {
   buildInstalledFiles,
   buildInstallRecord,
   buildReceipt,
+  type ReceiptInstalledFile,
   RECEIPT_FILE,
   upsertAndWriteReceipt
 } from "../src/receipt.js";
 import { status } from "../src/status.js";
+
+
+
+function firstItem<T>(items: readonly T[], label: string): T {
+  const [item] = items;
+  if (item === undefined) {
+    assert.fail(`${label} should contain at least one item.`);
+  }
+  return item;
+}
+
+function requireValue<T>(value: T | undefined, label: string): T {
+  assert.ok(value !== undefined, label);
+  return value;
+}
 
 test("status reports manifest-wide statuses for all assignments and respects receipt state", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-test-"));
@@ -270,7 +286,7 @@ assignmentPaths:
 
   assert.equal(result.ok, true);
   assert.equal(result.summary.current, 1);
-  assert.equal(result.statuses[0].status, "current");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
 });
 
 test("status prefers valid modern install records when one record in array is invalid", async (t) => {
@@ -343,9 +359,12 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.current, 1);
   assert.equal(result.summary.unknown, 0);
-  assert.equal(result.statuses[0].status, "current");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
-  const invalidReceiptError = result.errors.find((entry) => entry.code === "invalid_receipt");
+  const invalidReceiptError = requireValue(
+    result.errors.find((entry) => entry.code === "invalid_receipt"),
+    "expected invalid_receipt error"
+  );
   assert.equal(
     typeof invalidReceiptError?.message === "string" &&
       invalidReceiptError.message.includes("invalid install record for office-hours"),
@@ -423,9 +442,12 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.current, 1);
   assert.equal(result.summary.unknown, 0);
-  assert.equal(result.statuses[0].status, "current");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
-  const invalidReceiptError = result.errors.find((entry) => entry.code === "invalid_receipt");
+  const invalidReceiptError = requireValue(
+    result.errors.find((entry) => entry.code === "invalid_receipt"),
+    "expected invalid_receipt error"
+  );
   assert.equal(
     typeof invalidReceiptError?.message === "string" &&
       invalidReceiptError.message.includes("invalid install record for office-hours"),
@@ -634,9 +656,12 @@ assignmentPaths:
 
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
-  assert.equal(result.statuses[0].status, "unknown");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "unknown");
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
-  const invalidReceiptError = result.errors.find((entry) => entry.code === "invalid_receipt");
+  const invalidReceiptError = requireValue(
+    result.errors.find((entry) => entry.code === "invalid_receipt"),
+    "expected invalid_receipt error"
+  );
   assert.equal(
     typeof invalidReceiptError?.message === "string" &&
       invalidReceiptError.message.includes("ambiguous install records for office-hours"),
@@ -771,7 +796,7 @@ assignmentPaths:
   const result = await status({ source: sourceRoot });
 
   assert.equal(result.ok, false);
-  assert.equal(result.statuses[0].status, "unknown");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "unknown");
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.summary.current, 0);
   assert.equal(result.summary.missing, 0);
@@ -854,7 +879,7 @@ assignmentPaths:
 
   assert.equal(result.ok, true);
   assert.equal(result.summary.current, 1);
-  assert.equal(result.statuses[0].status, "current");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
 });
 
 test("status matches modern receipts with installRoot-relative targetPath", async (t) => {
@@ -922,7 +947,7 @@ assignmentPaths:
 
   assert.equal(result.ok, true);
   assert.equal(result.summary.current, 1);
-  assert.equal(result.statuses[0].status, "current");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
 });
 
 test("status reports stale installed content as behind instead of dirty", async (t) => {
@@ -972,7 +997,7 @@ assignmentPaths:
   assert.equal(result.ok, true);
   assert.equal(result.summary.behind, 1);
   assert.equal(result.summary.dirty, 0);
-  assert.equal(result.statuses[0].status, "behind");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "behind");
 });
 
 test("status reports stale symlinked installs as behind instead of dirty", async (t) => {
@@ -1022,7 +1047,7 @@ assignmentPaths:
   assert.equal(result.ok, true);
   assert.equal(result.summary.behind, 1);
   assert.equal(result.summary.dirty, 0);
-  assert.equal(result.statuses[0].status, "behind");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "behind");
 });
 
 test("status marks compatibility-blocked plan entries", async (t) => {
@@ -1080,7 +1105,10 @@ compatibility:
   assert.equal(result.summary.blocked, 1);
   assert.equal(result.errors.some((entry) => entry.code === "blocked_skill"), true);
 
-  const blocked = result.statuses.find((entry) => entry.skill === "gnhf-postflight");
+  const blocked = requireValue(
+    result.statuses.find((entry) => entry.skill === "gnhf-postflight"),
+    "expected blocked status for gnhf-postflight"
+  );
   assert.equal(blocked.status, "blocked");
   assert.equal(blocked.reason, "Codex must use the slimmer platform variant.");
 });
@@ -1118,8 +1146,8 @@ assignmentPaths:
 
   assert.equal(result.ok, false);
   assert.equal(result.statuses.length, 0);
-  assert.equal(result.errors[0].code, "invalid_assignment_path");
-  assert.equal(result.errors[0].path, "assignmentPaths.codex-global.skillsPath");
+  assert.equal(firstItem(result.errors, "result.errors").code, "invalid_assignment_path");
+  assert.equal(firstItem(result.errors, "result.errors").path, "assignmentPaths.codex-global.skillsPath");
 });
 
 test("status reports missing install roots as assignment errors", async (t) => {
@@ -1155,9 +1183,12 @@ assignmentPaths:
 
   assert.equal(result.ok, false);
   assert.equal(result.statuses.length, 0);
-  assert.equal(result.assignments[0].errors[0].code, "missing_install_root");
-  assert.equal(result.errors[0].code, "missing_install_root");
-  assert.equal(result.errors[0].path, "assignmentPaths.openclaw.path");
+  assert.equal(
+    firstItem(firstItem(result.assignments, "result.assignments").errors, "result.assignments[0].errors").code,
+    "missing_install_root"
+  );
+  assert.equal(firstItem(result.errors, "result.errors").code, "missing_install_root");
+  assert.equal(firstItem(result.errors, "result.errors").path, "assignmentPaths.openclaw.path");
 });
 
 test("status reports malformed sync receipts as errors", async (t) => {
@@ -1418,7 +1449,7 @@ assignmentPaths:
   assert.equal(result.ok, true);
   assert.equal(result.summary.current, 1);
   assert.equal(result.summary.unknown, 0);
-  assert.equal(result.statuses[0].status, "current");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
 });
 
 test("status matches legacy sync receipts with installRoot-relative targetPath", async (t) => {
@@ -1485,7 +1516,7 @@ assignmentPaths:
   assert.equal(result.ok, true);
   assert.equal(result.summary.current, 1);
   assert.equal(result.summary.unknown, 0);
-  assert.equal(result.statuses[0].status, "current");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
 });
 
 test("status evaluates current state from receipts written by upsertAndWriteReceipt", async (t) => {
@@ -1558,7 +1589,7 @@ assignmentPaths:
   assert.equal(result.summary.current, 1);
   assert.equal(result.summary.unknown, 0);
   assert.equal(result.statuses.length, 1);
-  assert.equal(result.statuses[0].status, "current");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
 });
 
 test("status prefers modern receipts over legacy sync receipts", async (t) => {
@@ -1675,7 +1706,7 @@ assignmentPaths:
 
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
-  assert.equal(result.statuses[0].status, "unknown");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "unknown");
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
 });
 
@@ -1769,7 +1800,10 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
-  const invalid = result.errors.find((entry) => entry.code === "invalid_receipt");
+  const invalid = requireValue(
+    result.errors.find((entry) => entry.code === "invalid_receipt"),
+    "expected invalid_receipt error"
+  );
   assert.equal(
     typeof invalid?.message === "string" && invalid.message.includes("invalid installedFiles"),
     true
@@ -1839,7 +1873,10 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
-  const invalid = result.errors.find((entry) => entry.code === "invalid_receipt");
+  const invalid = requireValue(
+    result.errors.find((entry) => entry.code === "invalid_receipt"),
+    "expected invalid_receipt error"
+  );
   assert.equal(
     typeof invalid?.message === "string" && invalid.message.includes("invalid source.path"),
     true
@@ -1908,7 +1945,10 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
-  const invalid = result.errors.find((entry) => entry.code === "invalid_receipt");
+  const invalid = requireValue(
+    result.errors.find((entry) => entry.code === "invalid_receipt"),
+    "expected invalid_receipt error"
+  );
   assert.equal(
     typeof invalid?.message === "string" && invalid.message.includes("invalid version field for office-hours"),
     true
@@ -1977,7 +2017,10 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.errors.some((entry) => entry.code === "invalid_receipt"), true);
-  const invalid = result.errors.find((entry) => entry.code === "invalid_receipt");
+  const invalid = requireValue(
+    result.errors.find((entry) => entry.code === "invalid_receipt"),
+    "expected invalid_receipt error"
+  );
   assert.equal(
     typeof invalid?.message === "string" && invalid.message.includes("invalid priorState"),
     true
@@ -2042,22 +2085,28 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.assignments.length, 2);
 
-  const validAssignment = result.assignments.find((entry) => entry.assignmentPath === "openclaw");
-  const invalidAssignment = result.assignments.find((entry) => entry.assignmentPath === "bad-kind");
+  const validAssignment = requireValue(
+    result.assignments.find((entry) => entry.assignmentPath === "openclaw"),
+    "expected openclaw assignment"
+  );
+  const invalidAssignment = requireValue(
+    result.assignments.find((entry) => entry.assignmentPath === "bad-kind"),
+    "expected bad-kind assignment"
+  );
 
   assert.equal(validAssignment.assignment, "openclaw");
   assert.equal(validAssignment.statusCount, 1);
   assert.equal(validAssignment.statuses.length, 1);
-  assert.equal(validAssignment.statuses[0].status, "current");
+  assert.equal(firstItem(validAssignment.statuses, "validAssignment.statuses").status, "current");
 
   assert.equal(invalidAssignment.statusCount, 0);
   assert.equal(invalidAssignment.statuses.length, 0);
   assert.equal(invalidAssignment.errors.length, 1);
-  assert.equal(invalidAssignment.errors[0].code, "invalid_assignment_path");
+  assert.equal(firstItem(invalidAssignment.errors, "invalidAssignment.errors").code, "invalid_assignment_path");
 
   assert.equal(result.errors.length, 1);
-  assert.equal(result.errors[0].code, "invalid_assignment_path");
-  assert.equal(result.errors[0].path, "assignmentPaths.bad-kind.kind");
+  assert.equal(firstItem(result.errors, "result.errors").code, "invalid_assignment_path");
+  assert.equal(firstItem(result.errors, "result.errors").path, "assignmentPaths.bad-kind.kind");
 
   assert.equal(result.summary.current, 1);
   assert.equal(result.summary.missing, 0);
@@ -2133,18 +2182,24 @@ assignmentPaths:
   assert.equal(result.assignments.length, 2);
   assert.equal(result.errors.some((entry) => entry.code === "plan_failed"), true);
 
-  const validAssignment = result.assignments.find((entry) => entry.assignmentPath === "openclaw");
-  const brokenAssignment = result.assignments.find((entry) => entry.assignmentPath === "broken");
+  const validAssignment = requireValue(
+    result.assignments.find((entry) => entry.assignmentPath === "openclaw"),
+    "expected openclaw assignment"
+  );
+  const brokenAssignment = requireValue(
+    result.assignments.find((entry) => entry.assignmentPath === "broken"),
+    "expected broken assignment"
+  );
 
   assert.equal(validAssignment.assignment, "openclaw");
   assert.equal(validAssignment.statusCount, 1);
-  assert.equal(validAssignment.statuses[0].status, "current");
+  assert.equal(firstItem(validAssignment.statuses, "validAssignment.statuses").status, "current");
 
   assert.equal(brokenAssignment.assignment, "broken");
   assert.equal(brokenAssignment.statusCount, 0);
   assert.equal(brokenAssignment.statuses.length, 0);
   assert.equal(brokenAssignment.errors.length, 1);
-  assert.equal(brokenAssignment.errors[0].code, "plan_failed");
+  assert.equal(firstItem(brokenAssignment.errors, "brokenAssignment.errors").code, "plan_failed");
 });
 
 test("status captures source read failures and continues other assignments", async (t) => {
@@ -2208,12 +2263,18 @@ assignmentPaths:
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.errors.some((entry) => entry.code === "source_read_failed"), true);
 
-  const validAssignment = result.assignments.find((entry) => entry.assignmentPath === "openclaw");
-  const brokenAssignment = result.assignments.find((entry) => entry.assignmentPath === "broken");
+  const validAssignment = requireValue(
+    result.assignments.find((entry) => entry.assignmentPath === "openclaw"),
+    "expected openclaw assignment"
+  );
+  const brokenAssignment = requireValue(
+    result.assignments.find((entry) => entry.assignmentPath === "broken"),
+    "expected broken assignment"
+  );
 
-  assert.equal(validAssignment.statuses[0].status, "current");
-  assert.equal(brokenAssignment.statuses[0].status, "unknown");
-  assert.equal(brokenAssignment.errors[0].code, "source_read_failed");
+  assert.equal(firstItem(validAssignment.statuses, "validAssignment.statuses").status, "current");
+  assert.equal(firstItem(brokenAssignment.statuses, "brokenAssignment.statuses").status, "unknown");
+  assert.equal(firstItem(brokenAssignment.errors, "brokenAssignment.errors").code, "source_read_failed");
 });
 
 test("status reports file targets as blocking target errors", async (t) => {
@@ -2258,8 +2319,11 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.summary.missing, 0);
-  assert.equal(result.statuses[0].status, "unknown");
-  const invalidTargetError = result.errors.find((entry) => entry.code === "invalid_target");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "unknown");
+  const invalidTargetError = requireValue(
+    result.errors.find((entry) => entry.code === "invalid_target"),
+    "expected invalid_target error"
+  );
   assert.equal(invalidTargetError.path, path.join(installRoot, "office-hours"));
 });
 
@@ -2302,7 +2366,7 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.summary.missing, 0);
-  assert.equal(result.statuses[0].status, "unknown");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "unknown");
   assert.equal(result.errors.some((entry) => entry.code === "target_read_failed"), true);
 });
 
@@ -2380,15 +2444,24 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.current, 1);
   assert.equal(result.summary.unknown, 1);
-  const targetReadError = result.errors.find((entry) => entry.code === "target_read_failed");
+  const targetReadError = requireValue(
+    result.errors.find((entry) => entry.code === "target_read_failed"),
+    "expected target_read_failed error"
+  );
   assert.equal(targetReadError.path, path.join(brokenRoot, "missing-skill-file"));
 
-  const validAssignment = result.assignments.find((entry) => entry.assignmentPath === "openclaw");
-  const brokenAssignment = result.assignments.find((entry) => entry.assignmentPath === "broken");
+  const validAssignment = requireValue(
+    result.assignments.find((entry) => entry.assignmentPath === "openclaw"),
+    "expected openclaw assignment"
+  );
+  const brokenAssignment = requireValue(
+    result.assignments.find((entry) => entry.assignmentPath === "broken"),
+    "expected broken assignment"
+  );
 
-  assert.equal(validAssignment.statuses[0].status, "current");
-  assert.equal(brokenAssignment.statuses[0].status, "unknown");
-  assert.equal(brokenAssignment.errors[0].code, "target_read_failed");
+  assert.equal(firstItem(validAssignment.statuses, "validAssignment.statuses").status, "current");
+  assert.equal(firstItem(brokenAssignment.statuses, "brokenAssignment.statuses").status, "unknown");
+  assert.equal(firstItem(brokenAssignment.errors, "brokenAssignment.errors").code, "target_read_failed");
 });
 
 test("status reports receipt-hash target read failures instead of dirty", async (t) => {
@@ -2439,9 +2512,12 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.summary.unknown, 1);
   assert.equal(result.summary.dirty, 0);
-  assert.equal(result.statuses[0].status, "unknown");
-  assert.equal(result.statuses[0].installedHash, await hashDirectory(sourceSkill));
-  const targetReadError = result.errors.find((entry) => entry.code === "target_read_failed");
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "unknown");
+  assert.equal(firstItem(result.statuses, "result.statuses").installedHash, await hashDirectory(sourceSkill));
+  const targetReadError = requireValue(
+    result.errors.find((entry) => entry.code === "target_read_failed"),
+    "expected target_read_failed error"
+  );
   assert.equal(targetReadError.path, path.join(installRoot, "office-hours"));
 });
 
@@ -2451,8 +2527,16 @@ async function writeReceipt({
   skillName,
   version,
   sourceCommit = "deadbeef",
-  sourceHash,
+  sourceHash = null,
   installedFiles
+}: {
+  installRoot: string;
+  sourceRoot: string;
+  skillName: string;
+  version: string;
+  sourceCommit?: string | null;
+  sourceHash?: string | null;
+  installedFiles?: ReceiptInstalledFile[] | string[];
 }) {
   const installRecord = buildInstallRecord({
     agent: "openclaw",
@@ -2478,7 +2562,7 @@ async function writeReceipt({
   );
 }
 
-async function hashDirectory(root) {
+async function hashDirectory(root: string): Promise<string> {
   const digest = createHash("sha256");
   const entries = await listFiles(root);
   for (const entry of entries) {
@@ -2492,8 +2576,8 @@ async function hashDirectory(root) {
   return digest.digest("hex");
 }
 
-async function listFiles(root) {
-  const entries = [];
+async function listFiles(root: string): Promise<string[]> {
+  const entries: string[] = [];
   const files = await readdir(root, { withFileTypes: true });
   for (const item of files) {
     const itemPath = path.join(root, item.name);
