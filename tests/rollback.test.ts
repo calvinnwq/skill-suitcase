@@ -162,6 +162,51 @@ test("rollback is a deterministic no-op after a successful rollback", async (t) 
   assert.deepEqual(second.errors, []);
 });
 
+test("rollback reports remove failures instead of falsely reporting success", async (t) => {
+  const { receiptPath, targetRoot } = await createAppliedUpdate(t);
+  const blocker = path.join(targetRoot, "not-a-directory");
+  await writeFile(blocker, "blocker\n");
+
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": { rollback: { files: unknown[] } } };
+  };
+  receipt.installs["office-hours"].rollback.files.push({
+    path: "ghost.txt",
+    targetPath: path.join(blocker, "ghost.txt"),
+    previous: { kind: "missing" }
+  });
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.failed, 1);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(result.errors.some((error) => error.code === "rollback_remove_failed"), true);
+});
+
+test("rollback reports restore write failures as failed entries without throwing", async (t) => {
+  const { receiptPath, targetRoot } = await createAppliedUpdate(t);
+  const blocker = path.join(targetRoot, "not-a-directory");
+  await writeFile(blocker, "blocker\n");
+
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": { rollback: { files: unknown[] } } };
+  };
+  receipt.installs["office-hours"].rollback.files.push({
+    path: "ghost.txt",
+    targetPath: path.join(blocker, "ghost.txt"),
+    previous: { kind: "file", bytes: Buffer.from("ghost\n").toString("base64") }
+  });
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.failed, 1);
+  assert.equal(result.errors.some((error) => error.code === "restore_write_failed"), true);
+});
+
 test("rollback reports restore-impossible entries as partial failures", async (t) => {
   const { receiptPath } = await createAppliedUpdate(t);
   const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {

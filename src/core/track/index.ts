@@ -96,13 +96,35 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
 
   for (const planned of diffResult.planned) {
     const targetPath = path.join(installRoot, planned.skill);
+    const installedFiles = await readInstalledFiles(targetPath);
+    if (installedFiles === null) {
+      errors.push(trackError({
+        code: "target_missing",
+        message: `Target directory is missing for ${planned.skill}.`,
+        skill: planned.skill,
+        path: targetPath
+      }));
+      continue;
+    }
     records.push({
       skill: planned.skill,
       sourcePath: planned.sourcePath,
       targetPath,
       version: await skillVersion(planned.sourcePath),
       sourceHash: await hashDirectory(planned.sourcePath),
-      installedFiles: await buildInstalledFiles(targetPath)
+      installedFiles
+    });
+  }
+
+  if (errors.length > 0) {
+    return failure({
+      source: diffResult.source,
+      target,
+      assignment: diffResult.assignment,
+      installRoot,
+      planned: diffResult.planned.length,
+      blocked: diffResult.blocked.length,
+      errors
     });
   }
 
@@ -268,6 +290,19 @@ function failure({
   };
 }
 
+async function readInstalledFiles(
+  targetPath: string
+): Promise<Awaited<ReturnType<typeof buildInstalledFiles>> | null> {
+  try {
+    return await buildInstalledFiles(targetPath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function hashDirectory(root: string): Promise<string> {
   const files = await collectFiles(root, root);
   const digest = createHash("sha256");
@@ -298,6 +333,10 @@ async function collectFiles(root: string, baseRoot: string): Promise<string[]> {
     }
   }
   return files;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 async function skillVersion(skillPath: string): Promise<string | null> {

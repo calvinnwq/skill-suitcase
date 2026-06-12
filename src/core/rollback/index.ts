@@ -353,12 +353,7 @@ async function restoreRollbackFile(file: RollbackFileRecord): Promise<
   }
 
   if (file.previous.kind === "missing") {
-    await unlink(file.targetPath).catch(async (error) => {
-      if (isNodeError(error) && error.code === "EISDIR") {
-        await rm(file.targetPath, { recursive: true, force: true });
-      }
-    });
-    return { status: "removed" };
+    return removeRollbackTarget(file);
   }
 
   const bytes = Buffer.from(file.previous.bytes, "base64");
@@ -370,9 +365,48 @@ async function restoreRollbackFile(file: RollbackFileRecord): Promise<
       message: `Stored rollback bytes for ${file.path} do not match their digest.`
     };
   }
-  await mkdir(path.dirname(file.targetPath), { recursive: true });
-  await writeFile(file.targetPath, bytes);
+  try {
+    await mkdir(path.dirname(file.targetPath), { recursive: true });
+    await writeFile(file.targetPath, bytes);
+  } catch (error) {
+    return {
+      status: "failed",
+      code: "restore_write_failed",
+      message: `Failed to restore ${file.path}: ${errorMessage(error)}`
+    };
+  }
   return { status: "restored" };
+}
+
+async function removeRollbackTarget(file: RollbackFileRecord): Promise<
+  | { status: "removed" }
+  | { status: "failed"; code: string; message: string }
+> {
+  try {
+    await unlink(file.targetPath);
+    return { status: "removed" };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return { status: "removed" };
+    }
+    if (isNodeError(error) && error.code === "EISDIR") {
+      try {
+        await rm(file.targetPath, { recursive: true, force: true });
+        return { status: "removed" };
+      } catch (rmError) {
+        return {
+          status: "failed",
+          code: "rollback_remove_failed",
+          message: `Failed to remove ${file.path}: ${errorMessage(rmError)}`
+        };
+      }
+    }
+    return {
+      status: "failed",
+      code: "rollback_remove_failed",
+      message: `Failed to remove ${file.path}: ${errorMessage(error)}`
+    };
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -385,4 +419,8 @@ function normalizeString(value: unknown): string | null {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown error";
 }
