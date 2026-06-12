@@ -5,6 +5,7 @@ import { planCommand } from "./plan.js";
 import { rollbackCommand } from "./rollback.js";
 import { statusCommand } from "./status.js";
 import { targetsCommand } from "./targets.js";
+import { trackCommand } from "./track.js";
 import { validateCommand } from "./validate.js";
 import { exitCodeForCommandResult, EXIT_CODE_USAGE } from "../renderers/exit-codes.js";
 import { usageText } from "../renderers/usage.js";
@@ -18,7 +19,8 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   targetsCommand,
   statusCommand,
   applyCommand,
-  rollbackCommand
+  rollbackCommand,
+  trackCommand
 ];
 
 const KNOWN_COMMAND_NAMES: ReadonlySet<string> = new Set(

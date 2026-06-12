@@ -15,7 +15,8 @@ test("command registry exposes every public command explicitly", () => {
     "targets",
     "status",
     "apply",
-    "rollback"
+    "rollback",
+    "track"
   ]);
 });
 
