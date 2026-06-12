@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createCommandRegistry, dispatchCommand, parseCommandArgs, usageText } from "../src/commands/index.js";
+import { createCommandRegistry, dispatchCommand, parseCommandArgs } from "../src/commands/index.js";
+import { usageText } from "../src/renderers/usage.js";
 
 const fixtureSource = `${process.cwd()}/tests/fixtures/skills-catalog`;
 

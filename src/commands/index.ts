@@ -5,6 +5,8 @@ import { planCommand } from "./plan.js";
 import { statusCommand } from "./status.js";
 import { targetsCommand } from "./targets.js";
 import { validateCommand } from "./validate.js";
+import { exitCodeForCommandResult, EXIT_CODE_USAGE } from "../renderers/exit-codes.js";
+import { usageText } from "../renderers/usage.js";
 import type { CommandModule, CommandName, DispatchResult, ParsedCommandArgs, ValueFlagName } from "./types.js";
 
 const DEFAULT_COMMANDS: CommandModule[] = [
@@ -35,21 +37,6 @@ export class CommandRegistry {
 
 export function createCommandRegistry(): CommandRegistry {
   return new CommandRegistry(DEFAULT_COMMANDS);
-}
-
-export function usageText(): string {
-  return [
-    "Usage:",
-    "  suitcase plan --source <skills-repo> --target <target> --json",
-    "  suitcase diff --source <skills-repo> --target <target> --json",
-    "  suitcase pack --source <skills-repo> --target <target> --dry-run --json",
-    "  suitcase pack --source <skills-repo> --target <target> --output <dir> --json",
-    "  suitcase validate --source <skills-repo> --json",
-    "  suitcase targets --source <skills-repo> --json",
-    "  suitcase status --source <skills-repo> --json",
-    "  suitcase apply --source <skills-repo> --target <target> --lock <path> --json",
-    "  suitcase apply --source <skills-repo> --target <target> --artifact <path> --json"
-  ].join("\n");
 }
 
 export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
@@ -102,7 +89,7 @@ export async function dispatchCommand(argv: string[]): Promise<DispatchResult> {
       type: "usage",
       message: error instanceof Error ? error.message : "Failed to parse arguments.",
       usage: usageText(),
-      exitCode: 2
+      exitCode: EXIT_CODE_USAGE
     };
   }
 
@@ -112,7 +99,7 @@ export async function dispatchCommand(argv: string[]): Promise<DispatchResult> {
       type: "usage",
       message: null,
       usage: usageText(),
-      exitCode: 2
+      exitCode: EXIT_CODE_USAGE
     };
   }
 
@@ -120,7 +107,7 @@ export async function dispatchCommand(argv: string[]): Promise<DispatchResult> {
   return {
     type: "result",
     result,
-    exitCode: result.ok ? 0 : 1
+    exitCode: exitCodeForCommandResult(result)
   };
 }
 

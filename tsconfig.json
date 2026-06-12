@@ -46,6 +46,11 @@
     "src/commands/targets.ts",
     "src/commands/status.ts",
     "src/commands/apply.ts",
-    "tests/commands.test.ts"
+    "tests/commands.test.ts",
+    "src/renderers/exit-codes.ts",
+    "src/renderers/json.ts",
+    "src/renderers/usage.ts",
+    "src/renderers/errors.ts",
+    "tests/renderers.test.ts"
   ]
 }

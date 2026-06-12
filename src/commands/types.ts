@@ -1,3 +1,4 @@
+import type { CliExitCode } from "../renderers/exit-codes.js";
 import type { apply } from "../apply.js";
 import type { diff } from "../diff.js";
 import type { pack } from "../packer.js";
@@ -40,11 +41,11 @@ export type DispatchResult =
   | {
     type: "result";
     result: CommandJsonResult;
-    exitCode: 0 | 1;
+    exitCode: CliExitCode;
   }
   | {
     type: "usage";
     message: string | null;
     usage: string;
-    exitCode: 2;
+    exitCode: CliExitCode;
   };

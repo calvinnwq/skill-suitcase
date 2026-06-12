@@ -120,3 +120,30 @@ test("cli apply surfaces artifact input validation failures", async (t) => {
   assert.equal(Array.isArray(malformedErrors), true);
   assert.equal(malformedErrors[0]?.code, "invalid_artifact_manifest");
 });
+
+test("cli keeps JSON on stdout and usage errors on stderr", () => {
+  const sourceRoot = join(process.cwd(), "tests", "fixtures", "skills-catalog");
+  const validResult = runCli([
+    "validate",
+    "--source",
+    sourceRoot,
+    "--json"
+  ]);
+
+  assert.equal(validResult.status, 0);
+  assert.equal(validResult.stderr, "");
+  assert.equal((parseJsonOutput(validResult.stdout) as { ok: boolean }).ok, true);
+
+  const usageResult = runCli([
+    "validate",
+    "--source",
+    sourceRoot,
+    "--json",
+    "--unknown"
+  ]);
+
+  assert.equal(usageResult.status, 2);
+  assert.equal(usageResult.stdout, "");
+  assert.equal(usageResult.stderr.includes("Unknown argument: --unknown"), true);
+  assert.equal(usageResult.stderr.includes("Usage:"), true);
+});

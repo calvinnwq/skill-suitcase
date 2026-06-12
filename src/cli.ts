@@ -1,28 +1,27 @@
 #!/usr/bin/env node
 import { dispatchCommand } from "./commands/index.js";
+import { EXIT_CODE_EXECUTION_FAILURE } from "./renderers/exit-codes.js";
+import { renderCliError, messageFromUnknownError } from "./renderers/errors.js";
+import { renderJson } from "./renderers/json.js";
 
 async function main(): Promise<void> {
   try {
     const dispatched = await dispatchCommand(process.argv.slice(2));
 
     if (dispatched.type === "usage") {
-      if (dispatched.message !== null) {
-        console.error(dispatched.message);
-      }
-      console.error(dispatched.usage);
+      process.stderr.write(renderCliError({ type: "usage", message: dispatched.message }));
       process.exitCode = dispatched.exitCode;
       return;
     }
 
-    console.log(JSON.stringify(dispatched.result, null, 2));
+    process.stdout.write(renderJson(dispatched.result));
     process.exitCode = dispatched.exitCode;
   } catch (error) {
-    if (error instanceof Error) {
-      console.error(error.message);
-    } else {
-      console.error("Unhandled command failure.");
-    }
-    process.exitCode = 1;
+    process.stderr.write(renderCliError({
+      type: "fatal",
+      message: messageFromUnknownError(error, "Unhandled command failure.")
+    }));
+    process.exitCode = EXIT_CODE_EXECUTION_FAILURE;
   }
 }
 
