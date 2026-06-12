@@ -2,6 +2,9 @@
 
 ## Development
 
+Read [`ARCHITECTURE.md`](ARCHITECTURE.md) before command, core, adapter, or
+renderer changes.
+
 ```bash
 pnpm test
 pnpm run lint
