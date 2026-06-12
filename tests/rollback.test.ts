@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -113,6 +113,23 @@ test("rollback refuses target drift before restoring", async (t) => {
   assert.equal(result.ok, false);
   assert.equal(result.errors[0]?.code, "target_drift");
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"user edit\");\n");
+});
+
+test("rollback refuses a symlinked target root before restoring", async (t) => {
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-outside-"));
+  t.after(() => rm(outsideRoot, { recursive: true, force: true }));
+  const outsideSkill = path.join(outsideRoot, "office-hours");
+  await cp(targetSkill, outsideSkill, { recursive: true });
+  await rm(targetSkill, { recursive: true, force: true });
+  await symlink(outsideSkill, targetSkill, "dir");
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "target_drift");
+  assert.equal(result.summary.refused, 1);
+  assert.equal(await readFile(path.join(outsideSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
 });
 
 test("rollback removes files that were missing before apply", async (t) => {

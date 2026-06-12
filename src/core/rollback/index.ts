@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   buildInstalledFiles,
@@ -172,7 +172,8 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
       continue;
     }
 
-    if (!(await appliedStateMatches(targetPath, rollbackState.appliedFiles))) {
+    if (!(await targetRootIsRealDirectoryUnderInstallRoot(installRoot, targetPath))
+      || !(await appliedStateMatches(targetPath, rollbackState.appliedFiles))) {
       result.ok = false;
       result.summary.refused += 1;
       result.errors.push({
@@ -450,6 +451,22 @@ async function appliedStateMatches(targetPath: string, appliedFiles: InstalledFi
     }
   }
   return true;
+}
+
+async function targetRootIsRealDirectoryUnderInstallRoot(installRoot: string, targetPath: string): Promise<boolean> {
+  try {
+    const targetInfo = await lstat(targetPath);
+    if (!targetInfo.isDirectory() || targetInfo.isSymbolicLink()) {
+      return false;
+    }
+    const [resolvedInstallRoot, resolvedTargetPath] = await Promise.all([
+      realpath(installRoot),
+      realpath(targetPath)
+    ]);
+    return isPathInsideOrSame(resolvedInstallRoot, resolvedTargetPath);
+  } catch {
+    return false;
+  }
 }
 
 async function restoreRollbackFile(file: RollbackFileRecord): Promise<
