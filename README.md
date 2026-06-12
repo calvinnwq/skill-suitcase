@@ -494,11 +494,13 @@ pnpm run lint
 pnpm run typecheck
 pnpm run build
 pnpm run format:check
+pnpm run architecture:check
 ```
 
 CI runs `pnpm test` on GitHub Actions with Node 24. The script pipeline now builds
 TypeScript output to `dist`, then runs Node's built-in test runner against
-`dist/tests/*.test.js`.
+`dist/tests/*.test.js`. `architecture:check` runs `scripts/check-architecture.mjs`
+to enforce the module boundaries described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 The first milestone has no runtime package dependencies (only the TypeScript dev
 toolchain). The manifest reader is strict and intentionally scoped to the current
