@@ -377,9 +377,11 @@ export async function apply({
     .filter((value): value is string => value !== null);
   let receiptWriteCount = 0;
   try {
-    for (const [skill] of filesAppliedBySkill) {
+    for (const [skill, skillSource] of sourceBySkill) {
       const priorState = statusBySkill.get(skill);
-      const skillSource = sourceBySkill.get(skill);
+      if (!filesAppliedBySkill.has(skill) && priorState?.status === "current") {
+        continue;
+      }
       if (!skillSource) {
         throw new Error(`No source path for ${skill}`);
       }

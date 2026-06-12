@@ -1538,6 +1538,92 @@ test("apply can be re-run after preserving an extra without a dirty deadlock", a
   assert.equal(stillPreservedGuide, "keep me\n");
 });
 
+test("apply refreshes the receipt for a skill whose only source change is a deletion", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-pure-deletion-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-pure-deletion-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+  await writeFile(path.join(sourceSkill, "guide.md"), "keep me\n");
+
+  const targetSkill = path.join(targetRoot, "office-hours");
+  await mkdir(targetSkill, { recursive: true });
+  await writeFile(path.join(targetSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(targetSkill, "runtime.js"), "console.log(\"current\");\n");
+  await writeFile(path.join(targetSkill, "guide.md"), "keep me\n");
+
+  const oldHash = await hashDirectory(sourceSkill);
+  await upsertAndWriteReceipt({
+    installRoot: targetRoot,
+    skillName: "office-hours",
+    installRecord: {
+      skill: "office-hours",
+      agent: "openclaw",
+      target: "openclaw",
+      mode: "copy",
+      source: { path: sourceSkill },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      version: "2026.06.11",
+      sourceHash: oldHash,
+      installedFiles: []
+    }
+  });
+
+  await rm(path.join(sourceSkill, "guide.md"));
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-pure-deletion-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.preApplyStatus.summary.behind, 1);
+  assert.equal(result.applied.files, 0);
+
+  const officeStatus = result.postApplyStatus?.statuses.find((item) => item.skill === "office-hours");
+  assert.equal(officeStatus?.status, "current");
+  assert.equal(result.postApplyStatus?.summary.behind, 0);
+  assert.equal(result.postApplyStatus?.summary.dirty, 0);
+
+  const preservedGuide = await readFile(path.join(targetSkill, "guide.md"), "utf8");
+  assert.equal(preservedGuide, "keep me\n");
+
+  const receiptText = await readFile(path.join(targetRoot, ".skill-suitcase-receipt.json"), "utf8");
+  const receipt = JSON.parse(receiptText) as {
+    installs?: Record<string, { sourceHash?: string } | Array<Record<string, unknown>>>;
+  };
+  const entry = receipt.installs?.["office-hours"];
+  assert.ok(entry);
+  const receivedRecord = Array.isArray(entry) ? entry[0] : entry;
+  assert.ok(receivedRecord !== undefined);
+  if (receivedRecord === undefined) {
+    return;
+  }
+  const newSourceHash = await hashDirectory(sourceSkill);
+  assert.equal(receivedRecord.sourceHash, newSourceHash);
+  assert.notEqual(receivedRecord.sourceHash, oldHash);
+});
+
 test("apply creates missing skills when in plan and applies updates atomically", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-create-success-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-create-success-target-"));
