@@ -383,11 +383,14 @@ On success (`ok: true`):
 On failure (`ok: false`), the `errors` array contains one or more objects with
 `code` and `message`. Error codes include:
 
-- `missing_apply_input` / `invalid_apply_input` — wrong combination of --lock/--artifact
-- `invalid_apply_input` — lock file is not a valid plan-lock
+- `missing_apply_input` — neither `--lock` nor `--artifact` was provided
+- `invalid_apply_input` — both flags were provided, or the lock file is not a valid plan-lock
+- `plan_lock_target_mismatch` / `plan_lock_source_mismatch` — the lock's target or source does not match the apply invocation
+- `plan_lock_*` — the plan-lock is stale, suffixed with the drift reason (for example `plan_lock_source_commit_changed`)
 - `invalid_artifact_manifest` — artifact bundle is missing, unreadable, or malformed
 - `artifact_target_mismatch` / `artifact_source_mismatch` — approval metadata does not match the apply invocation
 - `artifact_blocked` — artifact contains blocked plan entries
+- `artifact_missing_planned` — artifact contains no planned skills
 - `unmanaged_target` — target has no managed status entries; install it first
 - `unsafe_target_state` — a planned skill is `dirty` or `unknown`
 - `status_*` — a pre-apply status-layer error (prefixed with `status_`)
@@ -433,7 +436,9 @@ await upsertAndWriteReceipt({
 
 `buildReceipt` produces a bare receipt shell with `schema`, `source`, and
 `installs`. `buildInstalledFiles` hashes regular files under a skill root,
-skipping `__pycache__` directories and `.pyc` files. `upsertInstallRecord` merges
+skipping `__pycache__` directories and `.pyc` files; pass an optional
+`{ exclude }` iterable of paths to omit specific files or directories (for
+example transient apply backups) from the hash set. `upsertInstallRecord` merges
 one install record into an in-memory receipt, replacing an existing record for
 the same resolved `targetPath` or appending a new record when target paths
 differ. `upsertAndWriteReceipt` performs the same merge against the receipt on
