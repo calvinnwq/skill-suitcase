@@ -1,11 +1,11 @@
 import type { CliExitCode } from "../renderers/exit-codes.js";
-import type { apply } from "../apply.js";
-import type { diff } from "../diff.js";
-import type { pack } from "../packer.js";
-import type { plan } from "../planner.js";
-import type { status } from "../status.js";
-import type { targets } from "../targets.js";
-import type { validate } from "../validator.js";
+import type { apply } from "../core/apply/index.js";
+import type { diff } from "../core/diffing/index.js";
+import type { pack } from "../core/packing/index.js";
+import type { plan } from "../core/planning/index.js";
+import type { status } from "../core/status/index.js";
+import type { targets } from "../core/catalog/targets.js";
+import type { validate } from "../core/validation/index.js";
 
 export type CommandName = "plan" | "diff" | "pack" | "validate" | "targets" | "status" | "apply";
 

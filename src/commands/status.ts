@@ -1,4 +1,4 @@
-import { status } from "../status.js";
+import { status } from "../core/status/index.js";
 import { hasJson, hasNoTarget, hasSource, requireStringValue } from "./helpers.js";
 import type { CommandModule } from "./types.js";
 

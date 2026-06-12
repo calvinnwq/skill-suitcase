@@ -1,4 +1,4 @@
-import { validate } from "../validator.js";
+import { validate } from "../core/validation/index.js";
 import { hasJson, hasNoTarget, hasSource, requireStringValue } from "./helpers.js";
 import type { CommandModule } from "./types.js";
 

@@ -1,4 +1,4 @@
-import { apply } from "../apply.js";
+import { apply } from "../core/apply/index.js";
 import { hasJson, hasSource, hasTarget, requireStringValue } from "./helpers.js";
 import type { CommandModule } from "./types.js";
 

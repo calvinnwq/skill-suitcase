@@ -1,4 +1,4 @@
-import { pack } from "../packer.js";
+import { pack } from "../core/packing/index.js";
 import { hasJson, hasSource, hasTarget, requireStringValue } from "./helpers.js";
 import type { CommandModule } from "./types.js";
 

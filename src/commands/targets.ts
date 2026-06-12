@@ -1,4 +1,4 @@
-import { targets } from "../targets.js";
+import { targets } from "../core/catalog/targets.js";
 import { hasJson, hasNoTarget, hasSource, requireStringValue } from "./helpers.js";
 import type { CommandModule } from "./types.js";
 

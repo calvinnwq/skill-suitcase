@@ -1,4 +1,4 @@
-import { plan } from "../planner.js";
+import { plan } from "../core/planning/index.js";
 import { hasJson, hasSource, hasTarget, requireStringValue } from "./helpers.js";
 import type { CommandModule } from "./types.js";
 
