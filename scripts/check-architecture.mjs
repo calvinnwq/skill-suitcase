@@ -8,6 +8,7 @@ const srcRoot = path.join(repoRoot, "src");
 const failures = [];
 
 const sourceFiles = await collectTypeScriptFiles(srcRoot);
+const sourceFileSet = new Set(sourceFiles);
 for (const filePath of sourceFiles) {
   const relative = toRepoRelative(filePath);
   const text = await readFile(filePath, "utf8");
@@ -97,17 +98,21 @@ function importedSourceFiles(filePath, text) {
 
 function resolveSourceSpecifier(filePath, specifier) {
   const resolved = path.resolve(path.dirname(filePath), specifier);
-  const candidates = [
-    resolved,
-    `${resolved}.ts`,
-    path.join(resolved, "index.ts")
-  ];
-  for (const candidate of candidates) {
-    if (candidate.startsWith(srcRoot)) {
+  for (const candidate of candidateSourcePaths(resolved)) {
+    if (sourceFileSet.has(candidate)) {
       return toRepoRelative(candidate);
     }
   }
   return null;
+}
+
+function candidateSourcePaths(resolved) {
+  const candidates = [];
+  if (resolved.endsWith(".js")) {
+    candidates.push(`${resolved.slice(0, -3)}.ts`);
+  }
+  candidates.push(resolved, `${resolved}.ts`, path.join(resolved, "index.ts"));
+  return candidates;
 }
 
 function toRepoRelative(filePath) {

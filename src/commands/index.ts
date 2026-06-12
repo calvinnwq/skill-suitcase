@@ -19,6 +19,10 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   applyCommand
 ];
 
+const KNOWN_COMMAND_NAMES: ReadonlySet<string> = new Set(
+  DEFAULT_COMMANDS.map((command) => command.name)
+);
+
 export class CommandRegistry {
   readonly #commands: CommandModule[];
 
@@ -112,8 +116,7 @@ export async function dispatchCommand(argv: string[]): Promise<DispatchResult> {
 }
 
 function isKnownCommand(command: string): command is CommandName {
-  return command === "plan" || command === "diff" || command === "pack" || command === "validate"
-    || command === "targets" || command === "status" || command === "apply";
+  return KNOWN_COMMAND_NAMES.has(command);
 }
 
 function isValueArg(token: string): token is `--${ValueFlagName}` {
