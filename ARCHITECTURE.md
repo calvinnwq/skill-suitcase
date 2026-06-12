@@ -22,24 +22,26 @@ src/
     apply.ts
   core/
     planning/
+    diffing/
     packing/
     apply/
     receipts/
+    status/
     catalog/
+    validation/
   adapters/
     filesystem.ts
-    target-store.ts
   renderers/
     json.ts
     errors.ts
+    usage.ts
+    exit-codes.ts
   config/
     defaults.ts
-  shared/
-    result.ts
 ```
 
-This tree is a target, not permission for a big-bang shuffle. Move toward it
-one command or feature boundary at a time.
+This tree is the current target shape after the architecture refactor. Keep future
+changes moving one command or feature boundary at a time.
 
 ## Responsibilities
 
@@ -124,12 +126,15 @@ Rules:
 - `process.stdout` and `process.stderr` should stay in `cli.ts` or renderers.
 - New command behavior should not be added directly to `src/cli.ts`.
 
-## Current Migration Path
+## Migration Path
 
-Skill Suitcase currently has a flat `src/` with domain-shaped files and a
-manageable but growing `src/cli.ts`.
+Skill Suitcase has completed the initial migration: `src/cli.ts` is a thin
+entrypoint and the `commands/`, `core/`, `adapters/`, `renderers/`, and `config/`
+boundaries now exist. The original domain-shaped files in `src/` remain as
+re-export shims over `src/core/`.
 
-Move in this order:
+The migration followed this order, which also describes how to land future
+boundary moves:
 
 1. Add the command registry and move command-specific parsing/validation into
    `src/commands/`.
@@ -187,7 +192,8 @@ When adding a new product feature:
 3. Put filesystem or target install IO behind an adapter.
 4. Render JSON through `src/renderers/`.
 5. Add command-boundary tests and core behavior tests.
-6. Run `pnpm test`, `pnpm typecheck`, `pnpm build`, and `git diff --check`.
+6. Run `pnpm test`, `pnpm typecheck`, `pnpm build`, `pnpm run architecture:check`,
+   and `git diff --check`.
 
 The blunt rule: do not fatten `src/cli.ts`.
 
@@ -199,5 +205,5 @@ The architecture is working when:
 - commands are discoverable by command name or family
 - core/domain behavior is testable without CLI process IO
 - JSON stdout remains stable
-- import-boundary checks prevent obvious regressions
+- `pnpm run architecture:check` prevents obvious boundary regressions
 - new feature work naturally follows the same pattern

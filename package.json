@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "pnpm run typecheck",
     "test": "rm -rf dist && pnpm run build && node --test dist/tests/*.test.js",
-    "format:check": "git diff --check"
+    "format:check": "git diff --check",
+    "architecture:check": "node scripts/check-architecture.mjs"
   },
   "devDependencies": {
     "@types/node": "25.9.2",
