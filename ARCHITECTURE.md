@@ -20,11 +20,15 @@ src/
     targets.ts
     status.ts
     apply.ts
+    rollback.ts
+    track.ts
   core/
     planning/
     diffing/
     packing/
     apply/
+    rollback/
+    track/
     receipts/
     status/
     catalog/
