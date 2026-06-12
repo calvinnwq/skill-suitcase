@@ -253,6 +253,28 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
       item.status = item.restored > 0 || item.removed > 0 ? "partial" : "refused";
       result.ok = false;
     } else {
+      if (installWasPreviouslyMissing(record)) {
+        const removedTarget = await removeMissingInstallTarget(targetPath);
+        if (removedTarget.status === "failed") {
+          item.failed += 1;
+          result.summary.failed += 1;
+          item.status = item.restored > 0 || item.removed > 0 ? "partial" : "refused";
+          result.ok = false;
+          result.errors.push({
+            code: removedTarget.code,
+            message: removedTarget.message,
+            skill,
+            path: targetPath
+          });
+          result.rollbacks.push(item);
+          continue;
+        }
+        removeReceiptInstallRecord(installs, skill, record);
+        changedReceipt = true;
+        result.rollbacks.push(item);
+        continue;
+      }
+
       const restoredMetadata = await buildRestoredInstallMetadata(targetPath, record);
       record.installedFiles = restoredMetadata.installedFiles;
       if (restoredMetadata.sourceHash === null) {
@@ -321,6 +343,26 @@ function collectRecords(installs: Record<string, unknown>): CollectRecordsResult
     }
   }
   return { records, errors };
+}
+
+function removeReceiptInstallRecord(
+  installs: Record<string, unknown>,
+  skill: string,
+  record: ReceiptInstallRecord
+): void {
+  const existing = installs[skill];
+  if (Array.isArray(existing)) {
+    const nextRecords = existing.filter((entry) => entry !== record);
+    if (nextRecords.length === 0) {
+      delete installs[skill];
+      return;
+    }
+    installs[skill] = nextRecords.length === 1 ? nextRecords[0] : nextRecords;
+    return;
+  }
+  if (existing === record) {
+    delete installs[skill];
+  }
 }
 
 function normalizeRollback(value: unknown, installRoot: string): RollbackParseResult {
@@ -558,6 +600,26 @@ async function buildRestoredInstallMetadata(
     version: await restoredVersion(targetPath, record),
     sourceCommit: restoredStringFromPriorState(record.priorState, "installedCommit")
   };
+}
+
+function installWasPreviouslyMissing(record: ReceiptInstallRecord): boolean {
+  return isRecord(record.priorState) && record.priorState.status === "missing";
+}
+
+async function removeMissingInstallTarget(targetPath: string): Promise<
+  | { status: "removed" }
+  | { status: "failed"; code: string; message: string }
+> {
+  try {
+    await rm(targetPath, { recursive: true, force: true });
+    return { status: "removed" };
+  } catch (error) {
+    return {
+      status: "failed",
+      code: "rollback_remove_failed",
+      message: `Failed to remove ${targetPath}: ${errorMessage(error)}`
+    };
+  }
 }
 
 async function restoredVersion(targetPath: string, record: ReceiptInstallRecord): Promise<string | null> {

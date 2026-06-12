@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -185,7 +185,7 @@ test("rollback refuses file paths with symlinked ancestors", async (t) => {
   await assert.rejects(readFile(path.join(outsideRoot, "escaped.txt"), "utf8"), /ENOENT/);
 });
 
-test("rollback removes files that were missing before apply", async (t) => {
+test("rollback removes installs that were missing before apply", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-missing-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-missing-target-"));
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));
@@ -219,6 +219,10 @@ test("rollback removes files that were missing before apply", async (t) => {
   assert.equal(result.ok, true);
   assert.equal(result.summary.removed, 2);
   await assert.rejects(readFile(path.join(targetSkill, "runtime.js"), "utf8"), /ENOENT/);
+  await assert.rejects(stat(targetSkill), /ENOENT/);
+
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as { installs?: Record<string, unknown> };
+  assert.equal(receipt.installs?.["office-hours"], undefined);
 });
 
 test("rollback is a deterministic no-op after a successful rollback", async (t) => {
