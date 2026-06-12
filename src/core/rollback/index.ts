@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   buildInstalledFiles,
@@ -72,6 +72,11 @@ type InstalledFile = {
   hash: string;
 };
 
+type CollectRecordsResult = {
+  records: Array<{ skill: string; record: ReceiptInstallRecord }>;
+  errors: Array<{ skill: string; message: string }>;
+};
+
 type RollbackParseResult = {
   kind: "none";
 } | {
@@ -120,7 +125,26 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
   }
 
   let changedReceipt = false;
-  const records = collectRecords(installs);
+  const collected = collectRecords(installs);
+  for (const error of collected.errors) {
+    result.ok = false;
+    result.summary.refused += 1;
+    result.errors.push({
+      code: "invalid_receipt",
+      message: `Invalid install record for ${error.skill}: ${error.message}`,
+      skill: error.skill
+    });
+    result.rollbacks.push({
+      skill: error.skill,
+      targetPath: null,
+      status: "refused",
+      restored: 0,
+      removed: 0,
+      failed: 0
+    });
+  }
+
+  const records = collected.records;
   records.sort((left, right) => left.skill.localeCompare(right.skill));
 
   for (const { skill, record } of records) {
@@ -173,6 +197,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     }
 
     if (!(await targetRootIsRealDirectoryUnderInstallRoot(installRoot, targetPath))
+      || !(await rollbackFilePathsStayInRealTarget(targetPath, rollbackState.files))
       || !(await appliedStateMatches(targetPath, rollbackState.appliedFiles))) {
       result.ok = false;
       result.summary.refused += 1;
@@ -228,6 +253,23 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
       item.status = item.restored > 0 || item.removed > 0 ? "partial" : "refused";
       result.ok = false;
     } else {
+      const restoredMetadata = await buildRestoredInstallMetadata(targetPath, record);
+      record.installedFiles = restoredMetadata.installedFiles;
+      if (restoredMetadata.sourceHash === null) {
+        delete record.sourceHash;
+      } else {
+        record.sourceHash = restoredMetadata.sourceHash;
+      }
+      if (restoredMetadata.version === null) {
+        delete record.version;
+      } else {
+        record.version = restoredMetadata.version;
+      }
+      if (restoredMetadata.sourceCommit === null) {
+        delete record.sourceCommit;
+      } else {
+        record.sourceCommit = restoredMetadata.sourceCommit;
+      }
       record.rollback = {
         ...rollbackState.raw,
         status: "rolled-back"
@@ -265,17 +307,20 @@ async function readReceipt(receiptPath: string): Promise<Receipt> {
   return parsed as Receipt;
 }
 
-function collectRecords(installs: Record<string, unknown>): Array<{ skill: string; record: ReceiptInstallRecord }> {
+function collectRecords(installs: Record<string, unknown>): CollectRecordsResult {
   const records: Array<{ skill: string; record: ReceiptInstallRecord }> = [];
+  const errors: Array<{ skill: string; message: string }> = [];
   for (const [skill, value] of Object.entries(installs)) {
     const entries = Array.isArray(value) ? value : [value];
     for (const entry of entries) {
       if (isRecord(entry)) {
         records.push({ skill, record: entry as ReceiptInstallRecord });
+        continue;
       }
+      errors.push({ skill, message: "install entries must be objects." });
     }
   }
-  return records;
+  return { records, errors };
 }
 
 function normalizeRollback(value: unknown, installRoot: string): RollbackParseResult {
@@ -467,6 +512,120 @@ async function targetRootIsRealDirectoryUnderInstallRoot(installRoot: string, ta
   } catch {
     return false;
   }
+}
+
+async function rollbackFilePathsStayInRealTarget(targetRoot: string, files: RollbackFileRecord[]): Promise<boolean> {
+  for (const file of files) {
+    if (!isPathInsideOrSame(targetRoot, file.targetPath) || await pathHasSymlinkComponent(targetRoot, file.targetPath)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function pathHasSymlinkComponent(root: string, targetPath: string): Promise<boolean> {
+  const relativePath = path.relative(path.resolve(root), path.resolve(targetPath));
+  if (relativePath === "") {
+    return false;
+  }
+
+  const parts = relativePath.split(path.sep).filter((part) => part.length > 0);
+  let currentPath = path.resolve(root);
+  for (const part of parts) {
+    currentPath = path.join(currentPath, part);
+    try {
+      if ((await lstat(currentPath)).isSymbolicLink()) {
+        return true;
+      }
+    } catch (error) {
+      if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+        continue;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+async function buildRestoredInstallMetadata(
+  targetPath: string,
+  record: ReceiptInstallRecord
+): Promise<{ installedFiles: InstalledFile[]; sourceHash: string | null; version: string | null; sourceCommit: string | null }> {
+  const installedFiles = await buildInstalledFiles(targetPath).catch(() => []);
+  return {
+    installedFiles,
+    sourceHash: await hashDirectory(targetPath).catch(() => null),
+    version: await restoredVersion(targetPath, record),
+    sourceCommit: restoredStringFromPriorState(record.priorState, "installedCommit")
+  };
+}
+
+async function restoredVersion(targetPath: string, record: ReceiptInstallRecord): Promise<string | null> {
+  const version = await readSkillVersion(targetPath).catch(() => null);
+  return version ?? restoredStringFromPriorState(record.priorState, "installedVersion");
+}
+
+async function readSkillVersion(targetPath: string): Promise<string | null> {
+  const text = await readFile(path.join(targetPath, "SKILL.md"), "utf8");
+  const lines = text.split(/\r?\n/);
+  if (lines[0] !== "---") {
+    return null;
+  }
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === undefined) {
+      continue;
+    }
+    const trimmed = line.trim();
+    if (trimmed === "---") {
+      break;
+    }
+    if (trimmed.startsWith("version:")) {
+      const version = trimmed.slice("version:".length).trim();
+      return version.length > 0 ? version : null;
+    }
+  }
+  return null;
+}
+
+function restoredStringFromPriorState(priorState: unknown, key: string): string | null {
+  if (!isRecord(priorState)) {
+    return null;
+  }
+  const value = priorState[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+async function hashDirectory(root: string): Promise<string> {
+  const files = await listFiles(root);
+  const digest = createHash("sha256");
+  for (const relativePath of files) {
+    const bytes = await readFile(path.join(root, relativePath));
+    digest.update(relativePath);
+    digest.update("\0");
+    digest.update(bytes);
+    digest.update("\0");
+  }
+  return digest.digest("hex");
+}
+
+async function listFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
+      continue;
+    }
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listFiles(entryPath)).map((item) => path.join(entry.name, item)));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(entry.name);
+    }
+  }
+  return files.sort();
 }
 
 async function restoreRollbackFile(file: RollbackFileRecord): Promise<

@@ -7,7 +7,8 @@ import { test } from "node:test";
 import { buildPlanLock } from "../src/plan-lock.js";
 import { apply } from "../src/apply.js";
 import { rollback } from "../src/rollback.js";
-import { RECEIPT_FILE, upsertAndWriteReceipt } from "../src/receipt.js";
+import { buildInstalledFiles, RECEIPT_FILE, upsertAndWriteReceipt } from "../src/receipt.js";
+import { status } from "../src/status.js";
 
 async function writeCatalog(sourceRoot: string, targetRoot: string): Promise<void> {
   await writeFile(
@@ -104,6 +105,34 @@ test("apply captures rollback state and rollback restores previous file bytes", 
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"old\");\n");
 });
 
+test("rollback updates receipt metadata to the restored target state", async (t) => {
+  const { receiptPath, sourceRoot, targetSkill } = await createAppliedUpdate(t);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, true);
+
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: {
+      "office-hours": {
+        version?: string;
+        sourceHash?: string;
+        installedFiles?: unknown;
+        rollback?: { status?: string };
+      };
+    };
+  };
+  const record = receipt.installs["office-hours"];
+  assert.equal(record.rollback?.status, "rolled-back");
+  assert.equal(record.version, "2026.06.11");
+  assert.equal(record.sourceHash, await hashDirectory(targetSkill));
+  assert.deepEqual(record.installedFiles, await buildInstalledFiles(targetSkill));
+
+  const statusResult = await status({ source: sourceRoot });
+  const officeHours = statusResult.statuses.find((entry) => entry.skill === "office-hours");
+  assert.equal(officeHours?.status, "behind");
+});
+
 test("rollback refuses target drift before restoring", async (t) => {
   const { receiptPath, targetSkill } = await createAppliedUpdate(t);
   await writeFile(path.join(targetSkill, "runtime.js"), "console.log(\"user edit\");\n");
@@ -130,6 +159,30 @@ test("rollback refuses a symlinked target root before restoring", async (t) => {
   assert.equal(result.errors[0]?.code, "target_drift");
   assert.equal(result.summary.refused, 1);
   assert.equal(await readFile(path.join(outsideSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+});
+
+test("rollback refuses file paths with symlinked ancestors", async (t) => {
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-nested-symlink-outside-"));
+  t.after(() => rm(outsideRoot, { recursive: true, force: true }));
+  const linkPath = path.join(targetSkill, "nested");
+  await symlink(outsideRoot, linkPath, "dir");
+
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": { rollback: { files: unknown[] } } };
+  };
+  receipt.installs["office-hours"].rollback.files.push({
+    path: "nested/escaped.txt",
+    targetPath: path.join(targetSkill, "nested", "escaped.txt"),
+    previous: { kind: "file", bytes: Buffer.from("escaped\n").toString("base64") }
+  });
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "target_drift");
+  await assert.rejects(readFile(path.join(outsideRoot, "escaped.txt"), "utf8"), /ENOENT/);
 });
 
 test("rollback removes files that were missing before apply", async (t) => {
@@ -290,6 +343,27 @@ test("rollback refuses malformed rollback file state", async (t) => {
   assert.equal(result.errors[0]?.code, "invalid_receipt");
   assert.equal(result.summary.refused, 1);
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+});
+
+test("rollback refuses malformed install records", async (t) => {
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-invalid-install-"));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  const receiptPath = path.join(targetRoot, RECEIPT_FILE);
+  await writeFile(
+    receiptPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      installs: {
+        "office-hours": null
+      }
+    }, null, 2)}\n`
+  );
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.refused, 1);
+  assert.equal(result.errors[0]?.code, "invalid_receipt");
 });
 
 test("rollback refuses missing applied rollback state", async (t) => {
