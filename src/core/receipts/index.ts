@@ -35,6 +35,7 @@ export type ReceiptInstallRecord = {
   sourceHash?: string;
   installedFiles?: unknown;
   priorState?: UnknownRecord;
+  rollback?: UnknownRecord;
 };
 
 export interface Receipt {
@@ -326,7 +327,8 @@ export function buildInstallRecord(
     sourceCommit,
     sourceHash,
     installedFiles,
-    priorState
+    priorState,
+    rollback
   } = installRecord;
 
   const record: ReceiptInstallRecord = {};
@@ -366,6 +368,9 @@ export function buildInstallRecord(
   }
   if (priorState !== undefined && priorState !== null && typeof priorState === "object") {
     record.priorState = priorState as UnknownRecord;
+  }
+  if (rollback !== undefined && rollback !== null && typeof rollback === "object") {
+    record.rollback = rollback as UnknownRecord;
   }
 
   return record;

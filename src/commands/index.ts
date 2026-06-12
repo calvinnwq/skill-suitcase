@@ -2,6 +2,7 @@ import { applyCommand } from "./apply.js";
 import { diffCommand } from "./diff.js";
 import { packCommand } from "./pack.js";
 import { planCommand } from "./plan.js";
+import { rollbackCommand } from "./rollback.js";
 import { statusCommand } from "./status.js";
 import { targetsCommand } from "./targets.js";
 import { validateCommand } from "./validate.js";
@@ -16,7 +17,8 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   validateCommand,
   targetsCommand,
   statusCommand,
-  applyCommand
+  applyCommand,
+  rollbackCommand
 ];
 
 const KNOWN_COMMAND_NAMES: ReadonlySet<string> = new Set(
@@ -121,5 +123,5 @@ function isKnownCommand(command: string): command is CommandName {
 
 function isValueArg(token: string): token is `--${ValueFlagName}` {
   return token === "--source" || token === "--target" || token === "--output" || token === "--lock"
-    || token === "--artifact";
+    || token === "--artifact" || token === "--receipt";
 }

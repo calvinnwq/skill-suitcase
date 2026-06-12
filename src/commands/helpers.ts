@@ -16,7 +16,7 @@ export function hasNoTarget(args: ParsedCommandArgs): boolean {
   return !hasTarget(args);
 }
 
-export function requireStringValue(name: ValueFlagName | "source", value: string | undefined): string {
+export function requireStringValue(name: ValueFlagName | "source" | "receipt", value: string | undefined): string {
   if (typeof value !== "string") {
     throw new Error(`${name} is required`);
   }
