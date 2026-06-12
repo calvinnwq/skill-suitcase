@@ -574,7 +574,7 @@ async function statusSkill({
         installedCommit
       });
     }
-    if (targetHash !== installedHash) {
+    if (targetHash !== installedHash && !(await targetMatchesInstalledFiles(targetPath, installRecord.installedFiles))) {
       return {
         status: "dirty",
         reason: "target files differ from receipt",
@@ -1315,6 +1315,55 @@ async function targetDiffersFromSource(source: string, target: string): Promise<
 
 async function hashInstalledTarget(targetPath: string): Promise<string> {
   return hashDirectory(targetPath);
+}
+
+async function targetMatchesInstalledFiles(
+  targetPath: string,
+  installedFiles: InstalledFileRecord[] | null | undefined
+): Promise<boolean> {
+  if (!Array.isArray(installedFiles) || installedFiles.length === 0) {
+    return false;
+  }
+
+  const expected = new Map<string, string>();
+  for (const file of installedFiles) {
+    const filePath = normalizeValue(file?.path);
+    const hash = normalizeValue(file?.hash);
+    if (filePath === null || hash === null) {
+      return false;
+    }
+    expected.set(filePath, hash);
+  }
+
+  let actualFiles: string[];
+  try {
+    actualFiles = await listFiles(targetPath);
+  } catch {
+    return false;
+  }
+
+  if (actualFiles.length !== expected.size) {
+    return false;
+  }
+
+  for (const relativePath of actualFiles) {
+    const expectedHash = expected.get(relativePath);
+    if (expectedHash === undefined) {
+      return false;
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(path.join(targetPath, relativePath));
+    } catch {
+      return false;
+    }
+    const actualHash = createHash("sha256").update(bytes).digest("hex");
+    if (actualHash !== expectedHash) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 async function getSymlinkTarget(target: string): Promise<string | null> {

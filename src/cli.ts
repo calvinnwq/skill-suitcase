@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-type CliCommand = "plan" | "diff" | "pack" | "validate" | "targets" | "status" | "help";
+type CliCommand = "plan" | "diff" | "pack" | "validate" | "targets" | "status" | "apply" | "help";
 
 type CliParsedArgs = {
   command: CliCommand | null;
@@ -8,16 +8,11 @@ type CliParsedArgs = {
   source?: string;
   target?: string;
   output?: string;
+  lock?: string;
+  artifact?: string;
 };
 
-type FlagName = "source" | "target" | "output";
-
-import { plan } from "./planner.js";
-import { pack } from "./packer.js";
-import { diff } from "./diff.js";
-import { validate } from "./validator.js";
-import { targets } from "./targets.js";
-import { status } from "./status.js";
+type FlagName = "source" | "target" | "output" | "lock" | "artifact";
 
 type CliCommandResult =
   | Awaited<ReturnType<typeof plan>>
@@ -25,7 +20,8 @@ type CliCommandResult =
   | Awaited<ReturnType<typeof diff>>
   | Awaited<ReturnType<typeof validate>>
   | Awaited<ReturnType<typeof targets>>
-  | Awaited<ReturnType<typeof status>>;
+  | Awaited<ReturnType<typeof status>>
+  | Awaited<ReturnType<typeof apply>>;
 
 type CommandFlags = {
   isPlan: boolean;
@@ -33,7 +29,16 @@ type CommandFlags = {
   isPack: boolean;
   isTargets: boolean;
   isStatus: boolean;
+  isApply: boolean;
 };
+
+import { apply } from "./apply.js";
+import { diff } from "./diff.js";
+import { pack } from "./packer.js";
+import { plan } from "./planner.js";
+import { status } from "./status.js";
+import { targets } from "./targets.js";
+import { validate } from "./validator.js";
 
 function printUsage() {
   console.error("Usage:");
@@ -44,6 +49,8 @@ function printUsage() {
   console.error("  suitcase validate --source <skills-repo> --json");
   console.error("  suitcase targets --source <skills-repo> --json");
   console.error("  suitcase status --source <skills-repo> --json");
+  console.error("  suitcase apply --source <skills-repo> --target <target> --lock <path> --json");
+  console.error("  suitcase apply --source <skills-repo> --target <target> --artifact <path> --json");
 }
 
 function parseArgs(argv: string[]): CliParsedArgs {
@@ -105,6 +112,8 @@ async function main() {
   const hasJson = args.json === true;
   const hasTarget = typeof args.target === "string";
   const hasSource = typeof args.source === "string";
+  const hasLock = typeof args.lock === "string";
+  const hasArtifact = typeof args.artifact === "string";
   const hasOutput = typeof args.output === "string";
   const hasNoTarget = !hasTarget;
   const hasPackOutputOrDryRun = args.dryRun || hasOutput;
@@ -115,15 +124,24 @@ async function main() {
   const isValidate = args.command === "validate" && hasSource && hasNoTarget && hasJson;
   const isTargets = args.command === "targets" && hasSource && hasNoTarget && hasJson;
   const isStatus = args.command === "status" && hasSource && hasNoTarget && hasJson;
+  const isApply = args.command === "apply" && hasSource && hasTarget && hasJson
+    && ((hasLock || hasArtifact) && !(hasLock && hasArtifact));
 
-  if (!isPlan && !isDiff && !isPack && !isValidate && !isTargets && !isStatus) {
+  if (!isPlan && !isDiff && !isPack && !isValidate && !isTargets && !isStatus && !isApply) {
     printUsage();
     process.exitCode = 2;
     return;
   }
 
   try {
-    const result = await runCommand(args, { isPlan, isDiff, isPack, isTargets, isStatus });
+    const result = await runCommand(args, {
+      isPlan,
+      isDiff,
+      isPack,
+      isTargets,
+      isStatus,
+      isApply
+    });
     console.log(JSON.stringify(result, null, 2));
     process.exitCode = result.ok ? 0 : 1;
   } catch (error) {
@@ -138,16 +156,17 @@ async function main() {
 
 function isKnownCommand(command: string): command is CliCommand {
   return command === "plan" || command === "diff" || command === "pack" || command === "validate"
-    || command === "targets" || command === "status";
+    || command === "targets" || command === "status" || command === "apply";
 }
 
 function isValueArg(token: string): token is `--${FlagName}` {
-  return token === "--source" || token === "--target" || token === "--output";
+  return token === "--source" || token === "--target" || token === "--output" || token === "--lock"
+    || token === "--artifact";
 }
 
 async function runCommand(
   args: CliParsedArgs,
-  { isPlan, isDiff, isPack, isTargets, isStatus }: CommandFlags
+  { isPlan, isDiff, isPack, isTargets, isStatus, isApply }: CommandFlags
 ): Promise<CliCommandResult> {
   if (isPlan) {
     return plan({
@@ -178,6 +197,28 @@ async function runCommand(
 
   if (isStatus) {
     return status({ source: requireStringValue("source", args.source) });
+  }
+
+  if (isApply) {
+    const applyInput: {
+      source: string;
+      target: string;
+      lock?: string;
+      artifact?: string;
+    } = {
+      source: requireStringValue("source", args.source),
+      target: requireStringValue("target", args.target)
+    };
+
+    if (args.lock !== undefined) {
+      applyInput.lock = args.lock;
+    }
+
+    if (args.artifact !== undefined) {
+      applyInput.artifact = args.artifact;
+    }
+
+    return apply(applyInput);
   }
 
   return validate({

@@ -2,11 +2,14 @@
 
 Skill Suitcase is a CLI for planning portable skill installs from a catalog repo.
 
-Milestone 1 CLI commands are deliberately non-mutating for live installs. They
+Read-only commands (`plan`, `diff`, `pack`, `validate`, `targets`, `status`)
 read a catalog manifest, resolve assignments and assignment paths, and emit JSON
-plans, diffs, target discovery, bundle manifests, or status reports. They do not
-copy skill files into target install paths, mutate target install paths, or
-touch runtime homes.
+plans, diffs, target discovery, bundle manifests, or status reports without
+touching target install paths or runtime homes.
+
+The `apply` command writes skill files into target install paths. It requires
+an explicit approval input (plan-lock or staging artifact), refuses dirty or
+unmanaged targets, writes transactionally, and emits receipts.
 
 ## Usage
 
@@ -19,6 +22,8 @@ node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target opencl
 node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
+node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --json
+node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --artifact /tmp/skill-suitcase-bundle.json --json
 ```
 
 Targets currently exercised against fixture #1:
@@ -344,6 +349,53 @@ to either the assignment install root or `<installRoot>/<skill-name>`; relative
 `targetPath` values resolve under `installRoot`. Ambiguous or missing matches
 are reported as `invalid_receipt`.
 
+## `apply` Output
+
+`apply` requires exactly one of `--lock` (a plan-lock file path) or `--artifact`
+(a staging bundle path or directory). It validates the approval input, checks
+pre-apply target status, writes skill files transactionally, and emits a receipt
+per skill.
+
+On success (`ok: true`):
+
+```json
+{
+  "ok": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "target": "openclaw",
+  "mode": "lock",
+  "input": "/tmp/plan-lock.json",
+  "assignment": "openclaw",
+  "planTarget": "openclaw",
+  "installRoot": "/tmp/openclaw-install",
+  "preApplyStatus": {
+    "source": "/Users/ngxcalvin/repos/skills",
+    "statuses": [{ "skill": "office-hours", "status": "behind", "reason": "..." }],
+    "summary": { "total": 1, "behind": 1, "current": 0, "dirty": 0, "missing": 0, "unknown": 0, "blocked": 0, "version": 0, "unchanged": 0 }
+  },
+  "postApplyStatus": { "ok": true, "statuses": [{ "skill": "office-hours", "status": "current" }] },
+  "summary": { "planned": 1, "blocked": 0, "create": 0, "update": 1, "unchanged": 0, "extra": 0, "missing": 0 },
+  "applied": { "skills": ["office-hours"], "files": 1 },
+  "errors": []
+}
+```
+
+On failure (`ok: false`), the `errors` array contains one or more objects with
+`code` and `message`. Error codes include:
+
+- `missing_apply_input` — neither `--lock` nor `--artifact` was provided
+- `invalid_apply_input` — both flags were provided, or the lock file is not a valid plan-lock
+- `plan_lock_target_mismatch` / `plan_lock_source_mismatch` — the lock's target or source does not match the apply invocation
+- `plan_lock_*` — the plan-lock is stale, suffixed with the drift reason (for example `plan_lock_source_commit_changed`)
+- `invalid_artifact_manifest` — artifact bundle is missing, unreadable, or malformed
+- `artifact_target_mismatch` / `artifact_source_mismatch` — approval metadata does not match the apply invocation
+- `artifact_blocked` — artifact contains blocked plan entries
+- `artifact_missing_planned` — artifact contains no planned skills
+- `unmanaged_target` — target has no managed status entries; install it first
+- `unsafe_target_state` — a planned skill is `dirty` or `unknown`
+- `status_*` — a pre-apply status-layer error (prefixed with `status_`)
+- `write_error` — a file write or rollback failure
+
 ## Receipt Module
 
 `src/receipt.ts` (and its compiled output at `dist/src/receipt.js`) provides
@@ -384,7 +436,9 @@ await upsertAndWriteReceipt({
 
 `buildReceipt` produces a bare receipt shell with `schema`, `source`, and
 `installs`. `buildInstalledFiles` hashes regular files under a skill root,
-skipping `__pycache__` directories and `.pyc` files. `upsertInstallRecord` merges
+skipping `__pycache__` directories and `.pyc` files; pass an optional
+`{ exclude }` iterable of paths to omit specific files or directories (for
+example transient apply backups) from the hash set. `upsertInstallRecord` merges
 one install record into an in-memory receipt, replacing an existing record for
 the same resolved `targetPath` or appending a new record when target paths
 differ. `upsertAndWriteReceipt` performs the same merge against the receipt on
