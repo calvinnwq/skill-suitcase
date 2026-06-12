@@ -65,6 +65,7 @@
     "src/receipt.ts",
     "src/status.ts",
     "tests/core-boundaries.test.ts",
-    "src/adapters/filesystem.ts"
+    "src/adapters/filesystem.ts",
+    "tests/architecture-guardrails.test.ts"
   ]
 }

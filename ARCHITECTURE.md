@@ -22,24 +22,26 @@ src/
     apply.ts
   core/
     planning/
+    diffing/
     packing/
     apply/
     receipts/
+    status/
     catalog/
+    validation/
   adapters/
     filesystem.ts
-    target-store.ts
   renderers/
     json.ts
     errors.ts
+    usage.ts
+    exit-codes.ts
   config/
     defaults.ts
-  shared/
-    result.ts
 ```
 
-This tree is a target, not permission for a big-bang shuffle. Move toward it
-one command or feature boundary at a time.
+This tree is the current target shape after the architecture refactor. Keep future
+changes moving one command or feature boundary at a time.
 
 ## Responsibilities
 
@@ -199,5 +201,5 @@ The architecture is working when:
 - commands are discoverable by command name or family
 - core/domain behavior is testable without CLI process IO
 - JSON stdout remains stable
-- import-boundary checks prevent obvious regressions
+- `pnpm run architecture:check` prevents obvious boundary regressions
 - new feature work naturally follows the same pattern
