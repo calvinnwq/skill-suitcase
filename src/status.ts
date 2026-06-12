@@ -1351,7 +1351,12 @@ async function targetMatchesInstalledFiles(
     if (expectedHash === undefined) {
       return false;
     }
-    const bytes = await readFile(path.join(targetPath, relativePath));
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(path.join(targetPath, relativePath));
+    } catch {
+      return false;
+    }
     const actualHash = createHash("sha256").update(bytes).digest("hex");
     if (actualHash !== expectedHash) {
       return false;

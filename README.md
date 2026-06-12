@@ -375,7 +375,7 @@ On success (`ok: true`):
   },
   "postApplyStatus": { "ok": true, "statuses": [{ "skill": "office-hours", "status": "current" }] },
   "summary": { "planned": 1, "blocked": 0, "create": 0, "update": 1, "unchanged": 0, "extra": 0, "missing": 0 },
-  "applied": { "skills": ["office-hours"], "files": 2 },
+  "applied": { "skills": ["office-hours"], "files": 1 },
   "errors": []
 }
 ```
