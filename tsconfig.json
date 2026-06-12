@@ -35,6 +35,17 @@
     "src/status.ts",
     "tests/status.test.ts",
     "tests/apply.test.ts",
-    "tests/cli.test.ts"
+    "tests/cli.test.ts",
+    "src/commands/types.ts",
+    "src/commands/helpers.ts",
+    "src/commands/index.ts",
+    "src/commands/plan.ts",
+    "src/commands/diff.ts",
+    "src/commands/pack.ts",
+    "src/commands/validate.ts",
+    "src/commands/targets.ts",
+    "src/commands/status.ts",
+    "src/commands/apply.ts",
+    "tests/commands.test.ts"
   ]
 }
