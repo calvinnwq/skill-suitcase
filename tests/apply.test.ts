@@ -1438,6 +1438,10 @@ test("apply writes files, emits receipt, and preserves extras", async (t) => {
   assert.equal(result.postApplyStatus?.ok, true);
   assert.equal(result.preApplyStatus.summary.behind, 1);
 
+  const officeStatus = result.postApplyStatus?.statuses.find((item) => item.skill === "office-hours");
+  assert.equal(officeStatus?.status, "current");
+  assert.equal(result.postApplyStatus?.summary.dirty, 0);
+
   const createdNotes = await readFile(path.join(targetSkill, "notes.md"), "utf8");
   assert.equal(createdNotes, "apply me\n");
 
@@ -1466,6 +1470,72 @@ test("apply writes files, emits receipt, and preserves extras", async (t) => {
 
   const finalInstalledFiles = await readdir(targetSkill);
   assert.ok(finalInstalledFiles.includes("guide.md"));
+});
+
+test("apply can be re-run after preserving an extra without a dirty deadlock", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-reapply-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-reapply-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+  await writeFile(path.join(sourceSkill, "guide.md"), "keep me\n");
+
+  const targetSkill = path.join(targetRoot, "office-hours");
+  await mkdir(targetSkill, { recursive: true });
+  await writeFile(path.join(targetSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(targetSkill, "runtime.js"), "console.log(\"current\");\n");
+  await writeFile(path.join(targetSkill, "guide.md"), "keep me\n");
+
+  await upsertAndWriteReceipt({
+    installRoot: targetRoot,
+    skillName: "office-hours",
+    installRecord: {
+      skill: "office-hours",
+      agent: "openclaw",
+      target: "openclaw",
+      mode: "copy",
+      source: { path: sourceSkill },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      version: "2026.06.11",
+      sourceHash: await hashDirectory(sourceSkill),
+      installedFiles: []
+    }
+  });
+
+  await rm(path.join(sourceSkill, "guide.md"));
+  await writeFile(path.join(sourceSkill, "notes.md"), "apply me\n");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-reapply-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const firstResult = await apply({ source: sourceRoot, target: "openclaw", lock: lockPath });
+  assert.equal(firstResult.ok, true);
+
+  const secondResult = await apply({ source: sourceRoot, target: "openclaw", lock: lockPath });
+  assert.equal(secondResult.ok, true);
+  assert.equal(secondResult.errors.some((error) => error.code === "unsafe_target_state"), false);
+
+  const secondOfficeStatus = secondResult.preApplyStatus.statuses.find((item) => item.skill === "office-hours");
+  assert.equal(secondOfficeStatus?.status, "current");
+
+  const stillPreservedGuide = await readFile(path.join(targetSkill, "guide.md"), "utf8");
+  assert.equal(stillPreservedGuide, "keep me\n");
 });
 
 test("apply creates missing skills when in plan and applies updates atomically", async (t) => {
@@ -2098,6 +2168,10 @@ test("apply accepts artifact input and applies planned updates", async (t) => {
   assert.equal(result.postApplyStatus !== null, true);
   assert.equal(result.postApplyStatus?.ok, true);
   assert.equal(result.applied.files > 0, true);
+
+  const officeStatus = result.postApplyStatus?.statuses.find((item) => item.skill === "office-hours");
+  assert.equal(officeStatus?.status, "current");
+  assert.equal(result.postApplyStatus?.summary.dirty, 0);
 
   const createdNotes = await readFile(path.join(targetSkill, "notes.md"), "utf8");
   assert.equal(createdNotes, "apply me\n");

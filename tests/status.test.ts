@@ -1073,6 +1073,110 @@ assignmentPaths:
   assert.equal(firstItem(result.statuses, "result.statuses").status, "behind");
 });
 
+test("status keeps installs current when the target matches installedFiles despite preserved extras", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-extras-current-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-extras-current-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+  await writeFile(path.join(sourceSkill, "notes.md"), "apply me\n");
+
+  const targetSkill = path.join(installRoot, "office-hours");
+  await cp(sourceSkill, targetSkill, { recursive: true });
+  await writeFile(path.join(targetSkill, "guide.md"), "keep me\n");
+
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(sourceSkill),
+    installedFiles: await buildInstalledFiles(targetSkill)
+  });
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.dirty, 0);
+  assert.equal(result.summary.current, 1);
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
+});
+
+test("status still reports dirty when a tracked installedFiles entry is modified", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-extras-tamper-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-extras-tamper-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  const targetSkill = path.join(installRoot, "office-hours");
+  await cp(sourceSkill, targetSkill, { recursive: true });
+
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(sourceSkill),
+    installedFiles: await buildInstalledFiles(targetSkill)
+  });
+
+  await writeFile(path.join(targetSkill, "runtime.js"), "console.log(\"tampered\");\n");
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.summary.dirty, 1);
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "dirty");
+});
+
 test("status reports stale symlinked installs as behind instead of dirty", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-stale-link-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-stale-link-install-"));

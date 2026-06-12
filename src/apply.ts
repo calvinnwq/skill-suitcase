@@ -468,7 +468,12 @@ export async function apply({
 
   await cleanupApplyBackups({ restorePlan });
 
-  const postApplyStatus = await status({ source: diffResult.source });
+  let postApplyStatus: StatusResult | null = null;
+  try {
+    postApplyStatus = await status({ source: diffResult.source });
+  } catch {
+    postApplyStatus = null;
+  }
 
   return {
     ok: true,
