@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -384,4 +384,31 @@ test("rollback refuses missing applied rollback state", async (t) => {
   assert.equal(result.errors[0]?.code, "invalid_receipt");
   assert.equal(result.summary.refused, 1);
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+});
+
+test("rollback returns invalid_receipt for malformed receipt JSON", async (t) => {
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-invalid-json-"));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  const receiptPath = path.join(targetRoot, RECEIPT_FILE);
+  await writeFile(receiptPath, "{ not json\n");
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "invalid_receipt");
+  assert.deepEqual(result.rollbacks, []);
+});
+
+test("rollback reports receipt write failures after restoring files", async (t) => {
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  await chmod(receiptPath, 0o400);
+  t.after(() => chmod(receiptPath, 0o600).catch(() => undefined));
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "receipt_write_failed"), true);
+  assert.equal(result.summary.failed, 1);
+  assert.equal(result.rollbacks[0]?.status, "partial");
+  assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"old\");\n");
 });

@@ -116,7 +116,18 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     errors: []
   };
 
-  const receiptPayload = await readReceipt(receiptPath);
+  let receiptPayload: Receipt;
+  try {
+    receiptPayload = await readReceipt(receiptPath);
+  } catch (error) {
+    result.ok = false;
+    result.errors.push({
+      code: "invalid_receipt",
+      message: `Invalid receipt ${receiptPath}: ${errorMessage(error)}`,
+      path: receiptPath
+    });
+    return result;
+  }
   const installs = receiptPayload.installs;
   if (!isRecord(installs)) {
     result.ok = false;
@@ -125,6 +136,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
   }
 
   let changedReceipt = false;
+  const receiptChangedSkills = new Set<string>();
   const collected = collectRecords(installs);
   for (const error of collected.errors) {
     result.ok = false;
@@ -271,6 +283,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
         }
         removeReceiptInstallRecord(installs, skill, record);
         changedReceipt = true;
+        receiptChangedSkills.add(skill);
         result.rollbacks.push(item);
         continue;
       }
@@ -297,12 +310,31 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
         status: "rolled-back"
       };
       changedReceipt = true;
+      receiptChangedSkills.add(skill);
     }
     result.rollbacks.push(item);
   }
 
   if (changedReceipt) {
-    await writeFile(receiptPath, `${JSON.stringify(receiptPayload, null, 2)}\n`, "utf8");
+    try {
+      await writeFile(receiptPath, `${JSON.stringify(receiptPayload, null, 2)}\n`, "utf8");
+    } catch (error) {
+      result.ok = false;
+      let affectedItems = 0;
+      for (const item of result.rollbacks) {
+        if (item.status === "restored" && receiptChangedSkills.has(item.skill)) {
+          item.status = item.restored > 0 || item.removed > 0 ? "partial" : "refused";
+          item.failed += 1;
+          affectedItems += 1;
+        }
+      }
+      result.summary.failed += Math.max(affectedItems, 1);
+      result.errors.push({
+        code: "receipt_write_failed",
+        message: `Failed to write rollback receipt ${receiptPath}: ${errorMessage(error)}`,
+        path: receiptPath
+      });
+    }
   }
 
   if (result.errors.length > 0) {

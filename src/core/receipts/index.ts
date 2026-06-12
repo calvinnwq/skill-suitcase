@@ -53,6 +53,11 @@ type UpsertAndWriteReceiptInput = {
   receiptPath?: string;
 };
 
+type ReadReceiptInput = {
+  installRoot?: string;
+  receiptPath?: string;
+};
+
 type WriteReceiptInput = {
   installRoot: string;
   receipt: Receipt;
@@ -110,6 +115,22 @@ export async function writeReceipt({
   return outputPath;
 }
 
+export async function readReceipt({
+  installRoot,
+  receiptPath = RECEIPT_FILE
+}: ReadReceiptInput): Promise<Receipt> {
+  const normalizedRoot = normalizeInstallRoot(installRoot);
+  const normalizedReceiptPath = receiptPath ?? RECEIPT_FILE;
+  const outputPath = resolveReceiptPath({
+    installRoot: normalizedRoot,
+    receiptPath: normalizedReceiptPath
+  });
+  return readReceiptForUpsert({
+    receiptPath: outputPath,
+    legacyReceiptPath: path.join(normalizedRoot, LEGACY_RECEIPT_FILE)
+  });
+}
+
 export async function upsertAndWriteReceipt({
   installRoot,
   receipt,
@@ -133,9 +154,9 @@ export async function upsertAndWriteReceipt({
   }
 
   const currentReceipt = receipt === undefined
-    ? await readReceiptForUpsert({
-      receiptPath: outputPath,
-      legacyReceiptPath: path.join(normalizedRoot, LEGACY_RECEIPT_FILE)
+    ? await readReceipt({
+      installRoot: normalizedRoot,
+      receiptPath: normalizedReceiptPath
     })
     : receipt;
   if (!isRecord(currentReceipt)) {

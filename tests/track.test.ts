@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -117,5 +117,23 @@ test("track refuses planned skills whose target directory is absent", async (t) 
 
   assert.equal(result.ok, false);
   assert.equal(result.errors.some((error) => error.code === "target_missing"), true);
+  await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
+});
+
+test("track reports receipt write failures without partial adoption", async (t) => {
+  const { sourceRoot, targetRoot } = await createLiveMatchingInstall(t);
+  await chmod(targetRoot, 0o555);
+
+  let result: Awaited<ReturnType<typeof track>> | undefined;
+  try {
+    result = await track({ source: sourceRoot, target: "openclaw" });
+  } finally {
+    await chmod(targetRoot, 0o755).catch(() => undefined);
+  }
+
+  assert.ok(result);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "receipt_write_failed"), true);
+  assert.equal(result.summary.tracked, 0);
   await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
 });

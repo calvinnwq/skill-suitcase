@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { diff } from "../diffing/index.js";
-import { buildInstallRecord, buildInstalledFiles, upsertAndWriteReceipt } from "../receipts/index.js";
+import {
+  buildInstallRecord,
+  buildInstalledFiles,
+  readReceipt,
+  upsertInstallRecord,
+  writeReceipt,
+  type Receipt
+} from "../receipts/index.js";
 
 type TrackInput = {
   source: string;
@@ -129,6 +136,24 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
   }
 
   let trackedFiles = 0;
+  let nextReceipt: Receipt;
+  try {
+    nextReceipt = await readReceipt({ installRoot });
+  } catch (error) {
+    return failure({
+      source: diffResult.source,
+      target,
+      assignment: diffResult.assignment,
+      installRoot,
+      planned: diffResult.planned.length,
+      blocked: diffResult.blocked.length,
+      errors: [trackError({
+        code: "invalid_receipt",
+        message: `Could not read receipt for track: ${errorMessage(error)}`
+      })]
+    });
+  }
+
   for (const record of records) {
     trackedFiles += record.installedFiles.length;
     const installRecord: Record<string, unknown> = {
@@ -151,10 +176,31 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
     if (record.version !== null) {
       installRecord.version = record.version;
     }
-    await upsertAndWriteReceipt({
+    nextReceipt = upsertInstallRecord(nextReceipt, {
       installRoot,
       skillName: record.skill,
       installRecord: buildInstallRecord(installRecord)
+    });
+  }
+
+  try {
+    await writeReceipt({
+      installRoot,
+      receipt: nextReceipt
+    });
+  } catch (error) {
+    return failure({
+      source: diffResult.source,
+      target,
+      assignment: diffResult.assignment,
+      installRoot,
+      planned: diffResult.planned.length,
+      blocked: diffResult.blocked.length,
+      errors: [trackError({
+        code: "receipt_write_failed",
+        message: `Failed to write track receipt: ${errorMessage(error)}`,
+        path: installRoot
+      })]
     });
   }
 
@@ -337,6 +383,10 @@ async function collectFiles(root: string, baseRoot: string): Promise<string[]> {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown error";
 }
 
 async function skillVersion(skillPath: string): Promise<string | null> {
