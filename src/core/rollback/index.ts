@@ -68,8 +68,25 @@ type RollbackFileRecord = {
 };
 
 type InstalledFile = {
-  path?: unknown;
-  hash?: unknown;
+  path: string;
+  hash: string;
+};
+
+type RollbackParseResult = {
+  kind: "none";
+} | {
+  kind: "invalid";
+  targetPath: string | null;
+  message: string;
+} | {
+  kind: "valid";
+  state: {
+    raw: RollbackState;
+    status: "available" | "rolled-back";
+    targetPath: string;
+    files: RollbackFileRecord[];
+    appliedFiles: InstalledFile[];
+  };
 };
 
 export async function rollback({ receipt }: RollbackInput): Promise<RollbackResult> {
@@ -107,8 +124,8 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
   records.sort((left, right) => left.skill.localeCompare(right.skill));
 
   for (const { skill, record } of records) {
-    const rollbackState = normalizeRollback(record.rollback);
-    if (rollbackState === null) {
+    const parsedRollback = normalizeRollback(record.rollback, installRoot);
+    if (parsedRollback.kind === "none") {
       result.summary.noop += 1;
       result.rollbacks.push({
         skill,
@@ -120,7 +137,27 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
       });
       continue;
     }
+    if (parsedRollback.kind === "invalid") {
+      result.ok = false;
+      result.summary.refused += 1;
+      result.errors.push({
+        code: "invalid_receipt",
+        message: `Invalid rollback state for ${skill}: ${parsedRollback.message}`,
+        skill,
+        ...(parsedRollback.targetPath === null ? {} : { path: parsedRollback.targetPath })
+      });
+      result.rollbacks.push({
+        skill,
+        targetPath: parsedRollback.targetPath,
+        status: "refused",
+        restored: 0,
+        removed: 0,
+        failed: 0
+      });
+      continue;
+    }
 
+    const rollbackState = parsedRollback.state;
     const targetPath = rollbackState.targetPath;
     if (rollbackState.status === "rolled-back") {
       result.summary.noop += 1;
@@ -240,81 +277,157 @@ function collectRecords(installs: Record<string, unknown>): Array<{ skill: strin
   return records;
 }
 
-function normalizeRollback(value: unknown): {
-  raw: RollbackState;
-  status: "available" | "rolled-back";
-  targetPath: string;
-  files: RollbackFileRecord[];
-  appliedFiles: InstalledFile[];
-} | null {
+function normalizeRollback(value: unknown, installRoot: string): RollbackParseResult {
   if (!isRecord(value)) {
-    return null;
+    return { kind: "none" };
   }
   const raw = value as RollbackState;
   if (raw.schema !== "calvinnwq.skills.rollback.v0") {
-    return null;
+    return { kind: "none" };
   }
-  const targetPath = normalizeString(raw.targetPath);
+  const targetPathValue = normalizeString(raw.targetPath);
+  if (targetPathValue === null) {
+    return { kind: "invalid", targetPath: null, message: "rollback targetPath must be a non-empty string." };
+  }
+  const targetPath = resolveReceiptPathUnderRoot(installRoot, targetPathValue);
   if (targetPath === null) {
-    return null;
+    return {
+      kind: "invalid",
+      targetPath: path.resolve(targetPathValue),
+      message: "rollback targetPath must stay within the receipt install root."
+    };
   }
-  const status = raw.status === "rolled-back" ? "rolled-back" : "available";
-  const files = Array.isArray(raw.files)
-    ? raw.files.map(normalizeRollbackFile).filter((file): file is RollbackFileRecord => file !== null)
-    : [];
-  const appliedFiles = Array.isArray(raw.appliedFiles)
-    ? raw.appliedFiles.filter(isRecord) as InstalledFile[]
-    : [];
+  if (raw.status !== "available" && raw.status !== "rolled-back") {
+    return { kind: "invalid", targetPath, message: "rollback status must be available or rolled-back." };
+  }
+  if (!Array.isArray(raw.files)) {
+    return { kind: "invalid", targetPath, message: "rollback files must be an array." };
+  }
+  if (!Array.isArray(raw.appliedFiles)) {
+    return { kind: "invalid", targetPath, message: "rollback appliedFiles must be an array." };
+  }
 
-  return { raw, status, targetPath, files, appliedFiles };
+  const files: RollbackFileRecord[] = [];
+  for (const file of raw.files) {
+    const normalized = normalizeRollbackFile(file, targetPath);
+    if (normalized.kind === "invalid") {
+      return { kind: "invalid", targetPath, message: normalized.message };
+    }
+    files.push(normalized.file);
+  }
+
+  const appliedFiles: InstalledFile[] = [];
+  for (const file of raw.appliedFiles) {
+    const normalized = normalizeInstalledFile(file);
+    if (normalized.kind === "invalid") {
+      return { kind: "invalid", targetPath, message: normalized.message };
+    }
+    appliedFiles.push(normalized.file);
+  }
+
+  return {
+    kind: "valid",
+    state: {
+      raw,
+      status: raw.status,
+      targetPath,
+      files,
+      appliedFiles
+    }
+  };
 }
 
-function normalizeRollbackFile(value: unknown): RollbackFileRecord | null {
+function normalizeRollbackFile(value: unknown, targetRoot: string): {
+  kind: "valid";
+  file: RollbackFileRecord;
+} | {
+  kind: "invalid";
+  message: string;
+} {
   if (!isRecord(value)) {
-    return null;
+    return { kind: "invalid", message: "rollback files entries must be objects." };
   }
-  const relativePath = normalizeString(value.path);
-  const targetPath = normalizeString(value.targetPath);
-  if (relativePath === null || targetPath === null || !isRecord(value.previous)) {
-    return null;
+  const relativePath = normalizeRelativePath(value.path);
+  if (relativePath === null) {
+    return { kind: "invalid", message: "rollback file path must be a relative path within the target." };
+  }
+  const targetPath = resolveRelativePath(targetRoot, relativePath);
+  const recordedTargetPathValue = normalizeString(value.targetPath);
+  if (recordedTargetPathValue === null) {
+    return { kind: "invalid", message: "rollback file targetPath must be a non-empty string." };
+  }
+  const recordedTargetPath = resolveReceiptPathUnderRoot(targetRoot, recordedTargetPathValue);
+  if (recordedTargetPath === null || recordedTargetPath !== targetPath) {
+    return { kind: "invalid", message: `rollback file targetPath for ${relativePath} must match the target-relative path.` };
+  }
+  if (!isRecord(value.previous)) {
+    return { kind: "invalid", message: `rollback file ${relativePath} must include previous state.` };
   }
   const previous = value.previous;
   if (previous.kind === "file" && typeof previous.bytes === "string") {
     return {
-      path: relativePath,
-      targetPath,
-      previous: {
-        kind: "file",
-        bytes: previous.bytes,
-        ...(typeof previous.sha256 === "string" ? { sha256: previous.sha256 } : {})
+      kind: "valid",
+      file: {
+        path: relativePath,
+        targetPath,
+        previous: {
+          kind: "file",
+          bytes: previous.bytes,
+          ...(typeof previous.sha256 === "string" ? { sha256: previous.sha256 } : {})
+        }
       }
     };
   }
   if (previous.kind === "missing") {
     return {
-      path: relativePath,
-      targetPath,
-      previous: { kind: "missing" }
+      kind: "valid",
+      file: {
+        path: relativePath,
+        targetPath,
+        previous: { kind: "missing" }
+      }
     };
   }
   if (previous.kind === "restore-impossible") {
     return {
-      path: relativePath,
-      targetPath,
-      previous: {
-        kind: "restore-impossible",
-        ...(typeof previous.reason === "string" ? { reason: previous.reason } : {})
+      kind: "valid",
+      file: {
+        path: relativePath,
+        targetPath,
+        previous: {
+          kind: "restore-impossible",
+          ...(typeof previous.reason === "string" ? { reason: previous.reason } : {})
+        }
       }
     };
   }
-  return null;
+  return { kind: "invalid", message: `rollback file ${relativePath} has invalid previous state.` };
+}
+
+function normalizeInstalledFile(value: unknown): {
+  kind: "valid";
+  file: InstalledFile;
+} | {
+  kind: "invalid";
+  message: string;
+} {
+  if (!isRecord(value)) {
+    return { kind: "invalid", message: "rollback appliedFiles entries must be objects." };
+  }
+  const relativePath = normalizeRelativePath(value.path);
+  if (relativePath === null || typeof value.hash !== "string" || value.hash.trim().length === 0) {
+    return { kind: "invalid", message: "rollback appliedFiles entries must include relative path and hash strings." };
+  }
+  return {
+    kind: "valid",
+    file: {
+      path: relativePath,
+      hash: value.hash
+    }
+  };
 }
 
 async function appliedStateMatches(targetPath: string, appliedFiles: InstalledFile[]): Promise<boolean> {
-  if (appliedFiles.length === 0) {
-    return true;
-  }
-
   let currentFiles: Array<{ path: string; hash: string }>;
   try {
     currentFiles = await buildInstalledFiles(targetPath);
@@ -414,7 +527,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
+  return typeof value === "string" && value.trim().length > 0 && !value.includes("\0") ? value : null;
+}
+
+function normalizeRelativePath(value: unknown): string | null {
+  const candidate = normalizeString(value);
+  if (candidate === null || path.isAbsolute(candidate)) {
+    return null;
+  }
+  const normalized = path.normalize(candidate);
+  if (normalized === "." || normalized === ".." || normalized.startsWith(`..${path.sep}`) || path.isAbsolute(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function resolveReceiptPathUnderRoot(root: string, candidate: string): string | null {
+  const resolvedRoot = path.resolve(root);
+  const resolvedCandidate = path.isAbsolute(candidate)
+    ? path.resolve(candidate)
+    : path.resolve(resolvedRoot, candidate);
+  return isPathInsideOrSame(resolvedRoot, resolvedCandidate) ? resolvedCandidate : null;
+}
+
+function resolveRelativePath(root: string, relativePath: string): string {
+  return path.resolve(path.resolve(root), relativePath);
+}
+
+function isPathInsideOrSame(root: string, candidate: string): boolean {
+  const relativePath = path.relative(path.resolve(root), path.resolve(candidate));
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

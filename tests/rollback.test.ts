@@ -163,15 +163,19 @@ test("rollback is a deterministic no-op after a successful rollback", async (t) 
 });
 
 test("rollback reports remove failures instead of falsely reporting success", async (t) => {
-  const { receiptPath, targetRoot } = await createAppliedUpdate(t);
-  const blocker = path.join(targetRoot, "not-a-directory");
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  const blocker = path.join(targetSkill, "not-a-directory");
   await writeFile(blocker, "blocker\n");
 
   const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
-    installs: { "office-hours": { rollback: { files: unknown[] } } };
+    installs: { "office-hours": { rollback: { files: unknown[]; appliedFiles: unknown[] } } };
   };
+  receipt.installs["office-hours"].rollback.appliedFiles.push({
+    path: "not-a-directory",
+    hash: createHash("sha256").update("blocker\n").digest("hex")
+  });
   receipt.installs["office-hours"].rollback.files.push({
-    path: "ghost.txt",
+    path: "not-a-directory/ghost.txt",
     targetPath: path.join(blocker, "ghost.txt"),
     previous: { kind: "missing" }
   });
@@ -186,15 +190,19 @@ test("rollback reports remove failures instead of falsely reporting success", as
 });
 
 test("rollback reports restore write failures as failed entries without throwing", async (t) => {
-  const { receiptPath, targetRoot } = await createAppliedUpdate(t);
-  const blocker = path.join(targetRoot, "not-a-directory");
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  const blocker = path.join(targetSkill, "not-a-directory");
   await writeFile(blocker, "blocker\n");
 
   const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
-    installs: { "office-hours": { rollback: { files: unknown[] } } };
+    installs: { "office-hours": { rollback: { files: unknown[]; appliedFiles: unknown[] } } };
   };
+  receipt.installs["office-hours"].rollback.appliedFiles.push({
+    path: "not-a-directory",
+    hash: createHash("sha256").update("blocker\n").digest("hex")
+  });
   receipt.installs["office-hours"].rollback.files.push({
-    path: "ghost.txt",
+    path: "not-a-directory/ghost.txt",
     targetPath: path.join(blocker, "ghost.txt"),
     previous: { kind: "file", bytes: Buffer.from("ghost\n").toString("base64") }
   });
@@ -225,4 +233,60 @@ test("rollback reports restore-impossible entries as partial failures", async (t
   assert.equal(result.ok, false);
   assert.equal(result.summary.failed, 1);
   assert.equal(result.errors.some((error) => error.code === "restore_impossible"), true);
+});
+
+test("rollback refuses file targets outside the rollback target", async (t) => {
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-outside-"));
+  t.after(() => rm(outsideRoot, { recursive: true, force: true }));
+  const outsideFile = path.join(outsideRoot, "runtime.js");
+  await writeFile(outsideFile, "outside\n");
+
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": { rollback: { files: Array<Record<string, unknown>> } } };
+  };
+  receipt.installs["office-hours"].rollback.files[0] = {
+    ...receipt.installs["office-hours"].rollback.files[0],
+    targetPath: outsideFile
+  };
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "invalid_receipt");
+  assert.equal(await readFile(outsideFile, "utf8"), "outside\n");
+  assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+});
+
+test("rollback refuses malformed rollback file state", async (t) => {
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": { rollback: { files: unknown } } };
+  };
+  receipt.installs["office-hours"].rollback.files = [{ path: "runtime.js" }];
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "invalid_receipt");
+  assert.equal(result.summary.refused, 1);
+  assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+});
+
+test("rollback refuses missing applied rollback state", async (t) => {
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": { rollback: { appliedFiles?: unknown } } };
+  };
+  delete receipt.installs["office-hours"].rollback.appliedFiles;
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "invalid_receipt");
+  assert.equal(result.summary.refused, 1);
+  assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
 });
