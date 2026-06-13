@@ -73,6 +73,11 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       continue;
     }
 
+    if (token === "--strict") {
+      args.strict = true;
+      continue;
+    }
+
     if (isValueArg(token)) {
       const value = rest[index + 1];
       if (value === undefined || value === "" || value.startsWith("--")) {

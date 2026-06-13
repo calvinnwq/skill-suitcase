@@ -31,6 +31,7 @@ node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target opencl
 node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
 node dist/src/cli.js import --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
+node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --json
 node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --json
@@ -133,6 +134,75 @@ Each finding has `level`, `code`, `message`, and `path`. Warning codes include
 `missing_skill_directory`, `missing_skill_file`, `missing_variant_source`,
 `invalid_variant_source`, `missing_variant_directory`, and
 `missing_variant_skill_file`.
+
+## `validate` Strict Mode
+
+`validate --source <skills-repo> --json` runs fast catalog-health checks only
+(manifest relationships plus per-skill `SKILL.md` presence). Adding `--strict`
+extends the same command into strict Skillify-10 contract validation for every
+skill referenced by a suitcase.
+
+```bash
+node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --json
+```
+
+Strict mode mirrors the deterministic checks in
+`skills/skillify/scripts/check_skillify_contract.py` from the catalog repo, so
+the CLI scores each skill the same way without shelling out to Python. The
+result gains two fields:
+
+- `strict`: `true` when strict scoring ran (`false` for basic validation, where
+  `contracts` is always empty).
+- `contracts`: one report per referenced skill, sorted by skill name. Each
+  report has `skill`, `score`, `total` (always `10`), `complete`, and the ten
+  `items`. Every item carries `id`, `name`, `ok`, `applicable`, `evidence`, and
+  `missing` reasons. Evidence paths are emitted relative to the source root for
+  deterministic JSON.
+
+`summary` also gains `contractsEvaluated` and `contractsComplete` counts.
+
+Strict mode distinguishes warnings from release-blocking failures:
+
+- An **applicable** item that is not satisfied becomes a
+  `skillify_contract_failed` error finding, which flips `ok` to `false` and exits
+  non-zero. These are release-blocking.
+- A **not-applicable** item (for example LLM evals on a skill that makes no model
+  calls, or filing rules on a skill that writes no notes) that lacks evidence
+  becomes a `skillify_contract_warning`, which is reported but keeps `ok: true`.
+
+```json
+{
+  "ok": false,
+  "strict": true,
+  "summary": { "referencedSkills": 4, "contractsEvaluated": 4, "contractsComplete": 3, "findings": 3 },
+  "contracts": [
+    {
+      "skill": "office-hours",
+      "score": 7,
+      "total": 10,
+      "complete": false,
+      "items": [
+        {
+          "id": 4,
+          "name": "Integration tests or realistic local fixture tests",
+          "ok": false,
+          "applicable": true,
+          "evidence": [],
+          "missing": ["add integration test using real endpoint or realistic local fixture"]
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "level": "error",
+      "code": "skillify_contract_failed",
+      "message": "Skill office-hours fails Skillify-10 item 4 (Integration tests or realistic local fixture tests): add integration test using real endpoint or realistic local fixture.",
+      "path": "skills.office-hours.contract.4"
+    }
+  ]
+}
+```
 
 ## `plan` Output
 

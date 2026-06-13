@@ -1,6 +1,7 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { type Catalog, loadCatalog } from "../catalog/index.js";
+import { type ContractReport, scoreSkillContract } from "./skillify-contract.js";
 
 type FindingLevel = "error" | "warning";
 
@@ -16,22 +17,27 @@ type ValidationSummary = {
   assignments: number;
   assignmentPaths: number;
   referencedSkills: number;
+  contractsEvaluated: number;
+  contractsComplete: number;
   findings: number;
 };
 
 type ValidateArgs = {
   source: string;
+  strict?: boolean;
 };
 
 type ValidateResult = {
   ok: boolean;
   source: string;
   manifestPath: string;
+  strict: boolean;
   summary: ValidationSummary;
   findings: Finding[];
+  contracts: ContractReport[];
 };
 
-export async function validate({ source }: ValidateArgs): Promise<ValidateResult> {
+export async function validate({ source, strict = false }: ValidateArgs): Promise<ValidateResult> {
   const { sourceRoot, manifestPath, manifest } = await loadCatalog(source);
   const findings: Finding[] = [];
   const referencedSkills = collectReferencedSkills(manifest);
@@ -108,19 +114,67 @@ export async function validate({ source }: ValidateArgs): Promise<ValidateResult
     }
   }
 
+  const contracts = strict ? await scoreReferencedContracts(sourceRoot, referencedSkills, findings) : [];
+
   return {
     ok: findings.every((finding) => finding.level !== "error"),
     source: sourceRoot,
     manifestPath,
+    strict,
     summary: {
       suitcases: Object.keys(manifest.suitcases).length,
       assignments: Object.keys(manifest.assignments).length,
       assignmentPaths: Object.keys(manifest.assignmentPaths).length,
       referencedSkills: referencedSkills.size,
+      contractsEvaluated: contracts.length,
+      contractsComplete: contracts.filter((report) => report.complete).length,
       findings: findings.length
     },
-    findings
+    findings,
+    contracts
   };
+}
+
+async function scoreReferencedContracts(
+  sourceRoot: string,
+  referencedSkills: Set<string>,
+  findings: Finding[]
+): Promise<ContractReport[]> {
+  const contracts: ContractReport[] = [];
+
+  for (const skillName of [...referencedSkills].sort()) {
+    const report = await scoreSkillContract(sourceRoot, skillName);
+    contracts.push(report);
+
+    for (const contractItem of report.items) {
+      if (contractItem.ok) {
+        continue;
+      }
+
+      const reason = contractItem.missing.join("; ") || contractItem.name;
+      const pathName = `skills.${skillName}.contract.${contractItem.id}`;
+
+      if (contractItem.applicable) {
+        findings.push(
+          error(
+            "skillify_contract_failed",
+            `Skill ${skillName} fails Skillify-10 item ${contractItem.id} (${contractItem.name}): ${reason}.`,
+            pathName
+          )
+        );
+      } else {
+        findings.push(
+          warning(
+            "skillify_contract_warning",
+            `Skill ${skillName} is missing Skillify-10 item ${contractItem.id} (${contractItem.name}), accepted as not applicable: ${reason}.`,
+            pathName
+          )
+        );
+      }
+    }
+  }
+
+  return contracts;
 }
 
 function collectReferencedSkills(manifest: Catalog): Set<string> {

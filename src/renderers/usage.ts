@@ -7,6 +7,7 @@ export function usageText(): string {
     "  suitcase pack --source <skills-repo> --target <target> --output <dir> --json",
     "  suitcase import --source <skills-repo> --json",
     "  suitcase validate --source <skills-repo> --json",
+    "  suitcase validate --source <skills-repo> --strict --json",
     "  suitcase targets --source <skills-repo> --json",
     "  suitcase status --source <skills-repo> --json",
     "  suitcase apply --source <skills-repo> --target <target> --lock <path> --json",
