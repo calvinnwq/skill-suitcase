@@ -16,6 +16,7 @@ test("parses the skills repo suitcase manifest shape", async () => {
   const openclawAssignment = manifest.assignments.openclaw;
   const codexGlobal = manifest.assignmentPaths["codex-global"];
   const gnhfCompatibility = manifest.compatibility["gnhf-postflight"];
+  const gnhfVariants = manifest.variants["gnhf-postflight"];
 
   assert.ok(core);
   assert.ok(openclawBuilder);
@@ -23,6 +24,7 @@ test("parses the skills repo suitcase manifest shape", async () => {
   assert.ok(codexGlobal);
   assert.ok(gnhfCompatibility);
   assert.ok(gnhfCompatibility.blockedAgents);
+  assert.ok(gnhfVariants);
 
   assert.deepEqual(core.skills, ["office-hours"]);
   assert.deepEqual(openclawBuilder.skills, [
@@ -38,4 +40,8 @@ test("parses the skills repo suitcase manifest shape", async () => {
     gnhfCompatibility.blockedAgents!.codex,
     "Live Codex copy is a slimmer platform variant and must not be overwritten by the OpenClaw canonical bundle."
   );
+  assert.equal(gnhfVariants.canonical?.source, "skills/gnhf-postflight");
+  assert.deepEqual(gnhfVariants.canonical?.agents, ["openclaw"]);
+  assert.equal(gnhfVariants.codex?.source, "variants/codex/gnhf-postflight");
+  assert.deepEqual(gnhfVariants.codex?.agents, ["codex"]);
 });

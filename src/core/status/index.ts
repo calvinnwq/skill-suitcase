@@ -98,6 +98,7 @@ type InstallRecord = {
   targetPath?: string;
   target?: string;
   version?: string;
+  variant?: string;
   sourceCommit?: string;
   sourceHash?: string;
   installedFiles?: InstalledFileRecord[] | null;
@@ -120,6 +121,7 @@ const INSTALL_RECORD_SCALAR_FIELDS = [
   "sourcePath",
   "targetPath",
   "version",
+  "variant",
   "sourceCommit",
   "sourceHash"
 ] as const;
@@ -344,7 +346,8 @@ export async function status({ source }: { source: string }): Promise<StatusResu
         installedCommit: check.installedCommit,
         currentCommit: check.currentCommit,
         installedHash: check.installedHash,
-        currentHash: check.currentHash
+        currentHash: check.currentHash,
+        variant: planned.variant
       };
 
       if (!VALID_STATUSES.has(resultStatus.status)) {
@@ -931,6 +934,7 @@ function normalizeReceiptInstallRecord(
   const target = normalizeValue(installRecord.target) ?? undefined;
   const targetPath = normalizeValue(installRecord.targetPath) ?? undefined;
   const version = normalizeValue(installRecord.version) ?? undefined;
+  const variant = normalizeValue(installRecord.variant) ?? undefined;
   const sourceCommit = normalizeValue(installRecord.sourceCommit) ?? undefined;
   const sourceHash = normalizeValue(installRecord.sourceHash) ?? undefined;
   const installedFiles = Array.isArray(installRecord.installedFiles) ? installRecord.installedFiles : null;
@@ -1098,6 +1102,11 @@ function normalizeReceiptInstallRecord(
     canonical.version = version;
   } else {
     delete canonical.version;
+  }
+  if (variant !== undefined) {
+    canonical.variant = variant;
+  } else {
+    delete canonical.variant;
   }
   if (sourceCommit !== undefined) {
     canonical.sourceCommit = sourceCommit;

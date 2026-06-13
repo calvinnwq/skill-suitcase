@@ -60,7 +60,7 @@ type DiffForApply = {
   source: string;
   target: string;
   assignment: string | null;
-  planned: Array<{ skill: string; sourcePath: string }>;
+  planned: Array<{ skill: string; sourcePath: string; variant?: string }>;
   blocked: Array<{ skill: string; reason?: string }>;
   entries: Array<{
     action: "create" | "update" | "unchanged" | "extra" | "missing" | "blocked";
@@ -277,8 +277,12 @@ export async function apply({
   }
 
   const sourceBySkill = new Map<string, string>();
+  const variantBySkill = new Map<string, string>();
   for (const planned of diffResult.planned) {
     sourceBySkill.set(planned.skill, planned.sourcePath);
+    if (typeof planned.variant === "string" && planned.variant.trim().length > 0) {
+      variantBySkill.set(planned.skill, planned.variant);
+    }
   }
 
   const statusBySkill = new Map<string, StatusItem>();
@@ -408,6 +412,11 @@ export async function apply({
 
       if (sourceCommit.length > 0) {
         nextRecord.sourceCommit = sourceCommit;
+      }
+
+      const variant = variantBySkill.get(skill);
+      if (variant !== undefined) {
+        nextRecord.variant = variant;
       }
 
       const currentVersion = priorState?.currentVersion;

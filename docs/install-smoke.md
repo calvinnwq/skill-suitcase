@@ -35,6 +35,8 @@ node dist/src/cli.js pack --source /path/to/skills-catalog --target openclaw --d
 node dist/src/cli.js status --source /path/to/skills-catalog --json
 ```
 
-For Codex or Claude paths that contain slimmer live variants, `plan`, `diff`,
-`pack`, `apply`, and `track` should report blocked canonical entries instead of
-silently replacing the live variant.
+For Codex or Claude paths that have source variants, `plan`, `diff`, `pack`,
+`apply`, `track`, receipts, and `status` should carry the selected variant name.
+If a slimmer live variant is required but no source variant exists, those same
+boundaries should report blocked canonical entries instead of silently replacing
+the live variant.

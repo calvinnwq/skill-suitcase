@@ -16,6 +16,7 @@ type PlanItem = {
   variant: string;
   sourcePath: string;
   evidence: string[];
+  source?: string;
 };
 
 type PlanError = {
@@ -66,6 +67,13 @@ export async function plan({ source, target }: PlannerInput): Promise<PlanResult
 
   for (const skillName of plannedSkills) {
     const compatibility = manifest.compatibility[skillName] ?? {};
+    const variant = selectSkillVariant(manifest, skillName, compatibilityTargets);
+
+    if (variant !== null) {
+      planned.push(await plannedSkill(sourceRoot, skillName, compatibility, variant));
+      continue;
+    }
+
     const blockedReason = firstMatchingValue(compatibility.blockedAgents, compatibilityTargets);
     const compatibleAgents = compatibility.agents ?? [];
 
@@ -168,18 +176,24 @@ function firstMatchingValue(record: Catalog["compatibility"][string]["blockedAge
 async function plannedSkill(
   sourceRoot: string,
   skillName: string,
-  compatibility: Catalog["compatibility"][string]
+  compatibility: Catalog["compatibility"][string],
+  variant: ResolvedSkillVariant | null = null
 ): Promise<PlanItem> {
-  const skillPath = path.join(sourceRoot, "skills", skillName);
+  const sourceRelativePath = variant?.source ?? path.join("skills", skillName);
+  const skillPath = path.join(sourceRoot, sourceRelativePath);
   await assertDirectory(skillPath, `Missing skill directory for ${skillName}`);
 
-  return {
+  const item: PlanItem = {
     skill: skillName,
     action: "install",
-    variant: compatibility.variant ?? "canonical",
+    variant: variant?.name ?? compatibility.variant ?? "canonical",
     sourcePath: skillPath,
     evidence: compatibility.evidence ?? []
   };
+  if (variant?.source !== undefined) {
+    item.source = variant.source;
+  }
+  return item;
 }
 
 function blockedSkill(
@@ -198,6 +212,43 @@ function blockedSkill(
     reason,
     evidence: compatibility.evidence ?? []
   };
+}
+
+type ResolvedSkillVariant = {
+  name: string;
+  source: string;
+};
+
+function selectSkillVariant(
+  manifest: Catalog,
+  skillName: string,
+  compatibilityTargets: string[]
+): ResolvedSkillVariant | null {
+  const variants = manifest.variants?.[skillName];
+  if (!isRecord(variants)) {
+    return null;
+  }
+
+  for (const [variantName, variant] of Object.entries(variants)) {
+    if (!isRecord(variant)) {
+      continue;
+    }
+    const source = normalizeValue(variant.source);
+    if (!source) {
+      continue;
+    }
+    const agents = Array.isArray(variant.agents)
+      ? variant.agents.filter((agent): agent is string => typeof agent === "string")
+      : [];
+    if (agents.some((agent) => compatibilityTargets.includes(agent))) {
+      return {
+        name: variantName,
+        source
+      };
+    }
+  }
+
+  return null;
 }
 
 async function assertDirectory(targetPath: string, message: string): Promise<void> {

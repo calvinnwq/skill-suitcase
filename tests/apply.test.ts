@@ -550,6 +550,100 @@ compatibility:
   );
 });
 
+test("apply writes selected platform variants into receipts", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-codex-variant-src-"));
+  const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-codex-variant-home-"));
+  const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-codex-variant-artifact-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(codexHome, { recursive: true, force: true }));
+  t.after(() => rm(artifactRoot, { recursive: true, force: true }));
+
+  const skillsPath = path.join(codexHome, "skills");
+  const sourceSkill = path.join(sourceRoot, "variants", "codex", "gnhf-postflight");
+  const targetSkill = path.join(skillsPath, "gnhf-postflight");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(targetSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.12-codex\n---\nold\n");
+  await writeFile(path.join(targetSkill, "SKILL.md"), "---\nversion: 2026.06.12-codex\n---\nold\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  builder:
+    skills:
+      - gnhf-postflight
+
+assignments:
+  codex:
+    suitcases:
+      - builder
+
+assignmentPaths:
+  codex-global:
+    kind: codex-home
+    assignment: codex
+    codexHome: ${codexHome}
+    skillsPath: ${skillsPath}
+
+compatibility:
+  gnhf-postflight:
+    agents:
+      - openclaw
+    variant: canonical
+    blockedAgents:
+      codex: Codex must use the slimmer platform variant.
+
+variants:
+  gnhf-postflight:
+    codex:
+      source: variants/codex/gnhf-postflight
+      agents:
+        - codex
+`
+  );
+  await upsertAndWriteReceipt({
+    installRoot: skillsPath,
+    skillName: "gnhf-postflight",
+    installRecord: {
+      skill: "gnhf-postflight",
+      agent: "codex",
+      target: "codex",
+      mode: "copy",
+      source: {
+        path: sourceSkill
+      },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      version: "2026.06.12-codex",
+      variant: "codex",
+      sourceHash: await hashDirectory(sourceSkill),
+      installedFiles: []
+    }
+  });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.13-codex\n---\nnew\n");
+  const manifestPath = await writeArtifactManifest(artifactRoot, {
+    sourceRoot,
+    target: "codex-global",
+    plannedSkills: ["gnhf-postflight"]
+  });
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "codex-global",
+    artifact: manifestPath
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(await readFile(path.join(targetSkill, "SKILL.md"), "utf8"), "---\nversion: 2026.06.13-codex\n---\nnew\n");
+
+  const receipt = JSON.parse(await readFile(path.join(skillsPath, ".skill-suitcase-receipt.json"), "utf8")) as {
+    installs?: Record<string, { variant?: string; sourcePath?: string } | Array<{ variant?: string; sourcePath?: string }>>;
+  };
+  const install = receipt.installs?.["gnhf-postflight"];
+  const record = Array.isArray(install) ? install[0] : install;
+  assert.equal(record?.variant, "codex");
+  assert.equal(record?.sourcePath, sourceSkill);
+});
+
 test("apply refuses artifact with mismatched source", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-artifact-source-mismatch-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-artifact-source-mismatch-target-"));

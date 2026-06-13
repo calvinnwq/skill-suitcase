@@ -79,3 +79,18 @@ compatibility:
       claude: Live Claude copy is a slimmer platform variant and must not be overwritten by the OpenClaw canonical bundle.
     evidence:
       - docs/portability-matrix.md
+
+variants:
+  gnhf-postflight:
+    canonical:
+      source: skills/gnhf-postflight
+      agents:
+        - openclaw
+    codex:
+      source: variants/codex/gnhf-postflight
+      agents:
+        - codex
+    claude:
+      source: variants/claude/gnhf-postflight
+      agents:
+        - claude

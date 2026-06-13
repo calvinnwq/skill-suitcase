@@ -7,33 +7,53 @@ that variant.
 
 ## Source Catalog Variants
 
-Use `compatibility.<skill>.variant` to label the catalog source being planned or
-packed. Current fixtures use `canonical` for the OpenClaw source bundle.
+Use `compatibility.<skill>.variant` to label the default catalog source. Current
+fixtures use `canonical` for the OpenClaw source bundle.
 
 Use `compatibility.<skill>.agents` to list platforms that can receive that
 source bundle without transformation.
 
-Use `compatibility.<skill>.blockedAgents` to protect platforms that need a
-separate slimmer variant. This is the current guard for `gnhf-postflight` on
-Codex and Claude: the canonical OpenClaw bundle is blocked so `diff`, `pack`,
-`apply`, and `track` cannot blindly replace the live slimmer copy.
+Use `variants.<skill>.<variant>` to declare an installable source variant:
+
+```yaml
+variants:
+  gnhf-postflight:
+    canonical:
+      source: skills/gnhf-postflight
+      agents:
+        - openclaw
+    codex:
+      source: variants/codex/gnhf-postflight
+      agents:
+        - codex
+```
+
+Planning picks the first variant whose `agents` match the resolved platform
+adapter aliases. The planned item carries that variant name and source path
+through `diff`, `pack`, `apply`, `track`, receipts, and `status`.
+
+Use `compatibility.<skill>.blockedAgents` as the fallback guard when a platform
+needs a slimmer variant but the source catalog does not yet provide one. In that
+case the canonical OpenClaw bundle is blocked so `diff`, `pack`, `apply`, and
+`track` cannot blindly replace the live slimmer copy.
 
 ## Generated Packs
 
-Generated packs are immutable snapshots of a plan. They preserve the `variant`
-label from the source catalog in `planned` and `blocked` records, but they do
-not create a new variant model. If a platform needs a different source shape,
-add that model to the catalog first, then generate a pack from that catalog
-state.
+Generated packs are immutable snapshots of a resolved plan. They preserve the
+selected `variant`, selected source path, file hashes, and staged file payloads.
+They do not create or infer a variant model. If a platform needs a different
+source shape, add that model to `variants` in the source catalog first, then
+generate a pack from that catalog state.
 
 ## Regression Fixture
 
-`tests/fixtures/skills-catalog/skill-suitcase.yaml` keeps
-`gnhf-postflight` canonical for OpenClaw and blocked for Codex and Claude. Use
+`tests/fixtures/skills-catalog/skill-suitcase.yaml` keeps `gnhf-postflight`
+canonical for OpenClaw and declares slim Codex and Claude source variants. Use
 it when validating that:
 
 - OpenClaw plans and packs the canonical bundle.
-- Codex and Claude only receive portable core skills.
-- Canonical `gnhf-postflight` appears as blocked for Codex or Claude when it is
-  included in an assignment.
+- Codex and Claude can plan slim variants when their assignments include the
+  skill.
+- Canonical `gnhf-postflight` appears as blocked for Codex or Claude when a
+  required slim source variant is absent.
 - `track` refuses to adopt a blocked canonical skill into a slimmer live target.

@@ -157,3 +157,72 @@ compatibility:
     "Codex must use the slimmer platform variant."
   );
 });
+
+test("codex selects an explicit slim source variant when one exists", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-codex-variant-"));
+  const canonicalSource = path.join(source, "skills", "gnhf-postflight");
+  const codexSource = path.join(source, "variants", "codex", "gnhf-postflight");
+  await mkdir(canonicalSource, { recursive: true });
+  await mkdir(codexSource, { recursive: true });
+  await writeFile(path.join(canonicalSource, "SKILL.md"), "# Canonical\n");
+  await writeFile(path.join(codexSource, "SKILL.md"), "# Codex slim\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  builder:
+    skills:
+      - gnhf-postflight
+
+assignments:
+  codex:
+    suitcases:
+      - builder
+  openclaw:
+    suitcases:
+      - builder
+
+assignmentPaths:
+  codex-global:
+    kind: codex-home
+    assignment: codex
+    codexHome: ${path.join(source, "codex")}
+    skillsPath: ${path.join(source, "codex", "skills")}
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${path.join(source, "openclaw", "skills")}
+
+compatibility:
+  gnhf-postflight:
+    agents:
+      - openclaw
+    variant: canonical
+    blockedAgents:
+      codex: Codex must use the slimmer platform variant.
+
+variants:
+  gnhf-postflight:
+    canonical:
+      source: skills/gnhf-postflight
+      agents:
+        - openclaw
+    codex:
+      source: variants/codex/gnhf-postflight
+      agents:
+        - codex
+`
+  );
+
+  const codexResult = await plan({ source, target: "codex" });
+  const openclawResult = await plan({ source, target: "openclaw" });
+
+  assert.equal(codexResult.ok, true);
+  assert.deepEqual(codexResult.blocked, []);
+  assert.equal(codexResult.planned[0]?.skill, "gnhf-postflight");
+  assert.equal(codexResult.planned[0]?.variant, "codex");
+  assert.equal(codexResult.planned[0]?.sourcePath, codexSource);
+
+  assert.equal(openclawResult.ok, true);
+  assert.equal(openclawResult.planned[0]?.variant, "canonical");
+  assert.equal(openclawResult.planned[0]?.sourcePath, canonicalSource);
+});

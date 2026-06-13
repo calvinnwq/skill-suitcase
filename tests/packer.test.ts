@@ -220,3 +220,60 @@ compatibility:
   assert.equal(result.summary.files, 0);
   assert.deepEqual(result.files, []);
 });
+
+test("dry-run pack enumerates files from a selected platform variant", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-variant-"));
+  const canonical = path.join(source, "skills", "gnhf-postflight");
+  const codex = path.join(source, "variants", "codex", "gnhf-postflight");
+  await mkdir(canonical, { recursive: true });
+  await mkdir(codex, { recursive: true });
+  await writeFile(path.join(canonical, "SKILL.md"), "# Canonical\n");
+  await writeFile(path.join(codex, "SKILL.md"), "# Codex slim\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  builder:
+    skills:
+      - gnhf-postflight
+
+assignments:
+  codex:
+    suitcases:
+      - builder
+
+assignmentPaths:
+  codex-global:
+    kind: codex-home
+    assignment: codex
+    codexHome: ${path.join(source, "codex")}
+    skillsPath: ${path.join(source, "codex", "skills")}
+
+compatibility:
+  gnhf-postflight:
+    agents:
+      - openclaw
+    variant: canonical
+    blockedAgents:
+      codex: Codex must use the slimmer platform variant.
+
+variants:
+  gnhf-postflight:
+    canonical:
+      source: skills/gnhf-postflight
+      agents:
+        - openclaw
+    codex:
+      source: variants/codex/gnhf-postflight
+      agents:
+        - codex
+`
+  );
+
+  const result = await pack({ source, target: "codex-global", dryRun: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.planned[0]?.variant, "codex");
+  assert.equal(result.planned[0]?.sourcePath, codex);
+  assert.equal(result.files[0]?.sourcePath, path.join(codex, "SKILL.md"));
+  assert.equal(result.files[0]?.bundlePath, "skills/gnhf-postflight/SKILL.md");
+});
