@@ -4,6 +4,7 @@ import path from "node:path";
 import { loadCatalog } from "../catalog/index.js";
 import { type PlanResult, plan } from "../planning/index.js";
 import type { Catalog } from "../catalog/index.js";
+import { resolvePlatformInstallRoot } from "../platform-adapters.js";
 
 type DiffSourceFileRead =
   | {
@@ -86,13 +87,6 @@ type ResolveAssignmentInstallRootFailure = {
 type ResolveAssignmentInstallRootResult =
   | ResolveAssignmentInstallRootSuccess
   | ResolveAssignmentInstallRootFailure;
-
-const KIND_PATH_RULES = {
-  "openclaw-skills-root": "path",
-  "claude-skills-root": "path",
-  "codex-home": "skillsPath",
-  "nested-home-codex": "skillsPath"
-} as const;
 
 export async function diff(
   { source, target }: { source: string; target: string }
@@ -522,7 +516,7 @@ async function resolveSingleAssignmentPath(
   }
 
   const kind = normalizeValue(assignmentPath.kind);
-  const field = kind ? KIND_PATH_RULES[kind as keyof typeof KIND_PATH_RULES] : null;
+  const rootResolution = resolvePlatformInstallRoot({ kind, assignmentPath });
 
   if (!kind) {
     errors.push({
@@ -532,7 +526,7 @@ async function resolveSingleAssignmentPath(
     return { ok: false, errors, installRoot: null, assignment };
   }
 
-  if (!field) {
+  if (rootResolution.adapter === null) {
     errors.push({
       code: "unsupported_assignment_path_kind",
       message: `Assignment path ${assignmentPathId} has unsupported kind ${kind}.`
@@ -540,11 +534,20 @@ async function resolveSingleAssignmentPath(
     return { ok: false, errors, installRoot: null, assignment };
   }
 
-  const installRoot = normalizeValue(assignmentPath[field]);
-  if (!installRoot) {
+  if (!rootResolution.ok) {
+    const [field] = rootResolution.missingFields;
     errors.push({
       code: "invalid_assignment_path",
       message: `Assignment path ${assignmentPathId} is missing required field ${field}.`
+    });
+    return { ok: false, errors, installRoot: rootResolution.installRoot, assignment };
+  }
+
+  const installRoot = rootResolution.installRoot;
+  if (!installRoot) {
+    errors.push({
+      code: "invalid_assignment_path",
+      message: `Assignment path ${assignmentPathId} is missing required field ${rootResolution.adapter.installRootField}.`
     });
     return { ok: false, errors, installRoot: null, assignment };
   }

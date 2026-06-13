@@ -112,3 +112,48 @@ compatibility:
     "Codex must use the slimmer platform variant."
   );
 });
+
+test("blocked platform variants use assignment path adapter metadata instead of target name heuristics", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-platform-blocked-"));
+  const codexHome = path.join(source, "codex-home");
+  await mkdir(path.join(source, "skills", "gnhf-postflight"), { recursive: true });
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  builder:
+    skills:
+      - gnhf-postflight
+
+assignments:
+  builder:
+    suitcases:
+      - builder
+
+assignmentPaths:
+  global-tools:
+    kind: codex-home
+    assignment: builder
+    codexHome: ${codexHome}
+    skillsPath: ${path.join(codexHome, "skills")}
+
+compatibility:
+  gnhf-postflight:
+    agents:
+      - openclaw
+    variant: canonical
+    reason: Generic incompatibility reason.
+    blockedAgents:
+      codex: Codex must use the slimmer platform variant.
+`
+  );
+
+  const result = await plan({ source, target: "builder" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.blocked.length, 1);
+  assert.equal(result.blocked[0]?.skill, "gnhf-postflight");
+  assert.equal(
+    result.blocked[0]?.reason,
+    "Codex must use the slimmer platform variant."
+  );
+});

@@ -1,6 +1,7 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { type Catalog, loadCatalog } from "../catalog/index.js";
+import { platformCompatibilityNames } from "../platform-adapters.js";
 
 type PlannerInput = {
   source: string;
@@ -59,7 +60,7 @@ export async function plan({ source, target }: PlannerInput): Promise<PlanResult
   }
 
   const plannedSkills = resolveAssignmentSkills(manifest, assignment);
-  const compatibilityTargets = targetCompatibilityNames(target);
+  const compatibilityTargets = targetCompatibilityNames(manifest, target);
   const planned: PlanItem[] = [];
   const blocked: PlanItem[] = [];
 
@@ -123,17 +124,31 @@ function resolveAssignmentSkills(manifest: Catalog, assignment: Catalog["assignm
   return skills;
 }
 
-function targetCompatibilityNames(target: string): string[] {
-  const names = [target];
+function targetCompatibilityNames(manifest: Catalog, target: string): string[] {
+  const names = new Set<string>([target]);
+  const assignmentPaths = manifest.assignmentPaths ?? {};
 
-  if (target.includes("codex") && target !== "codex") {
-    names.push("codex");
-  }
-  if (target.includes("claude") && target !== "claude") {
-    names.push("claude");
+  if (!isRecord(assignmentPaths)) {
+    return [...names];
   }
 
-  return names;
+  for (const assignmentPath of Object.values(assignmentPaths)) {
+    if (!isRecord(assignmentPath)) {
+      continue;
+    }
+    if (normalizeValue(assignmentPath.assignment) !== target) {
+      continue;
+    }
+
+    for (const name of platformCompatibilityNames({
+      assignment: target,
+      kind: normalizeValue(assignmentPath.kind)
+    })) {
+      names.add(name);
+    }
+  }
+
+  return [...names];
 }
 
 function firstMatchingValue(record: Catalog["compatibility"][string]["blockedAgents"], keys: string[]): string | null {
@@ -195,4 +210,17 @@ async function assertDirectory(targetPath: string, message: string): Promise<voi
   } catch {
     throw new Error(message);
   }
+}
+
+function normalizeValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

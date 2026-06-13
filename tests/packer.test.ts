@@ -34,6 +34,18 @@ test("dry-run pack follows target assignment scope", async () => {
   assert.ok(result.files.every((file) => file.skill === "office-hours"));
 });
 
+test("dry-run pack accepts assignment path target selectors", async () => {
+  const result = await pack({ source: fixtureSource, target: "codex-global", dryRun: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.target, "codex-global");
+  assert.deepEqual(
+    result.planned.map((item) => item.skill),
+    ["office-hours"]
+  );
+  assert.ok(result.files.every((file) => file.skill === "office-hours"));
+});
+
 test("pack refuses non dry-run mode", async () => {
   await assert.rejects(
     () => pack({ source: fixtureSource, target: "openclaw", dryRun: false }),

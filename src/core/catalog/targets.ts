@@ -1,15 +1,11 @@
 import { stat } from "node:fs/promises";
 import { loadCatalog, type Catalog } from "./index.js";
-
-const KIND_PATH_RULES = {
-  "openclaw-skills-root": ["path"],
-  "claude-skills-root": ["path"],
-  "codex-home": ["codexHome", "skillsPath"],
-  "nested-home-codex": ["home", "codexHome", "skillsPath"]
-} as const;
+import {
+  platformPathFields,
+  resolvePlatformAdapter
+} from "../platform-adapters.js";
 
 type TargetPathField = "path" | "home" | "codexHome" | "skillsPath";
-type TargetPathRuleByKind = keyof typeof KIND_PATH_RULES;
 type TargetSafetyClassification = "invalid" | "missing" | "live-install-root";
 type TargetFindingLevel = "error" | "warning";
 
@@ -18,6 +14,13 @@ type TargetFinding = {
   code: string;
   message: string;
   path: string | null;
+};
+
+type TargetPlatform = {
+  adapter: string;
+  installRoot: string | null;
+  compatibility: string[];
+  metadata: Record<string, boolean>;
 };
 
 type Target = {
@@ -29,6 +32,7 @@ type Target = {
   home: string | null;
   codexHome: string | null;
   skillsPath: string | null;
+  platform: TargetPlatform | null;
   exists: Record<TargetPathField, boolean>;
   safety: {
     classification: TargetSafetyClassification;
@@ -48,8 +52,7 @@ type TargetInput = {
   source: string;
 };
 
-const PATH_FIELDS = ["path", "home", "codexHome", "skillsPath"] as const;
-const SUPPORTED_KINDS: Set<string> = new Set(Object.keys(KIND_PATH_RULES));
+const PATH_FIELDS = platformPathFields();
 
 export async function targets({ source }: TargetInput): Promise<TargetResult> {
   if (!source) {
@@ -106,6 +109,7 @@ async function describeTarget(
     home: null,
     codexHome: null,
     skillsPath: null,
+    platform: null,
     exists: {
       path: false,
       home: false,
@@ -162,7 +166,7 @@ async function describeTarget(
         `assignmentPaths.${targetId}.kind`
       )
     );
-  } else if (!isSupportedKind(kind)) {
+  } else if (resolvePlatformAdapter(kind) === null) {
     findings.push(
       error(
         "invalid_assignment_path",
@@ -184,11 +188,20 @@ async function describeTarget(
   target.path ??= target.codexHome ?? target.home;
   target.exists.path ||= await existsDirectory(target.path);
 
-  const hasKnownKind = isSupportedKind(kind);
+  const adapter = resolvePlatformAdapter(kind);
+  if (adapter !== null) {
+    target.platform = {
+      adapter: adapter.id,
+      installRoot: normalizeValue(assignmentPath[adapter.installRootField]),
+      compatibility: [...adapter.compatibilityNames],
+      metadata: { ...adapter.metadata }
+    };
+  }
+  const hasKnownKind = adapter !== null;
   let hasMissingPath = false;
 
-  if (hasKnownKind) {
-    for (const field of KIND_PATH_RULES[kind]) {
+  if (adapter !== null) {
+    for (const field of adapter.requiredFields) {
       const value = normalizeValue(assignmentPath[field]);
       if (!value) {
         findings.push(
@@ -254,10 +267,6 @@ function normalizeValue(value: unknown): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isSupportedKind(value: string | null): value is TargetPathRuleByKind {
-  return value !== null && SUPPORTED_KINDS.has(value);
 }
 
 function error(code: string, message: string, pathName: string | null = null): TargetFinding {

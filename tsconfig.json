@@ -48,6 +48,7 @@
     "src/config/defaults.ts",
     "src/core/catalog/suitcase-manifest.ts",
     "src/core/catalog/index.ts",
+    "src/core/platform-adapters.ts",
     "src/core/planning/index.ts",
     "src/core/diffing/index.ts",
     "src/core/packing/index.ts",
@@ -75,6 +76,7 @@
     "src/track.ts",
     "tests/core-boundaries.test.ts",
     "src/adapters/filesystem.ts",
-    "tests/architecture-guardrails.test.ts"
+    "tests/architecture-guardrails.test.ts",
+    "tests/platform-adapters.test.ts"
   ]
 }
