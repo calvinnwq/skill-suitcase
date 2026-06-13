@@ -75,6 +75,7 @@ Command modules should stay thin. They adapt the outside world to core code.
 - planning and lock semantics
 - packing and artifact construction
 - apply/install workflows
+- rollback and existing-install adoption workflows
 - receipt creation and validation
 - catalog, manifest, target, and validation rules
 

@@ -458,20 +458,25 @@ Per-skill `status` values:
 
 `summary` holds aggregate counts across the receipt: `restored` and `removed`
 count individual files, `noop` and `refused` count skills, and `failed` counts
-files that could not be restored or removed. After a fully successful rollback,
-the receipt's rollback record is marked `rolled-back`, so re-running `rollback`
-is a deterministic no-op.
+files that could not be restored or removed. After a fully successful rollback
+of a previously installed skill, the receipt's rollback record is marked
+`rolled-back`, so re-running `rollback` is a deterministic no-op. If the apply
+created the whole skill install, rollback removes that install record from the
+receipt.
 
 On failure (`ok: false`), `errors` contains objects with `code` and `message`
 (plus optional `skill` and `path`). Error codes include:
 
-- `invalid_receipt` — the receipt `installs` map is not an object
+- `invalid_receipt` — the receipt is missing, unreadable, or has malformed JSON,
+  schema, installs map, install records, or rollback records
 - `target_drift` — the target differs from the applied state recorded at apply time
 - `restore_impossible` — the previous state cannot be restored (for example the
   original target was not a regular file)
 - `rollback_record_invalid` — stored rollback bytes do not match their recorded digest
 - `restore_write_failed` — restoring a file's previous contents failed
 - `rollback_remove_failed` — removing an apply-created file failed
+- `receipt_write_failed` — rollback restored files but could not persist the
+  updated receipt
 
 ## `track` Output
 
@@ -516,8 +521,13 @@ extra or unreadable files, or when a skill is blocked. Error codes include:
 - `missing_install_root` — the target could not be resolved to an install root
 - `target_missing` — a planned skill's target directory or file is absent
 - `target_mismatch` — target files do not match the source (`update`/`extra`)
-- `source_missing` — a source file could not be read
+- `target_unreadable` — a target skill path is not a directory or cannot be read
+- `target_symlink` — the target skill tree contains a symlink
+- `source_missing` — a source entry is absent
+- `source_unreadable` — a source skill directory cannot be read
 - `blocked_skill` — compatibility rules block the skill for that assignment
+- `invalid_receipt` — the existing receipt cannot be read or normalized
+- `receipt_write_failed` — the adoption receipt could not be written
 - `diff_*` — a diff-layer error propagated from target resolution
 
 ## Receipt Module
@@ -530,6 +540,7 @@ import {
   buildReceipt,
   buildInstallRecord,
   buildInstalledFiles,
+  readReceipt,
   upsertInstallRecord,
   upsertAndWriteReceipt,
   writeReceipt,
@@ -568,7 +579,9 @@ the same resolved `targetPath` or appending a new record when target paths
 differ. `upsertAndWriteReceipt` performs the same merge against the receipt on
 disk (creating it if absent and migrating legacy `.skills-sync.json` receipts
 when needed), then writes `<installRoot>/.skill-suitcase-receipt.json`.
-`writeReceipt` writes the full receipt directly without merging. Both writers
+`readReceipt` reads and normalizes the same modern or legacy receipt path
+without writing it. `writeReceipt` writes the full receipt directly without
+merging. Both writers
 validate all install records before writing, normalize legacy schemas to
 `calvinnwq.skills.receipt.v0`, and allow custom receipt paths only when they stay
 inside `installRoot`.
