@@ -41,9 +41,25 @@ node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openc
 Targets currently exercised against fixture #1:
 
 - `openclaw`
-- `codex`
+- `codex` / `codex-global`
 - `openclaw-kody-codex`
-- `claude`
+- `openclaw-workspace-codex`
+- `claude` / `claude-global`
+
+Platform adapters are explicit. `openclaw-skills-root` uses the declared `path`
+as the workspace skill root. `codex-home` and `nested-home-codex` install into
+`skillsPath` without assuming a universal Codex home. `claude-skills-root` uses
+the declared `path`.
+
+Smoke-test discovery with:
+
+```bash
+node dist/src/cli.js targets --source /path/to/skills-catalog --json
+```
+
+See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
+checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
+canonical bundle versus platform variant rules.
 
 ## `plan` Output
 
@@ -68,6 +84,15 @@ Targets currently exercised against fixture #1:
 
 `plan` reports package-level actions (`install`/`blocked`) and no file-level
 `entries`.
+
+Each planned item records the resolved `variant` name, which defaults to
+`canonical` (or the `compatibility.<skill>.variant` label). When the catalog
+declares a matching source variant for the resolved platform, `variant` is that
+variant's name and an extra `source` field carries its catalog-relative source
+path. These `variant` and `source` fields flow through `diff`, `pack`, `apply`,
+`track`, receipts, and `status`. See
+[`docs/portability-matrix.md`](docs/portability-matrix.md) for the variant
+selection rules.
 
 `diff` resolves `--target` to an assignment plus install root, then adds
 file-level `entries` and a summary:
@@ -150,6 +175,11 @@ not write files. If target resolution fails (for example ambiguous or missing
 `pack --dry-run` reports the skill files that would be copied into a staging
 bundle, including byte counts and SHA-256 checksums, but creates no bundle
 directory and writes no receipts.
+
+Like `diff`, `pack` resolves `--target` to an assignment plan, so `--target` may
+be either an assignment name (`openclaw`) or an `assignmentPath` id
+(`codex-global`). The resolved assignment drives the plan, while the output and
+stored manifest `target` field echoes the value you passed.
 
 ```json
 {
@@ -246,6 +276,12 @@ Retention and cleanup:
       "path": "/tmp/codex",
       "codexHome": "/tmp/codex",
       "skillsPath": "/tmp/codex/skills",
+      "platform": {
+        "adapter": "codex",
+        "installRoot": "/tmp/codex/skills",
+        "compatibility": ["codex"],
+        "metadata": {}
+      },
       "exists": {
         "path": false,
         "codexHome": false,
@@ -296,7 +332,8 @@ and `claude-skills-root` entries, and `skillsPath` for `codex-home` and
           "installedCommit": "deadbeef",
           "currentCommit": "42fe414dc8770117bc0c5c3c8c7619d25627898a",
           "installedHash": "e1c..",
-          "currentHash": "e1c.."
+          "currentHash": "e1c..",
+          "variant": "canonical"
         }
       ],
       "errors": []
@@ -317,7 +354,8 @@ and `claude-skills-root` entries, and `skillsPath` for `codex-home` and
       "installedCommit": "deadbeef",
       "currentCommit": "42fe414dc8770117bc0c5c3c8c7619d25627898a",
       "installedHash": "e1c..",
-      "currentHash": "e1c.."
+      "currentHash": "e1c..",
+      "variant": "canonical"
     }
   ],
   "summary": {
@@ -350,7 +388,7 @@ preferred schema is `calvinnwq.skills.receipt.v0` with a machine-readable
 
 - `agent`, `mode`, `source` or `sourcePath`, `targetPath`
 - `version`, `sourceCommit`, or `sourceHash` (at least one)
-- optional `target`, `installedFiles`, `priorState`, and `rollback`
+- optional `target`, `variant`, `installedFiles`, `priorState`, and `rollback`
 
 For migration compatibility, `status` also reads legacy `.skills-sync.json` files
 using `calvinnwq.skills.sync-lock.v0` when no modern receipt exists.
@@ -405,6 +443,9 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
 - `artifact_target_mismatch` / `artifact_source_mismatch` — approval metadata does not match the apply invocation
 - `artifact_blocked` — artifact contains blocked plan entries
 - `artifact_missing_planned` — artifact contains no planned skills
+- `diff_*` — a target-resolution error propagated from the diff layer;
+  `diff_blocked_skill` reports a planned skill that is blocked for the target
+  (for example when a required source variant is missing)
 - `unmanaged_target` — target has no managed status entries; install it first
 - `unsafe_target_state` — a planned skill is `dirty` or `unknown`
 - `status_*` — a pre-apply status-layer error (prefixed with `status_`)

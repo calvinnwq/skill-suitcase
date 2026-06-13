@@ -79,6 +79,55 @@ test("track records existing matching office-hours and OpenClaw gnhf-postflight 
   assert.equal(statusResult.summary.current, 2);
 });
 
+test("track refuses canonical gnhf-postflight for Codex slimmer variant targets", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-codex-blocked-src-"));
+  const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-codex-blocked-home-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(codexHome, { recursive: true, force: true }));
+
+  const skillsPath = path.join(codexHome, "skills");
+  const fixtureRoot = path.join(process.cwd(), "tests", "fixtures", "skills-catalog", "skills");
+  await mkdir(path.join(sourceRoot, "skills"), { recursive: true });
+  await cp(path.join(fixtureRoot, "gnhf-postflight"), path.join(sourceRoot, "skills", "gnhf-postflight"), { recursive: true });
+  await mkdir(path.join(skillsPath, "gnhf-postflight"), { recursive: true });
+  await writeFile(path.join(skillsPath, "gnhf-postflight", "SKILL.md"), "# Slim Codex variant\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  builder:
+    skills:
+      - gnhf-postflight
+
+assignments:
+  codex:
+    suitcases:
+      - builder
+
+assignmentPaths:
+  codex-global:
+    kind: codex-home
+    assignment: codex
+    codexHome: ${codexHome}
+    skillsPath: ${skillsPath}
+
+compatibility:
+  gnhf-postflight:
+    agents:
+      - openclaw
+    variant: canonical
+    blockedAgents:
+      codex: Codex must use the slimmer platform variant.
+`
+  );
+
+  const result = await track({ source: sourceRoot, target: "codex-global" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "blocked_skill"), true);
+  assert.equal(result.summary.blocked, 1);
+  await assert.rejects(readFile(path.join(skillsPath, RECEIPT_FILE), "utf8"), /ENOENT/);
+});
+
 test("track records versions with the same frontmatter semantics as status", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-version-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-version-target-"));

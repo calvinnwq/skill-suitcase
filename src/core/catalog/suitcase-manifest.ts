@@ -1,5 +1,10 @@
 type ManifestSuitcase = { skills: string[] };
 type ManifestAssignment = { suitcases: string[] };
+type ManifestVariant = {
+  source?: string;
+  agents?: string[];
+  reason?: string;
+};
 type ManifestCompatibility = {
   agents?: string[];
   evidence?: string[];
@@ -12,23 +17,28 @@ type ParsedManifest = {
   assignments: Record<string, ManifestAssignment>;
   assignmentPaths: Record<string, Record<string, string>>;
   compatibility: Record<string, ManifestCompatibility>;
+  variants: Record<string, Record<string, ManifestVariant>>;
 };
 
-type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "compatibility" | null;
+type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "compatibility" | "variants" | null;
 type CompatibilityField = "agents" | "evidence" | "blockedAgents" | null;
+type VariantField = "agents" | null;
 
 export function parseSuitcaseManifest(text: string): ParsedManifest {
   const manifest: ParsedManifest = {
     suitcases: {},
     assignments: {},
     assignmentPaths: {},
-    compatibility: {}
+    compatibility: {},
+    variants: {}
   };
 
   const lines = text.split(/\r?\n/);
   let section: ParsedSection = null;
   let currentName: string | null = null;
+  let currentVariantName: string | null = null;
   let currentField: CompatibilityField = null;
+  let currentVariantField: VariantField = null;
 
   for (const rawLine of lines) {
     const line = rawLine.replace(/\s+$/, "");
@@ -46,12 +56,15 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         sectionValue === "suitcases" ||
         sectionValue === "assignments" ||
         sectionValue === "assignmentPaths" ||
-        sectionValue === "compatibility"
+        sectionValue === "compatibility" ||
+        sectionValue === "variants"
       )
         ? sectionValue
         : null;
       currentName = null;
+      currentVariantName = null;
       currentField = null;
+      currentVariantField = null;
       continue;
     }
 
@@ -59,14 +72,17 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       section !== "suitcases" &&
       section !== "assignments" &&
       section !== "assignmentPaths" &&
-      section !== "compatibility"
+      section !== "compatibility" &&
+      section !== "variants"
     ) {
       continue;
     }
 
     if (indent === 2 && trimmed.endsWith(":")) {
       currentName = trimmed.slice(0, -1);
+      currentVariantName = null;
       currentField = null;
+      currentVariantField = null;
 
       if (section === "suitcases") {
         manifest.suitcases[currentName] = { skills: [] };
@@ -74,8 +90,10 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         manifest.assignments[currentName] = { suitcases: [] };
       } else if (section === "assignmentPaths") {
         manifest.assignmentPaths[currentName] = {};
-      } else {
+      } else if (section === "compatibility") {
         manifest.compatibility[currentName] = {};
+      } else {
+        manifest.variants[currentName] = {};
       }
       continue;
     }
@@ -115,10 +133,73 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         trimmed,
         currentField
       );
+      continue;
+    }
+
+    if (section === "variants") {
+      const variants = manifest.variants[name];
+      if (!variants) continue;
+      const parsed = parseVariantLine(
+        variants,
+        currentVariantName,
+        indent,
+        trimmed,
+        currentVariantField
+      );
+      currentVariantName = parsed.currentVariantName;
+      currentVariantField = parsed.currentVariantField;
     }
   }
 
   return manifest;
+}
+
+function parseVariantLine(
+  variants: Record<string, ManifestVariant>,
+  currentVariantName: string | null,
+  indent: number,
+  trimmed: string,
+  currentVariantField: VariantField
+): { currentVariantName: string | null; currentVariantField: VariantField } {
+  if (indent === 4 && trimmed.endsWith(":")) {
+    const variantName = trimmed.slice(0, -1);
+    variants[variantName] = {};
+    return {
+      currentVariantName: variantName,
+      currentVariantField: null
+    };
+  }
+
+  if (!currentVariantName) {
+    return { currentVariantName, currentVariantField };
+  }
+
+  const variant = variants[currentVariantName];
+  if (!variant) {
+    return { currentVariantName, currentVariantField };
+  }
+
+  if (indent === 6 && trimmed.startsWith("source:")) {
+    variant.source = valueAfterColon(trimmed);
+    return { currentVariantName, currentVariantField: null };
+  }
+
+  if (indent === 6 && trimmed.startsWith("reason:")) {
+    variant.reason = valueAfterColon(trimmed);
+    return { currentVariantName, currentVariantField: null };
+  }
+
+  if (indent === 6 && trimmed === "agents:") {
+    variant.agents = [];
+    return { currentVariantName, currentVariantField: "agents" };
+  }
+
+  if (indent === 8 && trimmed.startsWith("- ") && currentVariantField === "agents") {
+    variant.agents?.push(trimmed.slice(2));
+    return { currentVariantName, currentVariantField };
+  }
+
+  return { currentVariantName, currentVariantField };
 }
 
 function parseMappingLine(record: Record<string, string>, indent: number, trimmed: string): void {

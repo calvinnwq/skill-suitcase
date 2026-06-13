@@ -1,6 +1,7 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { type Catalog, loadCatalog } from "../catalog/index.js";
+import { platformCompatibilityNames } from "../platform-adapters.js";
 
 type PlannerInput = {
   source: string;
@@ -15,6 +16,7 @@ type PlanItem = {
   variant: string;
   sourcePath: string;
   evidence: string[];
+  source?: string;
 };
 
 type PlanError = {
@@ -59,12 +61,19 @@ export async function plan({ source, target }: PlannerInput): Promise<PlanResult
   }
 
   const plannedSkills = resolveAssignmentSkills(manifest, assignment);
-  const compatibilityTargets = targetCompatibilityNames(target);
+  const compatibilityTargets = targetCompatibilityNames(manifest, target);
   const planned: PlanItem[] = [];
   const blocked: PlanItem[] = [];
 
   for (const skillName of plannedSkills) {
     const compatibility = manifest.compatibility[skillName] ?? {};
+    const variant = selectSkillVariant(manifest, skillName, compatibilityTargets);
+
+    if (variant !== null) {
+      planned.push(await plannedSkill(sourceRoot, skillName, compatibility, variant));
+      continue;
+    }
+
     const blockedReason = firstMatchingValue(compatibility.blockedAgents, compatibilityTargets);
     const compatibleAgents = compatibility.agents ?? [];
 
@@ -123,17 +132,31 @@ function resolveAssignmentSkills(manifest: Catalog, assignment: Catalog["assignm
   return skills;
 }
 
-function targetCompatibilityNames(target: string): string[] {
-  const names = [target];
+function targetCompatibilityNames(manifest: Catalog, target: string): string[] {
+  const names = new Set<string>([target]);
+  const assignmentPaths = manifest.assignmentPaths ?? {};
 
-  if (target.includes("codex") && target !== "codex") {
-    names.push("codex");
-  }
-  if (target.includes("claude") && target !== "claude") {
-    names.push("claude");
+  if (!isRecord(assignmentPaths)) {
+    return [...names];
   }
 
-  return names;
+  for (const assignmentPath of Object.values(assignmentPaths)) {
+    if (!isRecord(assignmentPath)) {
+      continue;
+    }
+    if (normalizeValue(assignmentPath.assignment) !== target) {
+      continue;
+    }
+
+    for (const name of platformCompatibilityNames({
+      assignment: target,
+      kind: normalizeValue(assignmentPath.kind)
+    })) {
+      names.add(name);
+    }
+  }
+
+  return [...names];
 }
 
 function firstMatchingValue(record: Catalog["compatibility"][string]["blockedAgents"], keys: string[]): string | null {
@@ -153,18 +176,24 @@ function firstMatchingValue(record: Catalog["compatibility"][string]["blockedAge
 async function plannedSkill(
   sourceRoot: string,
   skillName: string,
-  compatibility: Catalog["compatibility"][string]
+  compatibility: Catalog["compatibility"][string],
+  variant: ResolvedSkillVariant | null = null
 ): Promise<PlanItem> {
-  const skillPath = path.join(sourceRoot, "skills", skillName);
+  const sourceRelativePath = variant?.source ?? path.join("skills", skillName);
+  const skillPath = path.join(sourceRoot, sourceRelativePath);
   await assertDirectory(skillPath, `Missing skill directory for ${skillName}`);
 
-  return {
+  const item: PlanItem = {
     skill: skillName,
     action: "install",
-    variant: compatibility.variant ?? "canonical",
+    variant: variant?.name ?? compatibility.variant ?? "canonical",
     sourcePath: skillPath,
     evidence: compatibility.evidence ?? []
   };
+  if (variant?.source !== undefined) {
+    item.source = variant.source;
+  }
+  return item;
 }
 
 function blockedSkill(
@@ -185,6 +214,43 @@ function blockedSkill(
   };
 }
 
+type ResolvedSkillVariant = {
+  name: string;
+  source: string;
+};
+
+function selectSkillVariant(
+  manifest: Catalog,
+  skillName: string,
+  compatibilityTargets: string[]
+): ResolvedSkillVariant | null {
+  const variants = manifest.variants?.[skillName];
+  if (!isRecord(variants)) {
+    return null;
+  }
+
+  for (const [variantName, variant] of Object.entries(variants)) {
+    if (!isRecord(variant)) {
+      continue;
+    }
+    const source = normalizeValue(variant.source);
+    if (!source) {
+      continue;
+    }
+    const agents = Array.isArray(variant.agents)
+      ? variant.agents.filter((agent): agent is string => typeof agent === "string")
+      : [];
+    if (agents.some((agent) => compatibilityTargets.includes(agent))) {
+      return {
+        name: variantName,
+        source
+      };
+    }
+  }
+
+  return null;
+}
+
 async function assertDirectory(targetPath: string, message: string): Promise<void> {
   try {
     await access(targetPath);
@@ -195,4 +261,17 @@ async function assertDirectory(targetPath: string, message: string): Promise<voi
   } catch {
     throw new Error(message);
   }
+}
+
+function normalizeValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

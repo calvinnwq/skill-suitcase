@@ -60,8 +60,8 @@ type DiffForApply = {
   source: string;
   target: string;
   assignment: string | null;
-  planned: Array<{ skill: string; sourcePath: string }>;
-  blocked: Array<Record<string, unknown>>;
+  planned: Array<{ skill: string; sourcePath: string; variant?: string }>;
+  blocked: Array<{ skill: string; reason?: string }>;
   entries: Array<{
     action: "create" | "update" | "unchanged" | "extra" | "missing" | "blocked";
     skill: string;
@@ -186,7 +186,7 @@ export async function apply({
         statuses: [],
         summary: emptyStatusSummary()
       },
-      errors: diffResult.errors.map((error) => ({ code: `diff_${error.code}`, message: error.message }))
+      errors: diffFailureErrors(diffResult)
     });
   }
 
@@ -277,8 +277,12 @@ export async function apply({
   }
 
   const sourceBySkill = new Map<string, string>();
+  const variantBySkill = new Map<string, string>();
   for (const planned of diffResult.planned) {
     sourceBySkill.set(planned.skill, planned.sourcePath);
+    if (typeof planned.variant === "string" && planned.variant.trim().length > 0) {
+      variantBySkill.set(planned.skill, planned.variant);
+    }
   }
 
   const statusBySkill = new Map<string, StatusItem>();
@@ -408,6 +412,11 @@ export async function apply({
 
       if (sourceCommit.length > 0) {
         nextRecord.sourceCommit = sourceCommit;
+      }
+
+      const variant = variantBySkill.get(skill);
+      if (variant !== undefined) {
+        nextRecord.variant = variant;
       }
 
       const currentVersion = priorState?.currentVersion;
@@ -842,6 +851,22 @@ function collectApplyEntries(entries: DiffForApply["entries"]): WriteEntries {
   }
 
   return { items, errors };
+}
+
+function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {
+  const errors = diffResult.errors.map((error) => ({
+    code: `diff_${error.code}`,
+    message: error.message
+  }));
+
+  for (const blocked of diffResult.blocked) {
+    errors.push({
+      code: "diff_blocked_skill",
+      message: `Skill ${blocked.skill} is blocked for apply: ${blocked.reason ?? "blocked"}`
+    });
+  }
+
+  return errors;
 }
 
 async function buildRollbackRecord({

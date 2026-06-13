@@ -30,7 +30,7 @@ type DiffForTrack = {
   target: string;
   assignment: string | null;
   installRoot: string | null;
-  planned: Array<{ skill: string; sourcePath: string }>;
+  planned: Array<{ skill: string; sourcePath: string; variant?: string }>;
   blocked: Array<{ skill: string; reason?: string }>;
   entries: Array<{
     action: "create" | "update" | "unchanged" | "extra" | "missing" | "blocked";
@@ -108,6 +108,7 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
   const records: Array<{
     skill: string;
     sourcePath: string;
+    variant?: string;
     targetPath: string;
     version: string | null;
     sourceHash: string;
@@ -126,14 +127,26 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
       errors.push(sourceHash.error);
       continue;
     }
-    records.push({
+    const record: {
+      skill: string;
+      sourcePath: string;
+      variant?: string;
+      targetPath: string;
+      version: string | null;
+      sourceHash: string;
+      installedFiles: Awaited<ReturnType<typeof buildInstalledFiles>>;
+    } = {
       skill: planned.skill,
       sourcePath: planned.sourcePath,
       targetPath,
       version: await readSkillVersion(planned.sourcePath).catch(() => null),
       sourceHash: sourceHash.hash,
       installedFiles: installedFiles.files
-    });
+    };
+    if (typeof planned.variant === "string" && planned.variant.trim().length > 0) {
+      record.variant = planned.variant;
+    }
+    records.push(record);
   }
 
   if (errors.length > 0) {
@@ -186,6 +199,9 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
         reason: "target existed before Suitcase tracking"
       }
     };
+    if (record.variant !== undefined) {
+      installRecord.variant = record.variant;
+    }
     if (record.version !== null) {
       installRecord.version = record.version;
     }

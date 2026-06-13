@@ -105,7 +105,8 @@ export async function pack({ source, target, dryRun = false, output = null }: Pa
   }
 
   const { sourceRoot, manifestPath, manifest } = await loadCatalog(source);
-  const planResult: PlanResult = await plan({ source: sourceRoot, target });
+  const planTarget = resolvePlanTarget(manifest, target);
+  const planResult: PlanResult = await plan({ source: sourceRoot, target: planTarget });
   const files: PackedFile[] = [];
 
   if (planResult.ok) {
@@ -299,6 +300,22 @@ function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {
       evidence: item.evidence
     }))
   };
+}
+
+function resolvePlanTarget(manifest: LoadedCatalog["manifest"], target: string): string {
+  if (manifest.assignments[target]) {
+    return target;
+  }
+
+  const assignmentPath = manifest.assignmentPaths[target];
+  if (isRecord(assignmentPath) && typeof assignmentPath.assignment === "string") {
+    const assignment = assignmentPath.assignment.trim();
+    if (assignment.length > 0) {
+      return assignment;
+    }
+  }
+
+  return target;
 }
 
 function resolveSourceCommit(sourceRoot: string): string | null {

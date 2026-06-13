@@ -29,6 +29,25 @@ test("lists all assignment paths with stability fields from the fixture catalog"
   assert.equal(codexGlobal.path, "/tmp/codex");
   assert.equal(codexGlobal.codexHome, "/tmp/codex");
   assert.equal(codexGlobal.skillsPath, "/tmp/codex/skills");
+  assert.deepEqual(codexGlobal.platform, {
+    adapter: "codex",
+    installRoot: "/tmp/codex/skills",
+    compatibility: ["codex"],
+    metadata: {}
+  });
+
+  const openclaw = result.targets.find((entry) => entry.id === "openclaw");
+  if (openclaw === undefined) {
+    throw new Error("Expected openclaw target entry in fixture output.");
+  }
+  assert.deepEqual(openclaw.platform, {
+    adapter: "openclaw",
+    installRoot: "/tmp/openclaw/skills",
+    compatibility: ["openclaw"],
+    metadata: {
+      workspaceSkillRoot: true
+    }
+  });
 
   for (const entry of result.targets) {
     assert.equal(typeof entry.id, "string");

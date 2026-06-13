@@ -11,6 +11,7 @@ import {
   RECEIPT_SCHEMA
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
+import { resolvePlatformInstallRoot } from "../platform-adapters.js";
 
 type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
 type StatusSummary = {
@@ -97,6 +98,7 @@ type InstallRecord = {
   targetPath?: string;
   target?: string;
   version?: string;
+  variant?: string;
   sourceCommit?: string;
   sourceHash?: string;
   installedFiles?: InstalledFileRecord[] | null;
@@ -113,20 +115,13 @@ type InstalledFileRecord = {
   [key: string]: unknown;
 };
 
-const PATH_FIELDS_BY_KIND = {
-  "openclaw-skills-root": ["path"],
-  "claude-skills-root": ["path"],
-  "codex-home": ["skillsPath"],
-  "nested-home-codex": ["skillsPath"]
-} as const;
-type AssignmentKind = keyof typeof PATH_FIELDS_BY_KIND;
-type AssignmentPathField = (typeof PATH_FIELDS_BY_KIND)[AssignmentKind][number];
 const INSTALL_RECORD_SCALAR_FIELDS = [
   "agent",
   "mode",
   "sourcePath",
   "targetPath",
   "version",
+  "variant",
   "sourceCommit",
   "sourceHash"
 ] as const;
@@ -201,7 +196,8 @@ export async function status({ source }: { source: string }): Promise<StatusResu
 
     const assignmentName = normalizeValue((assignmentPath as { assignment?: unknown }).assignment);
     const kind = normalizeValue((assignmentPath as { kind?: unknown }).kind);
-    const installRoot = resolveAssignmentInstallRoot(assignmentPath, kind);
+    const rootResolution = resolvePlatformInstallRoot({ kind, assignmentPath });
+    const installRoot = rootResolution.installRoot;
 
     assignmentResult.assignment = assignmentName;
     assignmentResult.kind = kind;
@@ -222,7 +218,7 @@ export async function status({ source }: { source: string }): Promise<StatusResu
       const message = kind
         ? `Assignment path ${assignmentPathId} is missing required install-root field.`
         : `Assignment path ${assignmentPathId} is missing or uses an unsupported kind.`;
-      const pathField = kind && isSupportedKind(kind) ? PATH_FIELDS_BY_KIND[kind][0] : "kind";
+      const pathField = rootResolution.adapter?.installRootField ?? rootResolution.missingFields[0] ?? "kind";
       const assignmentError = {
         code: "invalid_assignment_path",
         message
@@ -256,7 +252,7 @@ export async function status({ source }: { source: string }): Promise<StatusResu
         code: "missing_install_root",
         message: `Assignment path ${assignmentPathId} points at missing install root: ${installRoot}.`
       };
-      const pathField = isSupportedKind(kind) ? PATH_FIELDS_BY_KIND[kind][0] : "kind";
+      const pathField = rootResolution.adapter?.installRootField ?? "kind";
       assignmentResult.errors.push(assignmentError);
       errors.push({ ...assignmentError, path: `assignmentPaths.${assignmentPathId}.${pathField}` });
       assignments.push(assignmentResult);
@@ -350,7 +346,8 @@ export async function status({ source }: { source: string }): Promise<StatusResu
         installedCommit: check.installedCommit,
         currentCommit: check.currentCommit,
         installedHash: check.installedHash,
-        currentHash: check.currentHash
+        currentHash: check.currentHash,
+        variant: planned.variant
       };
 
       if (!VALID_STATUSES.has(resultStatus.status)) {
@@ -937,6 +934,7 @@ function normalizeReceiptInstallRecord(
   const target = normalizeValue(installRecord.target) ?? undefined;
   const targetPath = normalizeValue(installRecord.targetPath) ?? undefined;
   const version = normalizeValue(installRecord.version) ?? undefined;
+  const variant = normalizeValue(installRecord.variant) ?? undefined;
   const sourceCommit = normalizeValue(installRecord.sourceCommit) ?? undefined;
   const sourceHash = normalizeValue(installRecord.sourceHash) ?? undefined;
   const installedFiles = Array.isArray(installRecord.installedFiles) ? installRecord.installedFiles : null;
@@ -1105,6 +1103,11 @@ function normalizeReceiptInstallRecord(
   } else {
     delete canonical.version;
   }
+  if (variant !== undefined) {
+    canonical.variant = variant;
+  } else {
+    delete canonical.variant;
+  }
   if (sourceCommit !== undefined) {
     canonical.sourceCommit = sourceCommit;
   } else {
@@ -1260,24 +1263,6 @@ function selectInstallRecord({
     ]
   };
 }
-function resolveAssignmentInstallRoot(assignmentPath: Record<string, unknown>, kind: string | null): string | null {
-  if (!isSupportedKind(kind)) {
-    return null;
-  }
-  const fields = PATH_FIELDS_BY_KIND[kind];
-  if (!fields) {
-    return null;
-  }
-
-  for (const field of fields) {
-    const value = normalizeValue(assignmentPath[field]);
-    if (value) {
-      return value;
-    }
-  }
-  return null;
-}
-
 async function targetDiffersFromSource(source: string, target: string): Promise<boolean> {
   try {
     const targetStats = await lstat(target);
@@ -1497,10 +1482,6 @@ function normalizeValue(value: unknown): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isSupportedKind(value: string | null): value is AssignmentKind {
-  return value !== null && Object.hasOwn(PATH_FIELDS_BY_KIND, value);
 }
 
 function errorMessage(error: unknown): string {

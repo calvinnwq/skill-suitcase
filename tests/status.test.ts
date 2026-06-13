@@ -1290,6 +1290,83 @@ compatibility:
   assert.equal(blocked.reason, "Codex must use the slimmer platform variant.");
 });
 
+test("status reports the selected platform variant for installed skills", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-variant-src-"));
+  const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-variant-home-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(codexHome, { recursive: true, force: true }));
+
+  const skillsPath = path.join(codexHome, "skills");
+  const sourceSkill = path.join(sourceRoot, "variants", "codex", "gnhf-postflight");
+  const targetSkill = path.join(skillsPath, "gnhf-postflight");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(targetSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: gnhf-postflight\nversion: 2026.06.13-codex\n---\n");
+  await writeFile(path.join(targetSkill, "SKILL.md"), "---\nname: gnhf-postflight\nversion: 2026.06.13-codex\n---\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  builder:
+    skills:
+      - gnhf-postflight
+
+assignments:
+  codex:
+    suitcases:
+      - builder
+
+assignmentPaths:
+  codex-global:
+    kind: codex-home
+    assignment: codex
+    codexHome: ${codexHome}
+    skillsPath: ${skillsPath}
+
+compatibility:
+  gnhf-postflight:
+    agents:
+      - openclaw
+    variant: canonical
+    blockedAgents:
+      codex: Codex must use the slimmer platform variant.
+
+variants:
+  gnhf-postflight:
+    codex:
+      source: variants/codex/gnhf-postflight
+      agents:
+        - codex
+`
+  );
+  await upsertAndWriteReceipt({
+    installRoot: skillsPath,
+    skillName: "gnhf-postflight",
+    installRecord: {
+      skill: "gnhf-postflight",
+      agent: "codex",
+      target: "codex",
+      mode: "copy",
+      source: {
+        path: sourceSkill
+      },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      version: "2026.06.13-codex",
+      variant: "codex",
+      sourceHash: await hashDirectory(sourceSkill),
+      installedFiles: await buildInstalledFiles(targetSkill)
+    }
+  });
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  const item = firstItem(result.statuses, "result.statuses");
+  assert.equal(item.skill, "gnhf-postflight");
+  assert.equal(item.status, "current");
+  assert.equal(item.variant, "codex");
+});
+
 test("status requires codex-home skillsPath as the install root", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-codex-root-"));
   const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-codex-home-"));
