@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assessPlanLock, type PlanLock, PLAN_LOCK_SCHEMA } from "../planning/plan-lock.js";
 import { diff } from "../diffing/index.js";
@@ -870,7 +870,13 @@ async function buildRollbackRecord({
 
 async function readRollbackFileState(filePath: string): Promise<RollbackFileState> {
   try {
-    const info = await stat(filePath);
+    const info = await lstat(filePath);
+    if (info.isSymbolicLink()) {
+      return {
+        kind: "restore-impossible",
+        reason: "target was a symbolic link"
+      };
+    }
     if (!info.isFile()) {
       return {
         kind: "restore-impossible",

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { diff } from "../diffing/index.js";
 import {
@@ -48,6 +48,10 @@ type InstalledFilesResult =
 
 type SourceHashResult =
   | { ok: true; hash: string }
+  | { ok: false; error: TrackError };
+
+type TargetTreeValidationResult =
+  | { ok: true }
   | { ok: false; error: TrackError };
 
 export type TrackResult = {
@@ -349,6 +353,11 @@ async function readInstalledFiles(
   targetPath: string,
   skill: string
 ): Promise<InstalledFilesResult> {
+  const validation = await validateTargetTree(targetPath, skill);
+  if (!validation.ok) {
+    return validation;
+  }
+
   try {
     return { ok: true, files: await buildInstalledFiles(targetPath) };
   } catch (error) {
@@ -373,6 +382,85 @@ async function readInstalledFiles(
       })
     };
   }
+}
+
+async function validateTargetTree(targetPath: string, skill: string): Promise<TargetTreeValidationResult> {
+  let info: Awaited<ReturnType<typeof lstat>>;
+  try {
+    info = await lstat(targetPath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return {
+        ok: false,
+        error: trackError({
+          code: "target_missing",
+          message: `Target directory is missing for ${skill}.`,
+          skill,
+          path: targetPath
+        })
+      };
+    }
+    return unreadableTargetTree(targetPath, skill, error);
+  }
+
+  if (info.isSymbolicLink()) {
+    return symlinkedTargetTree(targetPath, skill, targetPath);
+  }
+  if (!info.isDirectory()) {
+    return unreadableTargetTree(targetPath, skill, new Error("target is not a directory"));
+  }
+
+  return validateTargetTreeEntries(targetPath, skill, targetPath);
+}
+
+async function validateTargetTreeEntries(
+  rootPath: string,
+  skill: string,
+  currentPath: string
+): Promise<TargetTreeValidationResult> {
+  try {
+    const entries = await readdir(currentPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(currentPath, entry.name);
+      if (entry.isSymbolicLink()) {
+        return symlinkedTargetTree(rootPath, skill, entryPath);
+      }
+      if (entry.isDirectory()) {
+        const result = await validateTargetTreeEntries(rootPath, skill, entryPath);
+        if (!result.ok) {
+          return result;
+        }
+      }
+    }
+  } catch (error) {
+    return unreadableTargetTree(rootPath, skill, error);
+  }
+
+  return { ok: true };
+}
+
+function symlinkedTargetTree(targetPath: string, skill: string, symlinkPath: string): TargetTreeValidationResult {
+  return {
+    ok: false,
+    error: trackError({
+      code: "target_symlink",
+      message: `Target tree for ${skill} contains a symlink and cannot be tracked safely.`,
+      skill,
+      path: symlinkPath === targetPath ? targetPath : symlinkPath
+    })
+  };
+}
+
+function unreadableTargetTree(targetPath: string, skill: string, error: unknown): TargetTreeValidationResult {
+  return {
+    ok: false,
+    error: trackError({
+      code: "target_unreadable",
+      message: `Target directory could not be read for ${skill}: ${errorMessage(error)}`,
+      skill,
+      path: targetPath
+    })
+  };
 }
 
 async function readSourceHash(sourcePath: string, skill: string): Promise<SourceHashResult> {

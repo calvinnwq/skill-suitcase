@@ -794,7 +794,7 @@ async function removeRollbackTarget(file: RollbackFileRecord): Promise<
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function normalizeString(value: unknown): string | null {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -167,6 +167,24 @@ test("track reports unreadable target scans without throwing", async (t) => {
 
   assert.equal(result.ok, false);
   assert.equal(result.errors.some((error) => error.code === "target_unreadable"), true);
+  await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
+});
+
+test("track refuses symlinked target trees", async (t) => {
+  const { sourceRoot, targetRoot } = await createLiveMatchingInstall(t);
+  const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-symlink-outside-"));
+  t.after(() => rm(outsideRoot, { recursive: true, force: true }));
+
+  const sourceNested = path.join(sourceRoot, "skills", "office-hours", "nested");
+  await mkdir(sourceNested, { recursive: true });
+  await writeFile(path.join(sourceNested, "payload.txt"), "same\n");
+  await writeFile(path.join(outsideRoot, "payload.txt"), "same\n");
+  await symlink(outsideRoot, path.join(targetRoot, "office-hours", "nested"), "dir");
+
+  const result = await track({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "target_symlink"), true);
   await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
 });
 

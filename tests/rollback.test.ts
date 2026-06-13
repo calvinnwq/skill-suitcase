@@ -108,6 +108,71 @@ test("apply captures rollback state and rollback restores previous file bytes", 
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"old\");\n");
 });
 
+test("apply captures pre-existing symlink files as restore-impossible", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-target-"));
+  const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-file-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(outsideRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  const targetSkill = path.join(targetRoot, "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(targetSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"old\");\n");
+  await cp(sourceSkill, targetSkill, { recursive: true });
+
+  const outsideFile = path.join(outsideRoot, "runtime.js");
+  await writeFile(outsideFile, "console.log(\"old\");\n");
+  await rm(path.join(targetSkill, "runtime.js"));
+  await symlink(outsideFile, path.join(targetSkill, "runtime.js"));
+
+  await upsertAndWriteReceipt({
+    installRoot: targetRoot,
+    skillName: "office-hours",
+    installRecord: {
+      skill: "office-hours",
+      agent: "openclaw",
+      target: "openclaw",
+      mode: "copy",
+      source: { path: sourceSkill },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      version: "2026.06.11",
+      sourceHash: await hashDirectory(sourceSkill),
+      installedFiles: await buildInstalledFiles(targetSkill)
+    }
+  });
+
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"new\");\n");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({ source: sourceRoot, target: "openclaw", lock: lockPath });
+  assert.equal(result.ok, true);
+
+  const receipt = JSON.parse(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8")) as {
+    installs: { "office-hours": { rollback?: { files?: Array<{ path: string; previous: { kind: string; reason?: string } }> } } };
+  };
+  const runtimeFile = receipt.installs["office-hours"].rollback?.files?.find((file) => file.path === "runtime.js");
+  assert.equal(runtimeFile?.previous.kind, "restore-impossible");
+  assert.equal(runtimeFile?.previous.reason, "target was a symbolic link");
+  assert.equal(await readFile(outsideFile, "utf8"), "console.log(\"old\");\n");
+});
+
 test("rollback updates receipt metadata to the restored target state", async (t) => {
   const { receiptPath, sourceRoot, targetSkill } = await createAppliedUpdate(t);
 
@@ -417,6 +482,25 @@ test("rollback refuses malformed install records", async (t) => {
   assert.equal(result.ok, false);
   assert.equal(result.summary.refused, 1);
   assert.equal(result.errors[0]?.code, "invalid_receipt");
+});
+
+test("rollback refuses array-shaped receipt installs", async (t) => {
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-array-installs-"));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  const receiptPath = path.join(targetRoot, RECEIPT_FILE);
+  await writeFile(
+    receiptPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      installs: []
+    }, null, 2)}\n`
+  );
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "invalid_receipt");
+  assert.equal(result.rollbacks.length, 0);
 });
 
 test("rollback refuses missing applied rollback state", async (t) => {
