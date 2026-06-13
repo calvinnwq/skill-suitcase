@@ -45,6 +45,10 @@ type InstalledFilesResult =
   | { ok: true; files: Awaited<ReturnType<typeof buildInstalledFiles>> }
   | { ok: false; error: TrackError };
 
+type SourceHashResult =
+  | { ok: true; hash: string }
+  | { ok: false; error: TrackError };
+
 export type TrackResult = {
   ok: boolean;
   source: string;
@@ -112,12 +116,17 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
       errors.push(installedFiles.error);
       continue;
     }
+    const sourceHash = await readSourceHash(planned.sourcePath, planned.skill);
+    if (!sourceHash.ok) {
+      errors.push(sourceHash.error);
+      continue;
+    }
     records.push({
       skill: planned.skill,
       sourcePath: planned.sourcePath,
       targetPath,
       version: await skillVersion(planned.sourcePath),
-      sourceHash: await hashDirectory(planned.sourcePath),
+      sourceHash: sourceHash.hash,
       installedFiles: installedFiles.files
     });
   }
@@ -360,6 +369,22 @@ async function readInstalledFiles(
         message: `Target directory could not be read for ${skill}: ${errorMessage(error)}`,
         skill,
         path: targetPath
+      })
+    };
+  }
+}
+
+async function readSourceHash(sourcePath: string, skill: string): Promise<SourceHashResult> {
+  try {
+    return { ok: true, hash: await hashDirectory(sourcePath) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: trackError({
+        code: "source_unreadable",
+        message: `Source directory could not be read for ${skill}: ${errorMessage(error)}`,
+        skill,
+        path: sourcePath
       })
     };
   }
