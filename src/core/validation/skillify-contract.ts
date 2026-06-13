@@ -20,7 +20,14 @@ export type ContractReport = {
 
 const REQUIRED_SECTIONS = ["## Contract", "## Phases", "## Output Format"] as const;
 const NOTE_WRITING_TERMS = ["memory", "wiki", "vault", "obsidian", "notes"] as const;
-const LLM_TERMS = ["llm", "model", "prompt", "claude", "codex", "openai", "anthropic", "gemini"] as const;
+const LLM_TERMS = ["llm", "claude", "codex", "openai", "anthropic", "gemini"] as const;
+const LLM_PHRASES = [
+  /\blanguage model/,
+  /\b(?:ai|ml|chat|embedding|reasoning|reward|foundation) model/,
+  /\bmodel prompt/,
+  /\bsystem prompt/,
+  /\bprompt (?:template|engineering|injection|chaining|tuning)/
+] as const;
 
 /**
  * Mirror of `skills/skillify/scripts/check_skillify_contract.py` from the
@@ -98,7 +105,10 @@ export async function scoreSkillContract(root: string, skillName: string): Promi
     )
   );
 
-  const mentionsLlm = LLM_TERMS.some((term) => `${skillText}\n${testsText}`.toLowerCase().includes(term));
+  const llmHaystack = `${skillText}\n${testsText}`.toLowerCase();
+  const mentionsLlm =
+    LLM_TERMS.some((term) => llmHaystack.includes(term)) ||
+    LLM_PHRASES.some((pattern) => pattern.test(llmHaystack));
   const evalOk = /eval|quality/i.test(testsText) || hasExplicitNa(skillText, "LLM evals");
   items.push(
     contractItem(

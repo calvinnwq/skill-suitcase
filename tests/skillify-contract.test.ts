@@ -107,6 +107,65 @@ test("flags a bare skill and exposes per-item applicability", async () => {
   assert.equal(byId.get(10)?.applicable, false);
 });
 
+test("treats generic model/prompt prose as not-LLM but recognizes LLM phrasing", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(
+    root,
+    "prose",
+    `---
+name: prose
+description: Use when you need to prompt the user about a data model.
+---
+
+# Prose
+
+## Contract
+
+We prompt the user for confirmation and update the domain model. Trigger included.
+
+## Phases
+
+P.
+
+## Output Format
+
+O.
+`
+  );
+  await writeSkill(
+    root,
+    "llmish",
+    `---
+name: llmish
+description: Use when editing the system prompt for a language model. Trigger included.
+---
+
+# LLMish
+
+## Contract
+
+Tune the system prompt sent to the language model. Trigger included.
+
+## Phases
+
+P.
+
+## Output Format
+
+O.
+`
+  );
+
+  const prose = await scoreSkillContract(root, "prose");
+  const llmish = await scoreSkillContract(root, "llmish");
+
+  // "prompt the user" / "domain model" are generic prose, so the LLM eval item
+  // stays not-applicable instead of becoming a release-blocking failure.
+  assert.equal(prose.items.find((item) => item.id === 5)?.applicable, false);
+  // "system prompt" / "language model" are genuine LLM phrasing and remain applicable.
+  assert.equal(llmish.items.find((item) => item.id === 5)?.applicable, true);
+});
+
 test("accepts explicit not-applicable rationales", async () => {
   const root = await makeCatalogRoot();
   await writeSkill(
