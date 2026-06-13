@@ -277,6 +277,39 @@ O.
   assert.equal(byId.get(6)?.ok, true);
 });
 
+test("parses frontmatter with a leading UTF-8 BOM", async () => {
+  const root = await makeCatalogRoot();
+  const bom = `\uFEFF---
+name: bom
+description: |
+  Use when the file is saved with a leading byte-order mark. Trigger phrases included.
+---
+
+# BOM
+
+## Contract
+
+Trigger.
+
+## Phases
+
+P.
+
+## Output Format
+
+O.
+`;
+  await writeSkill(root, "bom", bom);
+
+  const report = await scoreSkillContract(root, "bom");
+  const byId = new Map(report.items.map((item) => [item.id, item]));
+
+  // name parses despite the leading BOM, so it still matches the skill name.
+  assert.equal(byId.get(1)?.ok, true);
+  // multi-line block-scalar description with "Use when" survives BOM stripping.
+  assert.equal(byId.get(6)?.ok, true);
+});
+
 test("parses folded and chomped block-scalar descriptions", async () => {
   const root = await makeCatalogRoot();
   await writeSkill(

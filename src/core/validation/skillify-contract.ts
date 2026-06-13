@@ -40,10 +40,10 @@ export async function scoreSkillContract(root: string, skillName: string): Promi
   const skillDir = path.join(skillRoot, "skills", skillName);
   const skillMd = path.join(skillDir, "SKILL.md");
   const skillText = await loadText(skillMd);
-  const testsText = await combinedTestText(skillRoot, skillName);
   const frontmatter = parseFrontmatter(skillText);
   const scripts = await listScripts(path.join(skillDir, "scripts"));
   const testFiles = await existingTestFiles(skillRoot, skillName);
+  const testsText = await combinedTestText(testFiles);
 
   const rel = (target: string): string => path.relative(skillRoot, target).split(path.sep).join("/");
   const description = frontmatter.description ?? "";
@@ -257,8 +257,7 @@ async function existingTestFiles(root: string, skillName: string): Promise<strin
   return found;
 }
 
-async function combinedTestText(root: string, skillName: string): Promise<string> {
-  const files = await existingTestFiles(root, skillName);
+async function combinedTestText(files: string[]): Promise<string> {
   const texts = await Promise.all(files.map((file) => loadText(file)));
   return texts.join("\n");
 }
@@ -273,7 +272,7 @@ function escapeRegExp(value: string): string {
 }
 
 function parseFrontmatter(content: string): Record<string, string> {
-  const normalized = content.replace(/\r\n/g, "\n");
+  const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---\n") || !normalized.includes("\n---\n")) {
     return {};
   }
