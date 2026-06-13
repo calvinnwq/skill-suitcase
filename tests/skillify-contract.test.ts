@@ -185,6 +185,76 @@ O.
   assert.equal(byId.get(6)?.ok, true);
 });
 
+test("parses CRLF frontmatter", async () => {
+  const root = await makeCatalogRoot();
+  const crlf = `---
+name: crlf
+description: |
+  Use when the file is saved with Windows line endings. Trigger phrases included.
+---
+
+# CRLF
+
+## Contract
+
+Trigger.
+
+## Phases
+
+P.
+
+## Output Format
+
+O.
+`.replace(/\n/g, "\r\n");
+  await writeSkill(root, "crlf", crlf);
+
+  const report = await scoreSkillContract(root, "crlf");
+  const byId = new Map(report.items.map((item) => [item.id, item]));
+
+  // name parses despite CRLF line endings, so it still matches the skill name.
+  assert.equal(byId.get(1)?.ok, true);
+  // multi-line block-scalar description with "Use when" survives CRLF normalization.
+  assert.equal(byId.get(6)?.ok, true);
+});
+
+test("parses folded and chomped block-scalar descriptions", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(
+    root,
+    "folded",
+    `---
+name: folded
+description: >-
+  Use when the description uses a folded block scalar.
+  Trigger wording is preserved across the fold.
+---
+
+# Folded
+
+## Contract
+
+Trigger.
+
+## Phases
+
+P.
+
+## Output Format
+
+O.
+`
+  );
+
+  const report = await scoreSkillContract(root, "folded");
+  const byId = new Map(report.items.map((item) => [item.id, item]));
+
+  // description is the folded body, not the literal ">-" indicator.
+  assert.equal(byId.get(1)?.ok, true);
+  // "Use when" inside the folded scalar satisfies the resolver trigger item.
+  assert.equal(byId.get(6)?.ok, true);
+});
+
 test("strict validate surfaces contract reports and distinguishes warnings from failures", async () => {
   const root = await makeCatalogRoot();
   // A skill that is structurally broken (applicable failures) but mentions no LLM/notes.

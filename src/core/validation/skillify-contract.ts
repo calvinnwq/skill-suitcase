@@ -263,11 +263,12 @@ function escapeRegExp(value: string): string {
 }
 
 function parseFrontmatter(content: string): Record<string, string> {
-  if (!content.startsWith("---\n") || !content.includes("\n---\n")) {
+  const normalized = content.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n") || !normalized.includes("\n---\n")) {
     return {};
   }
 
-  const raw = content.split("\n---\n")[0]!.slice(4);
+  const raw = normalized.split("\n---\n")[0]!.slice(4);
   const result: Record<string, string> = {};
   let currentKey: string | null = null;
   let collected: string[] = [];
@@ -288,7 +289,7 @@ function parseFrontmatter(content: string): Record<string, string> {
     const separator = line.indexOf(":");
     const key = line.slice(0, separator).trim();
     const value = line.slice(separator + 1).trim();
-    if (value === "|") {
+    if (isBlockScalarHeader(value)) {
       currentKey = key;
       collected = [];
     } else {
@@ -301,6 +302,10 @@ function parseFrontmatter(content: string): Record<string, string> {
   }
 
   return result;
+}
+
+function isBlockScalarHeader(value: string): boolean {
+  return /^[|>][0-9]*[+-]?$/.test(value);
 }
 
 function stripQuotes(value: string): string {
