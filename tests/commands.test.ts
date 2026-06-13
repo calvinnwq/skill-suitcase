@@ -11,6 +11,7 @@ test("command registry exposes every public command explicitly", () => {
     "plan",
     "diff",
     "pack",
+    "import",
     "validate",
     "targets",
     "status",
@@ -41,6 +42,41 @@ test("parseCommandArgs preserves current flag parsing and unknown argument error
     () => parseCommandArgs(["plan", "--source", fixtureSource, "--target", "openclaw", "--nope"]),
     /Unknown argument: --nope/
   );
+});
+
+test("dispatcher routes import and rejects invalid import argument shapes", async () => {
+  const success = await dispatchCommand([
+    "import",
+    "--source",
+    fixtureSource,
+    "--json"
+  ]);
+
+  assert.equal(success.type, "result");
+  if (success.type !== "result") {
+    assert.fail("Expected command result.");
+  }
+  assert.equal(success.exitCode, 0);
+  assert.equal(success.result.ok, true);
+
+  const missingJson = await dispatchCommand([
+    "import",
+    "--source",
+    fixtureSource
+  ]);
+  assert.equal(missingJson.type, "usage");
+  assert.equal(missingJson.exitCode, 2);
+
+  const invalidTarget = await dispatchCommand([
+    "import",
+    "--source",
+    fixtureSource,
+    "--target",
+    "codex",
+    "--json"
+  ]);
+  assert.equal(invalidTarget.type, "usage");
+  assert.equal(invalidTarget.exitCode, 2);
 });
 
 test("dispatcher routes valid commands and reports usage failures without stdout JSON", async () => {

@@ -2,10 +2,10 @@
 
 Skill Suitcase is a CLI for planning portable skill installs from a catalog repo.
 
-Read-only commands (`plan`, `diff`, `pack`, `validate`, `targets`, `status`)
-read a catalog manifest, resolve assignments and assignment paths, and emit JSON
-plans, diffs, target discovery, bundle manifests, or status reports without
-touching target install paths or runtime homes.
+Read-only commands (`plan`, `diff`, `pack`, `import`, `validate`, `targets`,
+`status`) read a catalog manifest, resolve assignments and assignment paths, and
+emit JSON plans, diffs, import findings, target discovery, bundle manifests, or
+status reports without touching target install paths or runtime homes.
 
 The `apply` command writes skill files into target install paths. It requires
 an explicit approval input (plan-lock or staging artifact), refuses dirty or
@@ -29,6 +29,7 @@ node dist/src/cli.js plan --source /Users/ngxcalvin/repos/skills --target opencl
 node dist/src/cli.js diff --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
 node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
+node dist/src/cli.js import --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
@@ -37,6 +38,14 @@ node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openc
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
 ```
+
+`import --json` is a read-only onboarding inspection for existing skills repos.
+It checks for `skill-suitcase.yaml`, the `skills/<name>/SKILL.md` layout, and
+catalog portability metadata such as assignments, assignment paths,
+compatibility, and variants. Findings are emitted as deterministic JSON with
+`warning` or `error` levels; warnings keep `ok: true`, while errors make the
+command exit with failure status. The command never creates install roots,
+runtime homes, receipts, or bundle artifacts.
 
 Targets currently exercised against fixture #1:
 
@@ -60,6 +69,70 @@ node dist/src/cli.js targets --source /path/to/skills-catalog --json
 See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
 canonical bundle versus platform variant rules.
+
+## `import` Output
+
+`import` accepts `--source <skills-repo> --json` and inspects an existing catalog
+without requiring a target. It returns absolute `source` and `manifestPath`
+values, summary counts, a sorted `skills` inventory, and deterministic findings.
+
+```json
+{
+  "ok": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "manifestPath": "/Users/ngxcalvin/repos/skills/skill-suitcase.yaml",
+  "summary": {
+    "discoveredSkills": 1,
+    "referencedSkills": 1,
+    "suitcases": 1,
+    "assignments": 1,
+    "assignmentPaths": 1,
+    "compatibilityEntries": 1,
+    "variantEntries": 1,
+    "warnings": 0,
+    "errors": 0,
+    "findings": 0
+  },
+  "skills": [
+    {
+      "name": "office-hours",
+      "path": "/Users/ngxcalvin/repos/skills/skills/office-hours",
+      "skillFile": "/Users/ngxcalvin/repos/skills/skills/office-hours/SKILL.md",
+      "referencedBy": ["core"],
+      "compatibility": {
+        "declared": true,
+        "agents": ["codex"],
+        "blockedAgents": [],
+        "variant": "canonical",
+        "evidence": ["README.md"]
+      },
+      "variants": [
+        {
+          "name": "codex",
+          "source": "variants/codex/office-hours",
+          "agents": ["codex"],
+          "exists": true,
+          "skillFileExists": true
+        }
+      ]
+    }
+  ],
+  "findings": []
+}
+```
+
+Each finding has `level`, `code`, `message`, and `path`. Warning codes include
+`missing_assignment_paths`, `empty_suitcase`, `unused_compatibility`,
+`missing_compatibility`, `missing_compatibility_agents`,
+`missing_compatibility_variant`, `missing_variant_metadata`,
+`missing_variant_agents`, and `unused_variants`. Error codes include
+`missing_manifest`, `unreadable_manifest`, `missing_skills_directory`,
+`unreadable_skills_directory`, `missing_suitcases`, `missing_assignments`,
+`empty_assignment`, `unknown_suitcase`, `invalid_assignment_path`,
+`unknown_assignment_path_target`, `invalid_skill_name`,
+`missing_skill_directory`, `missing_skill_file`, `missing_variant_source`,
+`invalid_variant_source`, `missing_variant_directory`, and
+`missing_variant_skill_file`.
 
 ## `plan` Output
 

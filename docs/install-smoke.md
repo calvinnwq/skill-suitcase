@@ -26,9 +26,10 @@ Expected target adapters:
 - `claude-skills-root` resolves to platform adapter `claude`, install root field
   `path`.
 
-Then smoke the read-only command boundaries for each assignment path id:
+Then smoke import and the read-only command boundaries:
 
 ```bash
+node dist/src/cli.js import --source /path/to/skills-catalog --json
 node dist/src/cli.js plan --source /path/to/skills-catalog --target openclaw --json
 node dist/src/cli.js diff --source /path/to/skills-catalog --target openclaw --json
 node dist/src/cli.js pack --source /path/to/skills-catalog --target openclaw --dry-run --json
