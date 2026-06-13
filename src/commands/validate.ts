@@ -8,6 +8,6 @@ export const validateCommand: CommandModule = {
     return args.command === "validate" && hasSource(args) && hasNoTarget(args) && hasJson(args);
   },
   async run(args) {
-    return validate({ source: requireStringValue("source", args.source) });
+    return validate({ source: requireStringValue("source", args.source), strict: args.strict === true });
   }
 };

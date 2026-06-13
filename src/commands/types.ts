@@ -26,6 +26,7 @@ export type ParsedCommandArgs = {
   command: CommandName | "help";
   dryRun: boolean;
   json: boolean;
+  strict?: boolean;
   source?: string;
   target?: string;
   output?: string;
