@@ -19,7 +19,16 @@ export type ContractReport = {
 };
 
 const REQUIRED_SECTIONS = ["## Contract", "## Phases", "## Output Format"] as const;
-const NOTE_WRITING_TERMS = ["memory", "wiki", "vault", "obsidian", "notes"] as const;
+const NOTE_WRITING_TERMS = ["obsidian"] as const;
+const NOTE_WRITING_PHRASES = [
+  /\b(?:daily|meeting|markdown|atomic|fleeting|permanent|literature|durable|persistent) notes\b/,
+  /\b(?:obsidian|knowledge|note|markdown|personal|memory) vault\b/,
+  /\bvault[-_ ]?(?:router|map)\b/,
+  /\bmemory ?\/ ?wiki ?\/ ?vault\b/,
+  /\bwiki[- ]?(?:page|entry|article|link|state|space)\b/,
+  /\b(?:long[- ]?term|persistent|agent|working|durable|conversation|episodic|semantic) memory\b/,
+  /\bmemory (?:file|bank|store|notes?|graph|router|map)\b/
+] as const;
 const LLM_TERMS = ["llm", "claude", "codex", "openai", "anthropic", "gemini"] as const;
 const LLM_PHRASES = [
   /\blanguage model/,
@@ -167,8 +176,10 @@ export async function scoreSkillContract(root: string, skillName: string): Promi
     )
   );
 
+  const noteHaystack = skillText.toLowerCase();
   const writesNotes =
-    NOTE_WRITING_TERMS.some((term) => skillText.toLowerCase().includes(term)) &&
+    (NOTE_WRITING_TERMS.some((term) => noteHaystack.includes(term)) ||
+      NOTE_WRITING_PHRASES.some((pattern) => pattern.test(noteHaystack))) &&
     !hasExplicitNa(skillText, "Filing rules");
   const filingOk =
     hasExplicitNa(skillText, "Filing rules") ||

@@ -166,6 +166,68 @@ O.
   assert.equal(llmish.items.find((item) => item.id === 5)?.applicable, true);
 });
 
+test("treats incidental note/memory prose as not-note-writing but recognizes genuine note outputs", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(
+    root,
+    "shallow",
+    `---
+name: shallow
+description: Use when you summarize the release notes. Trigger included.
+---
+
+# Shallow
+
+## Contract
+
+Summarize the latest release notes and recall prior decisions from memory. Trigger included.
+
+## Phases
+
+P.
+
+## Output Format
+
+O.
+`
+  );
+  await writeSkill(
+    root,
+    "noteish",
+    `---
+name: noteish
+description: Use when you capture meeting notes into the Obsidian vault. Trigger included.
+---
+
+# Noteish
+
+## Contract
+
+Capture meeting notes and write them to the Obsidian vault. Trigger included.
+
+## Phases
+
+P.
+
+## Output Format
+
+O.
+`
+  );
+
+  const shallow = await scoreSkillContract(root, "shallow");
+  const noteish = await scoreSkillContract(root, "noteish");
+
+  // "release notes" / "from memory" are incidental prose, so the filing-rules
+  // item stays not-applicable instead of becoming a release-blocking failure.
+  assert.equal(shallow.items.find((item) => item.id === 10)?.applicable, false);
+  // "meeting notes" written into an "Obsidian vault" is a genuine note output
+  // and stays applicable, so a missing filing rule still gates.
+  const noteishFiling = noteish.items.find((item) => item.id === 10);
+  assert.equal(noteishFiling?.applicable, true);
+  assert.equal(noteishFiling?.ok, false);
+});
+
 test("accepts explicit not-applicable rationales", async () => {
   const root = await makeCatalogRoot();
   await writeSkill(
