@@ -18,6 +18,7 @@ test("durable CLI behavior has core entrypoints", async () => {
     "src/core/planning/plan-lock.ts",
     "src/core/diffing/index.ts",
     "src/core/packing/index.ts",
+    "src/core/importing/index.ts",
     "src/core/apply/index.ts",
     "src/core/receipts/index.ts",
     "src/core/status/index.ts",

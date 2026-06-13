@@ -2,10 +2,10 @@
 
 Skill Suitcase is a CLI for planning portable skill installs from a catalog repo.
 
-Read-only commands (`plan`, `diff`, `pack`, `validate`, `targets`, `status`)
-read a catalog manifest, resolve assignments and assignment paths, and emit JSON
-plans, diffs, target discovery, bundle manifests, or status reports without
-touching target install paths or runtime homes.
+Read-only commands (`plan`, `diff`, `pack`, `import`, `validate`, `targets`,
+`status`) read a catalog manifest, resolve assignments and assignment paths, and
+emit JSON plans, diffs, import findings, target discovery, bundle manifests, or
+status reports without touching target install paths or runtime homes.
 
 The `apply` command writes skill files into target install paths. It requires
 an explicit approval input (plan-lock or staging artifact), refuses dirty or
@@ -29,6 +29,7 @@ node dist/src/cli.js plan --source /Users/ngxcalvin/repos/skills --target opencl
 node dist/src/cli.js diff --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
 node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
+node dist/src/cli.js import --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
@@ -37,6 +38,14 @@ node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openc
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
 ```
+
+`import --json` is a read-only onboarding inspection for existing skills repos.
+It checks for `skill-suitcase.yaml`, the `skills/<name>/SKILL.md` layout, and
+catalog portability metadata such as assignments, assignment paths,
+compatibility, and variants. Findings are emitted as deterministic JSON with
+`warning` or `error` levels; warnings keep `ok: true`, while errors make the
+command exit with failure status. The command never creates install roots,
+runtime homes, receipts, or bundle artifacts.
 
 Targets currently exercised against fixture #1:
 

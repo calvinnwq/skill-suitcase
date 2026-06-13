@@ -1,5 +1,6 @@
 import { applyCommand } from "./apply.js";
 import { diffCommand } from "./diff.js";
+import { importCommand } from "./import.js";
 import { packCommand } from "./pack.js";
 import { planCommand } from "./plan.js";
 import { rollbackCommand } from "./rollback.js";
@@ -15,6 +16,7 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   planCommand,
   diffCommand,
   packCommand,
+  importCommand,
   validateCommand,
   targetsCommand,
   statusCommand,

@@ -16,6 +16,7 @@ src/
     plan.ts
     diff.ts
     pack.ts
+    import.ts
     validate.ts
     targets.ts
     status.ts
@@ -26,6 +27,7 @@ src/
     planning/
     diffing/
     packing/
+    importing/
     apply/
     rollback/
     track/
