@@ -463,6 +463,23 @@ test("rollback refuses malformed rollback file state", async (t) => {
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
 });
 
+test("rollback refuses malformed rollback value", async (t) => {
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": { rollback?: unknown } };
+  };
+  receipt.installs["office-hours"].rollback = [];
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "invalid_receipt");
+  assert.equal(result.summary.refused, 1);
+  assert.equal(result.rollbacks[0]?.status, "refused");
+  assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+});
+
 test("rollback refuses malformed install records", async (t) => {
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-invalid-install-"));
   t.after(() => rm(targetRoot, { recursive: true, force: true }));

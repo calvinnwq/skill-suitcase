@@ -160,7 +160,9 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
   records.sort((left, right) => left.skill.localeCompare(right.skill));
 
   for (const { skill, record } of records) {
-    const parsedRollback = normalizeRollback(record.rollback, installRoot);
+    const parsedRollback = hasOwn(record, "rollback")
+      ? normalizeRollback(record.rollback, installRoot)
+      : { kind: "none" as const };
     if (parsedRollback.kind === "none") {
       result.summary.noop += 1;
       result.rollbacks.push({
@@ -399,7 +401,7 @@ function removeReceiptInstallRecord(
 
 function normalizeRollback(value: unknown, installRoot: string): RollbackParseResult {
   if (!isRecord(value)) {
-    return { kind: "none" };
+    return { kind: "invalid", targetPath: null, message: "rollback state must be an object." };
   }
   const raw = value as RollbackState;
   if (raw.schema !== "calvinnwq.skills.rollback.v0") {
@@ -795,6 +797,10 @@ async function removeRollbackTarget(file: RollbackFileRecord): Promise<
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function normalizeString(value: unknown): string | null {
