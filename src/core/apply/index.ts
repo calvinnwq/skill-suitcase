@@ -61,7 +61,7 @@ type DiffForApply = {
   target: string;
   assignment: string | null;
   planned: Array<{ skill: string; sourcePath: string }>;
-  blocked: Array<Record<string, unknown>>;
+  blocked: Array<{ skill: string; reason?: string }>;
   entries: Array<{
     action: "create" | "update" | "unchanged" | "extra" | "missing" | "blocked";
     skill: string;
@@ -186,7 +186,7 @@ export async function apply({
         statuses: [],
         summary: emptyStatusSummary()
       },
-      errors: diffResult.errors.map((error) => ({ code: `diff_${error.code}`, message: error.message }))
+      errors: diffFailureErrors(diffResult)
     });
   }
 
@@ -842,6 +842,22 @@ function collectApplyEntries(entries: DiffForApply["entries"]): WriteEntries {
   }
 
   return { items, errors };
+}
+
+function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {
+  const errors = diffResult.errors.map((error) => ({
+    code: `diff_${error.code}`,
+    message: error.message
+  }));
+
+  for (const blocked of diffResult.blocked) {
+    errors.push({
+      code: "diff_blocked_skill",
+      message: `Skill ${blocked.skill} is blocked for apply: ${blocked.reason ?? "blocked"}`
+    });
+  }
+
+  return errors;
 }
 
 async function buildRollbackRecord({
