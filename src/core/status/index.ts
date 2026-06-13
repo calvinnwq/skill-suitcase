@@ -10,6 +10,7 @@ import {
   RECEIPT_FILE,
   RECEIPT_SCHEMA
 } from "../receipts/index.js";
+import { readSkillVersion } from "../skill-metadata.js";
 
 type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
 type StatusSummary = {
@@ -435,7 +436,7 @@ async function statusSkill({
   let sourceVersion: string | null;
   let sourceHashValue = "";
   try {
-    sourceVersion = await skillVersion(sourceSkillPath);
+    sourceVersion = await readSkillVersion(sourceSkillPath);
     sourceHashValue = await hashDirectory(sourceSkillPath);
   } catch (error) {
     const currentCommit = await readRepoCommit(sourceRoot);
@@ -1384,34 +1385,6 @@ async function readlinkSafe(target: string): Promise<string | null> {
 
 function buffersEqual(left: Buffer, right: Buffer): boolean {
   return left.compare(right) === 0;
-}
-
-async function skillVersion(skillPath: string): Promise<string | null> {
-  const sourceSkill = await readFile(path.join(skillPath, "SKILL.md"), "utf8");
-  return parseFrontmatterVersion(sourceSkill);
-}
-
-function parseFrontmatterVersion(text: string): string | null {
-  const lines = text.split(/\r?\n/);
-  if (lines[0] !== "---") {
-    return null;
-  }
-
-  for (let index = 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line === undefined) {
-      continue;
-    }
-    const trimmed = line.trim();
-    if (trimmed === "---") {
-      break;
-    }
-    if (trimmed.startsWith("version:")) {
-      return trimmed.slice("version:".length).trim();
-    }
-  }
-
-  return null;
 }
 
 async function hashDirectory(root: string): Promise<string> {

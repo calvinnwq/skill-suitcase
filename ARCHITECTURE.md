@@ -20,11 +20,15 @@ src/
     targets.ts
     status.ts
     apply.ts
+    rollback.ts
+    track.ts
   core/
     planning/
     diffing/
     packing/
     apply/
+    rollback/
+    track/
     receipts/
     status/
     catalog/
@@ -71,6 +75,7 @@ Command modules should stay thin. They adapt the outside world to core code.
 - planning and lock semantics
 - packing and artifact construction
 - apply/install workflows
+- rollback and existing-install adoption workflows
 - receipt creation and validation
 - catalog, manifest, target, and validation rules
 

@@ -11,6 +11,16 @@ The `apply` command writes skill files into target install paths. It requires
 an explicit approval input (plan-lock or staging artifact), refuses dirty or
 unmanaged targets, writes transactionally, and emits receipts.
 
+The `rollback` command reverses an apply using the rollback state captured in a
+receipt. It restores each written file to its pre-apply contents (or removes
+files the apply created), refusing when the target has drifted from the recorded
+applied state.
+
+The `track` command adopts skills that are already installed in a target. It
+verifies the live files match the catalog source, then writes receipts so the
+existing install comes under Suitcase management without rewriting any skill
+files.
+
 ## Usage
 
 ```bash
@@ -24,6 +34,8 @@ node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --artifact /tmp/skill-suitcase-bundle.json --json
+node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
+node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
 ```
 
 Targets currently exercised against fixture #1:
@@ -338,7 +350,7 @@ preferred schema is `calvinnwq.skills.receipt.v0` with a machine-readable
 
 - `agent`, `mode`, `source` or `sourcePath`, `targetPath`
 - `version`, `sourceCommit`, or `sourceHash` (at least one)
-- optional `target`, `installedFiles`, and `priorState`
+- optional `target`, `installedFiles`, `priorState`, and `rollback`
 
 For migration compatibility, `status` also reads legacy `.skills-sync.json` files
 using `calvinnwq.skills.sync-lock.v0` when no modern receipt exists.
@@ -354,7 +366,9 @@ are reported as `invalid_receipt`.
 `apply` requires exactly one of `--lock` (a plan-lock file path) or `--artifact`
 (a staging bundle path or directory). It validates the approval input, checks
 pre-apply target status, writes skill files transactionally, and emits a receipt
-per skill.
+per skill. Each receipt also captures the pre-apply state of every written file
+(a `rollback` record) so the install can later be reversed with
+`suitcase rollback`.
 
 On success (`ok: true`):
 
@@ -396,6 +410,126 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
 - `status_*` — a pre-apply status-layer error (prefixed with `status_`)
 - `write_error` — a file write or rollback failure
 
+## `rollback` Output
+
+`rollback` reverses an apply from a receipt. It resolves `--receipt` to a receipt
+file (a directory argument resolves to `<dir>/.skill-suitcase-receipt.json`),
+then walks each install record's captured `rollback` state. For each skill it
+first checks that the target still matches the recorded applied state; on a match
+it restores every file to its pre-apply contents and removes files the apply
+created.
+
+On success (`ok: true`):
+
+```json
+{
+  "ok": true,
+  "receipt": "/tmp/openclaw-install/.skill-suitcase-receipt.json",
+  "installRoot": "/tmp/openclaw-install",
+  "summary": {
+    "restored": 1,
+    "removed": 0,
+    "noop": 0,
+    "failed": 0,
+    "refused": 0
+  },
+  "rollbacks": [
+    {
+      "skill": "office-hours",
+      "targetPath": "/tmp/openclaw-install/office-hours",
+      "status": "restored",
+      "restored": 1,
+      "removed": 0,
+      "failed": 0
+    }
+  ],
+  "errors": []
+}
+```
+
+Per-skill `status` values:
+
+- `restored`: the recorded previous file states were restored (and apply-created
+  files removed)
+- `noop`: the record has no rollback state, or it was already rolled back
+- `refused`: the target drifted from the recorded applied state, or every file
+  failed to restore
+- `partial`: some files were restored or removed but at least one failed
+
+`summary` holds aggregate counts across the receipt: `restored` and `removed`
+count individual files, `noop` and `refused` count skills, and `failed` counts
+files that could not be restored or removed. After a fully successful rollback
+of a previously installed skill, the receipt's rollback record is marked
+`rolled-back`, so re-running `rollback` is a deterministic no-op. If the apply
+created the whole skill install, rollback removes that install record from the
+receipt.
+
+On failure (`ok: false`), `errors` contains objects with `code` and `message`
+(plus optional `skill` and `path`). Error codes include:
+
+- `invalid_receipt` — the receipt is missing, unreadable, or has malformed JSON,
+  schema, installs map, install records, or rollback records
+- `target_drift` — the target differs from the applied state recorded at apply time
+- `restore_impossible` — the previous state cannot be restored (for example the
+  original target was not a regular file)
+- `rollback_record_invalid` — stored rollback bytes do not match their recorded digest
+- `restore_write_failed` — restoring a file's previous contents failed
+- `rollback_remove_failed` — removing an apply-created file failed
+- `receipt_write_failed` — rollback restored files but could not persist the
+  updated receipt
+
+## `track` Output
+
+`track` adopts an existing install into a receipt without rewriting files. It
+runs a `diff` of `--source` against `--target`, then writes a receipt for every
+planned skill whose live install already matches the catalog source exactly.
+
+On success (`ok: true`):
+
+```json
+{
+  "ok": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "target": "openclaw",
+  "assignment": "openclaw",
+  "installRoot": "/tmp/openclaw/skills",
+  "summary": {
+    "planned": 2,
+    "tracked": 2,
+    "files": 4,
+    "refused": 0,
+    "blocked": 0
+  },
+  "tracked": {
+    "skills": ["gnhf-postflight", "office-hours"],
+    "files": 4
+  },
+  "errors": []
+}
+```
+
+Each tracked skill is written with `mode: "track"` and a `priorState` of
+`{ "status": "unknown", "reason": "target existed before Suitcase tracking" }`,
+since Suitcase did not perform the original install. On success, `tracked.skills`
+lists the adopted skills (sorted) and `tracked.files` counts the receipted files.
+
+`track` writes no receipts unless every planned skill matches. It refuses (with
+`ok: false` and `summary.refused` counting the failures) when a target skill
+directory is absent, when any file would be created/updated, when the target has
+extra or unreadable files, or when a skill is blocked. Error codes include:
+
+- `missing_install_root` — the target could not be resolved to an install root
+- `target_missing` — a planned skill's target directory or file is absent
+- `target_mismatch` — target files do not match the source (`update`/`extra`)
+- `target_unreadable` — a target skill path is not a directory or cannot be read
+- `target_symlink` — the target skill tree contains a symlink
+- `source_missing` — a source entry is absent
+- `source_unreadable` — a source skill directory cannot be read
+- `blocked_skill` — compatibility rules block the skill for that assignment
+- `invalid_receipt` — the existing receipt cannot be read or normalized
+- `receipt_write_failed` — the adoption receipt could not be written
+- `diff_*` — a diff-layer error propagated from target resolution
+
 ## Receipt Module
 
 `src/receipt.ts` (and its compiled output at `dist/src/receipt.js`) provides
@@ -406,6 +540,7 @@ import {
   buildReceipt,
   buildInstallRecord,
   buildInstalledFiles,
+  readReceipt,
   upsertInstallRecord,
   upsertAndWriteReceipt,
   writeReceipt,
@@ -444,7 +579,9 @@ the same resolved `targetPath` or appending a new record when target paths
 differ. `upsertAndWriteReceipt` performs the same merge against the receipt on
 disk (creating it if absent and migrating legacy `.skills-sync.json` receipts
 when needed), then writes `<installRoot>/.skill-suitcase-receipt.json`.
-`writeReceipt` writes the full receipt directly without merging. Both writers
+`readReceipt` reads and normalizes the same modern or legacy receipt path
+without writing it. `writeReceipt` writes the full receipt directly without
+merging. Both writers
 validate all install records before writing, normalize legacy schemas to
 `calvinnwq.skills.receipt.v0`, and allow custom receipt paths only when they stay
 inside `installRoot`.

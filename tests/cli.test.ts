@@ -121,6 +121,32 @@ test("cli apply surfaces artifact input validation failures", async (t) => {
   assert.equal(malformedErrors[0]?.code, "invalid_artifact_manifest");
 });
 
+test("cli rollback accepts receipt paths and writes JSON to stdout", async (t) => {
+  const installRoot = await mkdtemp(join(os.tmpdir(), "skill-suitcase-cli-rollback-"));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+  const receiptPath = join(installRoot, ".skill-suitcase-receipt.json");
+  await writeFile(
+    receiptPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt.v0",
+      installs: {}
+    }, null, 2)}\n`
+  );
+
+  const result = runCli([
+    "rollback",
+    "--receipt",
+    receiptPath,
+    "--json"
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, "");
+  const parsed = parseJsonOutput(result.stdout) as { ok: boolean; receipt: string };
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.receipt, receiptPath);
+});
+
 test("cli keeps JSON on stdout and usage errors on stderr", () => {
   const sourceRoot = join(process.cwd(), "tests", "fixtures", "skills-catalog");
   const validResult = runCli([

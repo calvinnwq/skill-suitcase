@@ -35,6 +35,7 @@ export type ReceiptInstallRecord = {
   sourceHash?: string;
   installedFiles?: unknown;
   priorState?: UnknownRecord;
+  rollback?: UnknownRecord;
 };
 
 export interface Receipt {
@@ -49,6 +50,11 @@ type UpsertAndWriteReceiptInput = {
   receipt?: Receipt;
   skillName: string;
   installRecord: ReceiptInstallRecord;
+  receiptPath?: string;
+};
+
+type ReadReceiptInput = {
+  installRoot?: string;
   receiptPath?: string;
 };
 
@@ -109,6 +115,22 @@ export async function writeReceipt({
   return outputPath;
 }
 
+export async function readReceipt({
+  installRoot,
+  receiptPath = RECEIPT_FILE
+}: ReadReceiptInput): Promise<Receipt> {
+  const normalizedRoot = normalizeInstallRoot(installRoot);
+  const normalizedReceiptPath = receiptPath ?? RECEIPT_FILE;
+  const outputPath = resolveReceiptPath({
+    installRoot: normalizedRoot,
+    receiptPath: normalizedReceiptPath
+  });
+  return readReceiptForUpsert({
+    receiptPath: outputPath,
+    legacyReceiptPath: path.join(normalizedRoot, LEGACY_RECEIPT_FILE)
+  });
+}
+
 export async function upsertAndWriteReceipt({
   installRoot,
   receipt,
@@ -132,9 +154,9 @@ export async function upsertAndWriteReceipt({
   }
 
   const currentReceipt = receipt === undefined
-    ? await readReceiptForUpsert({
-      receiptPath: outputPath,
-      legacyReceiptPath: path.join(normalizedRoot, LEGACY_RECEIPT_FILE)
+    ? await readReceipt({
+      installRoot: normalizedRoot,
+      receiptPath: normalizedReceiptPath
     })
     : receipt;
   if (!isRecord(currentReceipt)) {
@@ -326,7 +348,8 @@ export function buildInstallRecord(
     sourceCommit,
     sourceHash,
     installedFiles,
-    priorState
+    priorState,
+    rollback
   } = installRecord;
 
   const record: ReceiptInstallRecord = {};
@@ -366,6 +389,9 @@ export function buildInstallRecord(
   }
   if (priorState !== undefined && priorState !== null && typeof priorState === "object") {
     record.priorState = priorState as UnknownRecord;
+  }
+  if (rollback !== undefined && rollback !== null && typeof rollback === "object") {
+    record.rollback = rollback as UnknownRecord;
   }
 
   return record;

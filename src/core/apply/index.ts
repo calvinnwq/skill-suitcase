@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assessPlanLock, type PlanLock, PLAN_LOCK_SCHEMA } from "../planning/plan-lock.js";
 import { diff } from "../diffing/index.js";
@@ -64,6 +65,7 @@ type DiffForApply = {
   entries: Array<{
     action: "create" | "update" | "unchanged" | "extra" | "missing" | "blocked";
     skill: string;
+    relativePath: string | null;
     sourcePath: string | null;
     targetPath: string | null;
     reason?: string | undefined;
@@ -311,6 +313,7 @@ export async function apply({
     }
     bucket.push(entry);
   }
+  const rollbackBySkill = new Map<string, RollbackRecord>();
 
   for (const [skill, entries] of entriesBySkill) {
     const skillSource = sourceBySkill.get(skill);
@@ -332,6 +335,11 @@ export async function apply({
         errors: [{ code: "missing_skill_source", message: `No source path for ${skill}` }]
       });
     }
+
+    rollbackBySkill.set(skill, await buildRollbackRecord({
+      targetPath: path.join(installRoot, skill),
+      entries
+    }));
 
     writeResult = await writePlannedSkillEntries({
       skill,
@@ -426,6 +434,13 @@ export async function apply({
       }
 
       nextRecord.installedFiles = await buildInstalledFiles(targetPath, { exclude: backupPaths });
+      const rollbackRecord = rollbackBySkill.get(skill);
+      if (rollbackRecord !== undefined) {
+        nextRecord.rollback = {
+          ...rollbackRecord,
+          appliedFiles: nextRecord.installedFiles
+        };
+      }
 
       receiptWriteCount += 1;
       if (failAfterReceiptWrites !== null && receiptWriteCount === failAfterReceiptWrites) {
@@ -742,6 +757,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
 
 type WriteEntry = {
   skill: string;
+  relativePath: string;
   sourcePath: string;
   targetPath: string;
 };
@@ -771,6 +787,30 @@ type WritePlannedSkillResult = {
   restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
 };
 
+type RollbackFileState = {
+  kind: "file";
+  sha256: string;
+  bytes: string;
+} | {
+  kind: "missing";
+} | {
+  kind: "restore-impossible";
+  reason: string;
+};
+
+type RollbackFileRecord = {
+  path: string;
+  targetPath: string;
+  previous: RollbackFileState;
+};
+
+type RollbackRecord = {
+  schema: "calvinnwq.skills.rollback.v0";
+  status: "available";
+  targetPath: string;
+  files: RollbackFileRecord[];
+};
+
 function collectApplyEntries(entries: DiffForApply["entries"]): WriteEntries {
   const items: WriteEntry[] = [];
   const errors: ApplyFinding[] = [];
@@ -786,6 +826,7 @@ function collectApplyEntries(entries: DiffForApply["entries"]): WriteEntries {
       }
       items.push({
         skill: entry.skill,
+        relativePath: entry.relativePath ?? path.basename(entry.targetPath),
         sourcePath: entry.sourcePath,
         targetPath: entry.targetPath
       });
@@ -801,6 +842,62 @@ function collectApplyEntries(entries: DiffForApply["entries"]): WriteEntries {
   }
 
   return { items, errors };
+}
+
+async function buildRollbackRecord({
+  targetPath,
+  entries
+}: {
+  targetPath: string;
+  entries: WriteEntry[];
+}): Promise<RollbackRecord> {
+  const files: RollbackFileRecord[] = [];
+  for (const entry of entries) {
+    files.push({
+      path: entry.relativePath,
+      targetPath: entry.targetPath,
+      previous: await readRollbackFileState(entry.targetPath)
+    });
+  }
+
+  return {
+    schema: "calvinnwq.skills.rollback.v0",
+    status: "available",
+    targetPath,
+    files: files.sort((left, right) => left.path.localeCompare(right.path))
+  };
+}
+
+async function readRollbackFileState(filePath: string): Promise<RollbackFileState> {
+  try {
+    const info = await lstat(filePath);
+    if (info.isSymbolicLink()) {
+      return {
+        kind: "restore-impossible",
+        reason: "target was a symbolic link"
+      };
+    }
+    if (!info.isFile()) {
+      return {
+        kind: "restore-impossible",
+        reason: "target was not a regular file"
+      };
+    }
+    const bytes = await readFile(filePath);
+    return {
+      kind: "file",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      bytes: bytes.toString("base64")
+    };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return { kind: "missing" };
+    }
+    return {
+      kind: "restore-impossible",
+      reason: error instanceof Error ? error.message : "target could not be read"
+    };
+  }
 }
 
 async function writePlannedSkillEntries(

@@ -9,6 +9,8 @@ export function usageText(): string {
     "  suitcase targets --source <skills-repo> --json",
     "  suitcase status --source <skills-repo> --json",
     "  suitcase apply --source <skills-repo> --target <target> --lock <path> --json",
-    "  suitcase apply --source <skills-repo> --target <target> --artifact <path> --json"
+    "  suitcase apply --source <skills-repo> --target <target> --artifact <path> --json",
+    "  suitcase rollback --receipt <path> --json",
+    "  suitcase track --source <skills-repo> --target <target> --json"
   ].join("\n");
 }
