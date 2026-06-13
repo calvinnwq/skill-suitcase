@@ -32,6 +32,7 @@ async function hashDirectory(root: string): Promise<string> {
 
 async function createAppliedUpdate(t: { after(fn: () => Promise<void> | void): void }): Promise<{
   sourceRoot: string;
+  sourceSkill: string;
   targetRoot: string;
   targetSkill: string;
   receiptPath: string;
@@ -62,7 +63,8 @@ async function createAppliedUpdate(t: { after(fn: () => Promise<void> | void): v
       sourcePath: sourceSkill,
       targetPath: targetSkill,
       version: "2026.06.11",
-      sourceHash: await hashDirectory(sourceSkill)
+      sourceHash: await hashDirectory(sourceSkill),
+      installedFiles: await buildInstalledFiles(targetSkill)
     }
   });
 
@@ -83,6 +85,7 @@ async function createAppliedUpdate(t: { after(fn: () => Promise<void> | void): v
   assert.equal(result.ok, true);
   return {
     sourceRoot,
+    sourceSkill,
     targetRoot,
     targetSkill,
     receiptPath: path.join(targetRoot, RECEIPT_FILE)
@@ -126,6 +129,52 @@ test("rollback updates receipt metadata to the restored target state", async (t)
   assert.equal(record.rollback?.status, "rolled-back");
   assert.equal(record.version, "2026.06.11");
   assert.equal(record.sourceHash, await hashDirectory(targetSkill));
+  assert.deepEqual(record.installedFiles, await buildInstalledFiles(targetSkill));
+
+  const statusResult = await status({ source: sourceRoot });
+  const officeHours = statusResult.statuses.find((entry) => entry.skill === "office-hours");
+  assert.equal(officeHours?.status, "behind");
+});
+
+test("rollback restores prior source hash while preserving extra installed files", async (t) => {
+  const { receiptPath, sourceRoot, sourceSkill, targetSkill } = await createAppliedUpdate(t);
+  await writeFile(path.join(targetSkill, "preserved.txt"), "target-only\n");
+
+  const receiptBefore = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: {
+      "office-hours": {
+        priorState?: { installedHash?: string };
+        rollback?: { appliedFiles?: unknown };
+        installedFiles?: unknown;
+      };
+    };
+  };
+  const priorSourceHash = receiptBefore.installs["office-hours"].priorState?.installedHash;
+  if (typeof priorSourceHash !== "string") {
+    throw new Error("expected rollback priorState.installedHash");
+  }
+  receiptBefore.installs["office-hours"].installedFiles = await buildInstalledFiles(targetSkill);
+  if (receiptBefore.installs["office-hours"].rollback !== undefined) {
+    receiptBefore.installs["office-hours"].rollback.appliedFiles = await buildInstalledFiles(targetSkill);
+  }
+  await writeFile(receiptPath, `${JSON.stringify(receiptBefore, null, 2)}\n`, "utf8");
+
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"newer\");\n");
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, true);
+  assert.equal(await readFile(path.join(targetSkill, "preserved.txt"), "utf8"), "target-only\n");
+
+  const receiptAfter = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: {
+      "office-hours": {
+        sourceHash?: string;
+        installedFiles?: unknown;
+      };
+    };
+  };
+  const record = receiptAfter.installs["office-hours"];
+  assert.equal(record.sourceHash, priorSourceHash);
   assert.deepEqual(record.installedFiles, await buildInstalledFiles(targetSkill));
 
   const statusResult = await status({ source: sourceRoot });

@@ -120,6 +120,26 @@ test("track refuses planned skills whose target directory is absent", async (t) 
   await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
 });
 
+test("track reports unreadable target scans without throwing", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-file-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-file-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\n\nassignments:\n  openclaw:\n    suitcases:\n      - core\n\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\n`
+  );
+  await mkdir(path.join(sourceRoot, "skills", "office-hours"), { recursive: true });
+  await writeFile(path.join(targetRoot, "office-hours"), "not a directory\n");
+
+  const result = await track({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "target_unreadable"), true);
+  await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
+});
+
 test("track reports receipt write failures without partial adoption", async (t) => {
   const { sourceRoot, targetRoot } = await createLiveMatchingInstall(t);
   await chmod(targetRoot, 0o555);

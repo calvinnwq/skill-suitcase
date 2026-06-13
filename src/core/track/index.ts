@@ -41,6 +41,10 @@ type DiffForTrack = {
   errors: Array<{ code: string; message: string }>;
 };
 
+type InstalledFilesResult =
+  | { ok: true; files: Awaited<ReturnType<typeof buildInstalledFiles>> }
+  | { ok: false; error: TrackError };
+
 export type TrackResult = {
   ok: boolean;
   source: string;
@@ -103,14 +107,9 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
 
   for (const planned of diffResult.planned) {
     const targetPath = path.join(installRoot, planned.skill);
-    const installedFiles = await readInstalledFiles(targetPath);
-    if (installedFiles === null) {
-      errors.push(trackError({
-        code: "target_missing",
-        message: `Target directory is missing for ${planned.skill}.`,
-        skill: planned.skill,
-        path: targetPath
-      }));
+    const installedFiles = await readInstalledFiles(targetPath, planned.skill);
+    if (!installedFiles.ok) {
+      errors.push(installedFiles.error);
       continue;
     }
     records.push({
@@ -119,7 +118,7 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
       targetPath,
       version: await skillVersion(planned.sourcePath),
       sourceHash: await hashDirectory(planned.sourcePath),
-      installedFiles
+      installedFiles: installedFiles.files
     });
   }
 
@@ -337,15 +336,32 @@ function failure({
 }
 
 async function readInstalledFiles(
-  targetPath: string
-): Promise<Awaited<ReturnType<typeof buildInstalledFiles>> | null> {
+  targetPath: string,
+  skill: string
+): Promise<InstalledFilesResult> {
   try {
-    return await buildInstalledFiles(targetPath);
+    return { ok: true, files: await buildInstalledFiles(targetPath) };
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
-      return null;
+      return {
+        ok: false,
+        error: trackError({
+          code: "target_missing",
+          message: `Target directory is missing for ${skill}.`,
+          skill,
+          path: targetPath
+        })
+      };
     }
-    throw error;
+    return {
+      ok: false,
+      error: trackError({
+        code: "target_unreadable",
+        message: `Target directory could not be read for ${skill}: ${errorMessage(error)}`,
+        skill,
+        path: targetPath
+      })
+    };
   }
 }
 

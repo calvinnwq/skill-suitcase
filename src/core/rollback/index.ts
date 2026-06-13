@@ -628,7 +628,8 @@ async function buildRestoredInstallMetadata(
   const installedFiles = await buildInstalledFiles(targetPath).catch(() => []);
   return {
     installedFiles,
-    sourceHash: await hashDirectory(targetPath).catch(() => null),
+    sourceHash: restoredStringFromPriorState(record.priorState, "installedHash")
+      ?? await hashDirectory(targetPath).catch(() => null),
     version: await restoredVersion(targetPath, record),
     sourceCommit: restoredStringFromPriorState(record.priorState, "installedCommit")
   };
