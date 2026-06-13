@@ -79,6 +79,36 @@ test("track records existing matching office-hours and OpenClaw gnhf-postflight 
   assert.equal(statusResult.summary.current, 2);
 });
 
+test("track records versions with the same frontmatter semantics as status", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-version-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-version-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\n\nassignments:\n  openclaw:\n    suitcases:\n      - core\n\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\n`
+  );
+  await writeFile(
+    path.join(sourceSkill, "SKILL.md"),
+    "---\r\nname: office-hours\r\nversion: \"2026.06.10\"\r\n---\r\n# Office Hours\r\n"
+  );
+  await cp(sourceSkill, path.join(targetRoot, "office-hours"), { recursive: true });
+
+  const result = await track({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, true);
+  const receipt = JSON.parse(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  assert.equal(singleRecord(receipt, "office-hours").version, "\"2026.06.10\"");
+
+  const statusResult = await status({ source: sourceRoot });
+  assert.equal(statusResult.ok, true);
+  assert.equal(statusResult.summary.current, 1);
+  assert.equal(statusResult.statuses[0]?.currentVersion, "\"2026.06.10\"");
+});
+
 test("track refuses dirty targets and does not write receipts", async (t) => {
   const { sourceRoot, targetRoot } = await createLiveMatchingInstall(t);
   await writeFile(path.join(targetRoot, "gnhf-postflight", "failure_patterns.yaml"), "dirty\n");

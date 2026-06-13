@@ -55,6 +55,7 @@
     "src/core/catalog/targets.ts",
     "src/core/planning/plan-lock.ts",
     "src/core/receipts/index.ts",
+    "src/core/skill-metadata.ts",
     "src/core/status/index.ts",
     "src/core/apply/index.ts",
     "src/core/rollback/index.ts",

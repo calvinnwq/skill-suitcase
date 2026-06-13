@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { diff } from "../diffing/index.js";
 import {
@@ -10,6 +10,7 @@ import {
   writeReceipt,
   type Receipt
 } from "../receipts/index.js";
+import { readSkillVersion } from "../skill-metadata.js";
 
 type TrackInput = {
   source: string;
@@ -125,7 +126,7 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
       skill: planned.skill,
       sourcePath: planned.sourcePath,
       targetPath,
-      version: await skillVersion(planned.sourcePath),
+      version: await readSkillVersion(planned.sourcePath).catch(() => null),
       sourceHash: sourceHash.hash,
       installedFiles: installedFiles.files
     });
@@ -428,29 +429,4 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
-}
-
-async function skillVersion(skillPath: string): Promise<string | null> {
-  const skillFile = path.join(skillPath, "SKILL.md");
-  try {
-    const info = await stat(skillFile);
-    if (!info.isFile()) {
-      return null;
-    }
-    const text = await readFile(skillFile, "utf8");
-    const frontmatter = /^---\n([\s\S]*?)\n---/.exec(text);
-    if (frontmatter === null) {
-      return null;
-    }
-    const body = frontmatter[1] ?? "";
-    for (const line of body.split("\n")) {
-      const match = /^version:\s*(.+?)\s*$/.exec(line);
-      if (match?.[1]) {
-        return match[1].trim().replace(/^["']|["']$/g, "");
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
 }
