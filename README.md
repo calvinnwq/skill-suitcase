@@ -41,9 +41,25 @@ node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openc
 Targets currently exercised against fixture #1:
 
 - `openclaw`
-- `codex`
+- `codex` / `codex-global`
 - `openclaw-kody-codex`
-- `claude`
+- `openclaw-workspace-codex`
+- `claude` / `claude-global`
+
+Platform adapters are explicit. `openclaw-skills-root` uses the declared `path`
+as the workspace skill root. `codex-home` and `nested-home-codex` install into
+`skillsPath` without assuming a universal Codex home. `claude-skills-root` uses
+the declared `path`.
+
+Smoke-test discovery with:
+
+```bash
+node dist/src/cli.js targets --source /path/to/skills-catalog --json
+```
+
+See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
+checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
+canonical bundle versus platform variant rules.
 
 ## `plan` Output
 
@@ -246,6 +262,12 @@ Retention and cleanup:
       "path": "/tmp/codex",
       "codexHome": "/tmp/codex",
       "skillsPath": "/tmp/codex/skills",
+      "platform": {
+        "adapter": "codex",
+        "installRoot": "/tmp/codex/skills",
+        "compatibility": ["codex"],
+        "metadata": {}
+      },
       "exists": {
         "path": false,
         "codexHome": false,
