@@ -37,6 +37,11 @@ needs a slimmer variant but the source catalog does not yet provide one. In that
 case the canonical OpenClaw bundle is blocked so `diff`, `pack`, `apply`, and
 `track` cannot blindly replace the live slimmer copy.
 
+Use `import --source <skills-catalog> --json` when onboarding or changing
+variant metadata. It reports missing compatibility labels, missing variant agent
+lists, blocked platform compatibility without variant sources, and variant
+sources that are missing, lack `SKILL.md`, or resolve outside the source repo.
+
 ## Generated Packs
 
 Generated packs are immutable snapshots of a resolved plan. They preserve the

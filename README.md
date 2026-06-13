@@ -70,6 +70,70 @@ See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
 canonical bundle versus platform variant rules.
 
+## `import` Output
+
+`import` accepts `--source <skills-repo> --json` and inspects an existing catalog
+without requiring a target. It returns absolute `source` and `manifestPath`
+values, summary counts, a sorted `skills` inventory, and deterministic findings.
+
+```json
+{
+  "ok": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "manifestPath": "/Users/ngxcalvin/repos/skills/skill-suitcase.yaml",
+  "summary": {
+    "discoveredSkills": 1,
+    "referencedSkills": 1,
+    "suitcases": 1,
+    "assignments": 1,
+    "assignmentPaths": 1,
+    "compatibilityEntries": 1,
+    "variantEntries": 1,
+    "warnings": 0,
+    "errors": 0,
+    "findings": 0
+  },
+  "skills": [
+    {
+      "name": "office-hours",
+      "path": "/Users/ngxcalvin/repos/skills/skills/office-hours",
+      "skillFile": "/Users/ngxcalvin/repos/skills/skills/office-hours/SKILL.md",
+      "referencedBy": ["core"],
+      "compatibility": {
+        "declared": true,
+        "agents": ["codex"],
+        "blockedAgents": [],
+        "variant": "canonical",
+        "evidence": ["README.md"]
+      },
+      "variants": [
+        {
+          "name": "codex",
+          "source": "variants/codex/office-hours",
+          "agents": ["codex"],
+          "exists": true,
+          "skillFileExists": true
+        }
+      ]
+    }
+  ],
+  "findings": []
+}
+```
+
+Each finding has `level`, `code`, `message`, and `path`. Warning codes include
+`missing_assignment_paths`, `empty_suitcase`, `unused_compatibility`,
+`missing_compatibility`, `missing_compatibility_agents`,
+`missing_compatibility_variant`, `missing_variant_metadata`,
+`missing_variant_agents`, and `unused_variants`. Error codes include
+`missing_manifest`, `unreadable_manifest`, `missing_skills_directory`,
+`unreadable_skills_directory`, `missing_suitcases`, `missing_assignments`,
+`empty_assignment`, `unknown_suitcase`, `invalid_assignment_path`,
+`unknown_assignment_path_target`, `invalid_skill_name`,
+`missing_skill_directory`, `missing_skill_file`, `missing_variant_source`,
+`invalid_variant_source`, `missing_variant_directory`, and
+`missing_variant_skill_file`.
+
 ## `plan` Output
 
 ```json
