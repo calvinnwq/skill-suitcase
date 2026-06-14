@@ -15,6 +15,7 @@ import { readSkillVersion } from "../skill-metadata.js";
 type TrackInput = {
   source: string;
   target: string;
+  skills?: string[];
 };
 
 type TrackError = {
@@ -39,7 +40,7 @@ type DiffForTrack = {
     targetPath: string | null;
     reason?: string;
   }>;
-  errors: Array<{ code: string; message: string }>;
+  errors: Array<{ code: string; message: string; skill?: string }>;
 };
 
 type InstalledFilesResult =
@@ -71,10 +72,16 @@ export type TrackResult = {
     skills: string[];
     files: number;
   };
+  selected: {
+    skills: string[];
+  };
+  refused: {
+    skills: string[];
+  };
   errors: TrackError[];
 };
 
-export async function track({ source, target }: TrackInput): Promise<TrackResult> {
+export async function track({ source, target, skills }: TrackInput): Promise<TrackResult> {
   if (!source) {
     throw new Error("source is required");
   }
@@ -82,9 +89,33 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
     throw new Error("target is required");
   }
 
-  const diffResult = await diff({ source, target }) as DiffForTrack;
+  const skillFilterWasProvided = skills !== undefined;
+  const selectedSkills = normalizeSelectedSkills(skills);
+  if (skillFilterWasProvided && (selectedSkills.length === 0 || hasBlankSkillFilter(skills))) {
+    return failure({
+      source,
+      target,
+      assignment: null,
+      installRoot: null,
+      planned: 0,
+      blocked: 0,
+      selected: selectedSkills,
+      errors: [trackError({
+        code: "invalid_skill_filter",
+        message: "At least one non-blank skill filter is required for targeted track."
+      })]
+    });
+  }
+  const selectedSkillSet = selectedSkills.length > 0 ? new Set(selectedSkills) : null;
+  const diffResult = await diff({
+    source,
+    target,
+    ...(selectedSkillSet !== null ? { skills: selectedSkills } : {})
+  }) as DiffForTrack;
   const installRoot = diffResult.installRoot;
-  const errors = collectTrackErrors(diffResult);
+  const plannedForTrack = selectPlannedForTrack(diffResult.planned, selectedSkillSet);
+  const blockedForTrack = countBlockedForTrack(diffResult.blocked, selectedSkillSet);
+  const errors = collectTrackErrors(diffResult, selectedSkillSet, selectedSkills);
 
   if (installRoot === null) {
     errors.push({
@@ -99,8 +130,9 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
       target,
       assignment: diffResult.assignment,
       installRoot,
-      planned: diffResult.planned.length,
-      blocked: diffResult.blocked.length,
+      planned: plannedForTrack.length,
+      blocked: blockedForTrack,
+      selected: selectedSkills,
       errors
     });
   }
@@ -115,7 +147,7 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
     installedFiles: Awaited<ReturnType<typeof buildInstalledFiles>>;
   }> = [];
 
-  for (const planned of diffResult.planned) {
+  for (const planned of plannedForTrack) {
     const targetPath = path.join(installRoot, planned.skill);
     const installedFiles = await readInstalledFiles(targetPath, planned.skill);
     if (!installedFiles.ok) {
@@ -155,8 +187,9 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
       target,
       assignment: diffResult.assignment,
       installRoot,
-      planned: diffResult.planned.length,
-      blocked: diffResult.blocked.length,
+      planned: plannedForTrack.length,
+      blocked: blockedForTrack,
+      selected: selectedSkills,
       errors
     });
   }
@@ -171,8 +204,9 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
       target,
       assignment: diffResult.assignment,
       installRoot,
-      planned: diffResult.planned.length,
-      blocked: diffResult.blocked.length,
+      planned: plannedForTrack.length,
+      blocked: blockedForTrack,
+      selected: selectedSkills,
       errors: [trackError({
         code: "invalid_receipt",
         message: `Could not read receipt for track: ${errorMessage(error)}`
@@ -223,8 +257,9 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
       target,
       assignment: diffResult.assignment,
       installRoot,
-      planned: diffResult.planned.length,
-      blocked: diffResult.blocked.length,
+      planned: plannedForTrack.length,
+      blocked: blockedForTrack,
+      selected: selectedSkills,
       errors: [trackError({
         code: "receipt_write_failed",
         message: `Failed to write track receipt: ${errorMessage(error)}`,
@@ -233,7 +268,7 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
     });
   }
 
-  const skills = records.map((record) => record.skill).sort();
+  const trackedSkills = records.map((record) => record.skill).sort();
   return {
     ok: true,
     source: diffResult.source,
@@ -241,27 +276,74 @@ export async function track({ source, target }: TrackInput): Promise<TrackResult
     assignment: diffResult.assignment,
     installRoot,
     summary: {
-      planned: diffResult.planned.length,
+      planned: plannedForTrack.length,
       tracked: records.length,
       files: trackedFiles,
       refused: 0,
-      blocked: diffResult.blocked.length
+      blocked: blockedForTrack
     },
     tracked: {
-      skills,
+      skills: trackedSkills,
       files: trackedFiles
+    },
+    selected: {
+      skills: selectedSkills
+    },
+    refused: {
+      skills: []
     },
     errors: []
   };
 }
 
-function collectTrackErrors(diffResult: DiffForTrack): TrackError[] {
-  const errors: TrackError[] = diffResult.errors.map((error) => ({
-    code: `diff_${error.code}`,
-    message: error.message
-  }));
+function normalizeSelectedSkills(skills: string[] | undefined): string[] {
+  if (skills === undefined) {
+    return [];
+  }
+  return [...new Set(skills.map((skill) => skill.trim()).filter((skill) => skill.length > 0))].sort();
+}
+
+function hasBlankSkillFilter(skills: string[]): boolean {
+  return skills.some((skill) => skill.trim().length === 0);
+}
+
+function selectPlannedForTrack(
+  planned: DiffForTrack["planned"],
+  selectedSkillSet: ReadonlySet<string> | null
+): DiffForTrack["planned"] {
+  if (selectedSkillSet === null) {
+    return planned;
+  }
+  return planned.filter((entry) => selectedSkillSet.has(entry.skill));
+}
+
+function countBlockedForTrack(
+  blocked: DiffForTrack["blocked"],
+  selectedSkillSet: ReadonlySet<string> | null
+): number {
+  if (selectedSkillSet === null) {
+    return blocked.length;
+  }
+  return blocked.filter((entry) => selectedSkillSet.has(entry.skill)).length;
+}
+
+function collectTrackErrors(
+  diffResult: DiffForTrack,
+  selectedSkillSet: ReadonlySet<string> | null,
+  selectedSkills: string[]
+): TrackError[] {
+  const errors: TrackError[] = diffResult.errors
+    .filter((error) => selectedSkillSet === null || error.skill === undefined || selectedSkillSet.has(error.skill))
+    .map((error) => trackError({
+      code: trackCodeForDiffError(error.code),
+      message: error.message,
+      ...(error.skill !== undefined ? { skill: error.skill } : {})
+    }));
 
   for (const blocked of diffResult.blocked) {
+    if (selectedSkillSet !== null && !selectedSkillSet.has(blocked.skill)) {
+      continue;
+    }
     errors.push({
       code: "blocked_skill",
       message: `Skill ${blocked.skill} is blocked for track: ${blocked.reason ?? "blocked"}`,
@@ -270,6 +352,10 @@ function collectTrackErrors(diffResult: DiffForTrack): TrackError[] {
   }
 
   for (const entry of diffResult.entries) {
+    if (selectedSkillSet !== null && !selectedSkillSet.has(entry.skill)) {
+      continue;
+    }
+
     if (entry.action === "unchanged") {
       continue;
     }
@@ -305,7 +391,34 @@ function collectTrackErrors(diffResult: DiffForTrack): TrackError[] {
     }
   }
 
+  if (selectedSkillSet !== null) {
+    const knownSkills = new Set([
+      ...diffResult.planned.map((entry) => entry.skill),
+      ...diffResult.blocked.map((entry) => entry.skill),
+      ...diffResult.entries.map((entry) => entry.skill),
+      ...diffResult.errors
+        .map((error) => error.skill)
+        .filter((skill): skill is string => typeof skill === "string")
+    ]);
+    for (const skill of selectedSkills) {
+      if (!knownSkills.has(skill)) {
+        errors.push(trackError({
+          code: "skill_not_planned",
+          message: `Skill ${skill} is not planned for target ${diffResult.assignment ?? diffResult.target}.`,
+          skill
+        }));
+      }
+    }
+  }
+
   return errors;
+}
+
+function trackCodeForDiffError(code: string): string {
+  if (code === "source_missing" || code === "source_unreadable") {
+    return code;
+  }
+  return `diff_${code}`;
 }
 
 function trackError({
@@ -334,6 +447,7 @@ function failure({
   installRoot,
   planned,
   blocked,
+  selected,
   errors
 }: {
   source: string;
@@ -342,8 +456,10 @@ function failure({
   installRoot: string | null;
   planned: number;
   blocked: number;
+  selected: string[];
   errors: TrackError[];
 }): TrackResult {
+  const refusedSkills = refusedSkillsFromErrors(errors);
   return {
     ok: false,
     source,
@@ -361,8 +477,22 @@ function failure({
       skills: [],
       files: 0
     },
+    selected: {
+      skills: selected
+    },
+    refused: {
+      skills: refusedSkills
+    },
     errors
   };
+}
+
+function refusedSkillsFromErrors(errors: TrackError[]): string[] {
+  return [...new Set(
+    errors
+      .map((error) => error.skill)
+      .filter((skill): skill is string => typeof skill === "string")
+  )].sort();
 }
 
 async function readInstalledFiles(

@@ -44,6 +44,44 @@ test("parseCommandArgs preserves current flag parsing and unknown argument error
   );
 });
 
+test("parseCommandArgs preserves repeated track skill filters", () => {
+  assert.deepEqual(parseCommandArgs([
+    "track",
+    "--source",
+    fixtureSource,
+    "--target",
+    "openclaw",
+    "--skill",
+    "office-hours",
+    "--skill",
+    "gnhf-postflight",
+    "--json"
+  ]), {
+    command: "track",
+    source: fixtureSource,
+    target: "openclaw",
+    skill: ["office-hours", "gnhf-postflight"],
+    dryRun: false,
+    json: true
+  });
+});
+
+test("parseCommandArgs rejects blank track skill filters", () => {
+  assert.throws(
+    () => parseCommandArgs([
+      "track",
+      "--source",
+      fixtureSource,
+      "--target",
+      "openclaw",
+      "--skill",
+      "   ",
+      "--json"
+    ]),
+    /--skill requires a non-blank value/
+  );
+});
+
 test("dispatcher routes import and rejects invalid import argument shapes", async () => {
   const success = await dispatchCommand([
     "import",

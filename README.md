@@ -38,6 +38,7 @@ node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openc
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --artifact /tmp/skill-suitcase-bundle.json --json
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
+node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
 ```
 
 `import --json` is a read-only onboarding inspection for existing skills repos.
@@ -667,6 +668,16 @@ On failure (`ok: false`), `errors` contains objects with `code` and `message`
 `track` adopts an existing install into a receipt without rewriting files. It
 runs a `diff` of `--source` against `--target`, then writes a receipt for every
 planned skill whose live install already matches the catalog source exactly.
+By default, `track` remains target-level all-or-nothing: every planned skill must
+match before any receipt is written.
+
+Use repeatable `--skill <name>` filters to adopt only selected, already-matching
+skills before applying new skills. In targeted mode, only selected skills are
+eligible for tracking. Selected skills must be `unchanged`; selected create,
+update, extra, missing, blocked, or non-planned skills are refused. Unselected
+skills, including create-only skills that will be applied later, do not block the
+targeted adoption. Targeted `track` still writes receipts only and never rewrites
+live skill files.
 
 On success (`ok: true`):
 
@@ -688,6 +699,12 @@ On success (`ok: true`):
     "skills": ["gnhf-postflight", "office-hours"],
     "files": 4
   },
+  "selected": {
+    "skills": []
+  },
+  "refused": {
+    "skills": []
+  },
   "errors": []
 }
 ```
@@ -695,12 +712,16 @@ On success (`ok: true`):
 Each tracked skill is written with `mode: "track"` and a `priorState` of
 `{ "status": "unknown", "reason": "target existed before Suitcase tracking" }`,
 since Suitcase did not perform the original install. On success, `tracked.skills`
-lists the adopted skills (sorted) and `tracked.files` counts the receipted files.
+lists the adopted skills (sorted), `tracked.files` counts the receipted files,
+and `selected.skills` lists the requested filters (empty for all-skills mode).
+On refusal, `refused.skills` lists the selected or planned skills that blocked
+receipt adoption.
 
 `track` writes no receipts unless every planned skill matches. It refuses (with
 `ok: false` and `summary.refused` counting the failures) when a target skill
 directory is absent, when any file would be created/updated, when the target has
-extra or unreadable files, or when a skill is blocked. Error codes include:
+extra or unreadable files, or when a skill is blocked. With `--skill`, the same
+refusal rules apply only to selected skills. Error codes include:
 
 - `missing_install_root` — the target could not be resolved to an install root
 - `target_missing` — a planned skill's target directory or file is absent
@@ -710,6 +731,7 @@ extra or unreadable files, or when a skill is blocked. Error codes include:
 - `source_missing` — a source entry is absent
 - `source_unreadable` — a source skill directory cannot be read
 - `blocked_skill` — compatibility rules block the skill for that assignment
+- `skill_not_planned` — a selected skill is not planned or blocked for the target
 - `invalid_receipt` — the existing receipt cannot be read or normalized
 - `receipt_write_failed` — the adoption receipt could not be written
 - `diff_*` — a diff-layer error propagated from target resolution

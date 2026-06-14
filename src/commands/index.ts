@@ -78,6 +78,22 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       continue;
     }
 
+    if (token === "--skill") {
+      if (args.command !== "track") {
+        throw new Error(`Unknown argument: ${token}`);
+      }
+      const value = rest[index + 1];
+      if (value === undefined || value === "" || value.startsWith("--")) {
+        throw new Error(`${token} requires a value`);
+      }
+      if (value.trim().length === 0) {
+        throw new Error(`${token} requires a non-blank value`);
+      }
+      args.skill = [...(args.skill ?? []), value];
+      index += 1;
+      continue;
+    }
+
     if (isValueArg(token)) {
       const value = rest[index + 1];
       if (value === undefined || value === "" || value.startsWith("--")) {

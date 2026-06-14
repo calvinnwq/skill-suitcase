@@ -34,6 +34,36 @@ async function createLiveMatchingInstall(t: { after(fn: () => Promise<void> | vo
   return { sourceRoot, targetRoot };
 }
 
+async function createTargetedTrackInstall(t: { after(fn: () => Promise<void> | void): void }): Promise<{
+  sourceRoot: string;
+  targetRoot: string;
+}> {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-targeted-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-targeted-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  const skillsRoot = path.join(sourceRoot, "skills");
+  await mkdir(skillsRoot, { recursive: true });
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\n      - skillify\n      - gnhf-postflight\n      - improve\n\nassignments:\n  openclaw:\n    suitcases:\n      - core\n\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\n\ncompatibility:\n  office-hours:\n    agents:\n      - openclaw\n    variant: canonical\n  skillify:\n    agents:\n      - openclaw\n    variant: canonical\n  gnhf-postflight:\n    agents:\n      - openclaw\n    variant: canonical\n  improve:\n    agents:\n      - openclaw\n    variant: canonical\n`
+  );
+
+  for (const skill of ["office-hours", "skillify", "gnhf-postflight", "improve"]) {
+    const skillRoot = path.join(skillsRoot, skill);
+    await mkdir(skillRoot, { recursive: true });
+    await writeFile(path.join(skillRoot, "SKILL.md"), `---\nname: ${skill}\nversion: "2026.06.14"\n---\n# ${skill}\n`);
+    await writeFile(path.join(skillRoot, "runtime.js"), `console.log("${skill}");\n`);
+  }
+
+  for (const skill of ["office-hours", "skillify", "gnhf-postflight"]) {
+    await cp(path.join(skillsRoot, skill), path.join(targetRoot, skill), { recursive: true });
+  }
+
+  return { sourceRoot, targetRoot };
+}
+
 function singleRecord(receipt: Receipt, skill: string): ReceiptInstallRecord {
   const value = receipt.installs?.[skill];
   if (value === undefined) {
@@ -156,6 +186,176 @@ test("track records versions with the same frontmatter semantics as status", asy
   assert.equal(statusResult.ok, true);
   assert.equal(statusResult.summary.current, 1);
   assert.equal(statusResult.statuses[0]?.currentVersion, "\"2026.06.10\"");
+});
+
+test("targeted track adopts selected unchanged skills while ignoring unselected create candidates", async (t) => {
+  const { sourceRoot, targetRoot } = await createTargetedTrackInstall(t);
+  const beforeImprove = await readFile(path.join(sourceRoot, "skills", "improve", "runtime.js"), "utf8");
+
+  const result = await track({
+    source: sourceRoot,
+    target: "openclaw",
+    skills: ["office-hours", "skillify", "gnhf-postflight"]
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.selected.skills, ["gnhf-postflight", "office-hours", "skillify"]);
+  assert.deepEqual(result.tracked.skills, ["gnhf-postflight", "office-hours", "skillify"]);
+  assert.deepEqual(result.refused.skills, []);
+  assert.equal(result.summary.planned, 3);
+  assert.equal(result.summary.tracked, 3);
+  await assert.rejects(readFile(path.join(targetRoot, "improve", "runtime.js"), "utf8"), /ENOENT/);
+  assert.equal(await readFile(path.join(sourceRoot, "skills", "improve", "runtime.js"), "utf8"), beforeImprove);
+
+  const receipt = JSON.parse(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  assert.equal(singleRecord(receipt, "office-hours").mode, "track");
+  assert.equal(singleRecord(receipt, "skillify").mode, "track");
+  assert.equal(singleRecord(receipt, "gnhf-postflight").mode, "track");
+  assert.equal(receipt.installs?.improve, undefined);
+});
+
+test("targeted track ignores source listing errors for unselected planned skills", async (t) => {
+  const { sourceRoot, targetRoot } = await createTargetedTrackInstall(t);
+  const unreadableImprovePath = path.join(sourceRoot, "skills", "improve", "unreadable");
+  await mkdir(unreadableImprovePath, { recursive: true });
+  await chmod(unreadableImprovePath, 0o000);
+  t.after(() => chmod(unreadableImprovePath, 0o755).catch(() => undefined));
+
+  const result = await track({
+    source: sourceRoot,
+    target: "openclaw",
+    skills: ["office-hours", "skillify", "gnhf-postflight"]
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.tracked.skills, ["gnhf-postflight", "office-hours", "skillify"]);
+  assert.deepEqual(result.refused.skills, []);
+
+  const receipt = JSON.parse(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  assert.equal(singleRecord(receipt, "office-hours").mode, "track");
+  assert.equal(singleRecord(receipt, "skillify").mode, "track");
+  assert.equal(singleRecord(receipt, "gnhf-postflight").mode, "track");
+  assert.equal(receipt.installs?.improve, undefined);
+});
+
+test("targeted track ignores missing source directories for unselected planned skills", async (t) => {
+  const { sourceRoot, targetRoot } = await createTargetedTrackInstall(t);
+  await rm(path.join(sourceRoot, "skills", "improve"), { recursive: true, force: true });
+
+  const result = await track({
+    source: sourceRoot,
+    target: "openclaw",
+    skills: ["office-hours", "skillify", "gnhf-postflight"]
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.tracked.skills, ["gnhf-postflight", "office-hours", "skillify"]);
+  assert.deepEqual(result.refused.skills, []);
+
+  const receipt = JSON.parse(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  assert.equal(singleRecord(receipt, "office-hours").mode, "track");
+  assert.equal(singleRecord(receipt, "skillify").mode, "track");
+  assert.equal(singleRecord(receipt, "gnhf-postflight").mode, "track");
+  assert.equal(receipt.installs?.improve, undefined);
+});
+
+test("targeted track refuses blank skill filters without writing receipts", async (t) => {
+  const { sourceRoot, targetRoot } = await createTargetedTrackInstall(t);
+
+  const result = await track({
+    source: sourceRoot,
+    target: "openclaw",
+    skills: ["   "]
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.selected.skills, []);
+  assert.deepEqual(result.tracked.skills, []);
+  assert.equal(result.errors[0]?.code, "invalid_skill_filter");
+  await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
+});
+
+test("targeted track refuses selected missing source directories without throwing", async (t) => {
+  const { sourceRoot, targetRoot } = await createTargetedTrackInstall(t);
+  await rm(path.join(sourceRoot, "skills", "improve"), { recursive: true, force: true });
+
+  const result = await track({
+    source: sourceRoot,
+    target: "openclaw",
+    skills: ["improve"]
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.selected.skills, ["improve"]);
+  assert.deepEqual(result.tracked.skills, []);
+  assert.deepEqual(result.refused.skills, ["improve"]);
+  assert.equal(result.summary.refused, 1);
+  assert.equal(result.errors.length, 1);
+  assert.equal(result.errors[0]?.code, "source_missing");
+  assert.equal(result.errors[0]?.skill, "improve");
+  await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
+});
+
+test("track without skill filters preserves all-or-nothing create refusal", async (t) => {
+  const { sourceRoot, targetRoot } = await createTargetedTrackInstall(t);
+
+  const result = await track({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "target_missing" && error.skill === "improve"), true);
+  assert.deepEqual(result.tracked.skills, []);
+  await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
+});
+
+test("targeted track refuses selected create, update, and extra entries without writing receipts", async (t) => {
+  const { sourceRoot, targetRoot } = await createTargetedTrackInstall(t);
+  await writeFile(path.join(targetRoot, "skillify", "runtime.js"), "console.log(\"changed\");\n");
+  await writeFile(path.join(targetRoot, "gnhf-postflight", "extra.txt"), "extra\n");
+
+  const result = await track({
+    source: sourceRoot,
+    target: "openclaw",
+    skills: ["improve", "skillify", "gnhf-postflight"]
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.selected.skills, ["gnhf-postflight", "improve", "skillify"]);
+  assert.deepEqual(result.refused.skills, ["gnhf-postflight", "improve", "skillify"]);
+  assert.equal(result.errors.some((error) => error.code === "target_missing" && error.skill === "improve"), true);
+  assert.equal(result.errors.some((error) => error.code === "target_mismatch" && error.skill === "skillify"), true);
+  assert.equal(result.errors.some((error) => error.code === "target_mismatch" && error.skill === "gnhf-postflight"), true);
+  await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
+});
+
+test("targeted track refuses blocked and non-planned selected skills", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-targeted-blocked-src-"));
+  const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-targeted-blocked-home-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(codexHome, { recursive: true, force: true }));
+
+  const skillsPath = path.join(codexHome, "skills");
+  const fixtureRoot = path.join(process.cwd(), "tests", "fixtures", "skills-catalog", "skills");
+  await mkdir(path.join(sourceRoot, "skills"), { recursive: true });
+  await cp(path.join(fixtureRoot, "gnhf-postflight"), path.join(sourceRoot, "skills", "gnhf-postflight"), { recursive: true });
+  await mkdir(path.join(skillsPath, "gnhf-postflight"), { recursive: true });
+  await writeFile(path.join(skillsPath, "gnhf-postflight", "SKILL.md"), "# Slim Codex variant\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  builder:\n    skills:\n      - gnhf-postflight\n\nassignments:\n  codex:\n    suitcases:\n      - builder\n\nassignmentPaths:\n  codex-global:\n    kind: codex-home\n    assignment: codex\n    codexHome: ${codexHome}\n    skillsPath: ${skillsPath}\n\ncompatibility:\n  gnhf-postflight:\n    agents:\n      - openclaw\n    variant: canonical\n    blockedAgents:\n      codex: Codex must use the slimmer platform variant.\n`
+  );
+
+  const result = await track({
+    source: sourceRoot,
+    target: "codex-global",
+    skills: ["gnhf-postflight", "office-hours"]
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.selected.skills, ["gnhf-postflight", "office-hours"]);
+  assert.deepEqual(result.refused.skills, ["gnhf-postflight", "office-hours"]);
+  assert.equal(result.errors.some((error) => error.code === "blocked_skill" && error.skill === "gnhf-postflight"), true);
+  assert.equal(result.errors.some((error) => error.code === "skill_not_planned" && error.skill === "office-hours"), true);
+  await assert.rejects(readFile(path.join(skillsPath, RECEIPT_FILE), "utf8"), /ENOENT/);
 });
 
 test("track refuses dirty targets and does not write receipts", async (t) => {
