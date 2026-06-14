@@ -6,6 +6,7 @@ import { platformCompatibilityNames } from "../platform-adapters.js";
 type PlannerInput = {
   source: string;
   target: string;
+  skills?: string[];
 };
 
 type PlanItem = {
@@ -22,6 +23,7 @@ type PlanItem = {
 type PlanError = {
   code: string;
   message: string;
+  skill?: string;
 };
 
 export type PlanResult = {
@@ -33,7 +35,7 @@ export type PlanResult = {
   errors: PlanError[];
 };
 
-export async function plan({ source, target }: PlannerInput): Promise<PlanResult> {
+export async function plan({ source, target, skills }: PlannerInput): Promise<PlanResult> {
   if (!source) {
     throw new Error("source is required");
   }
@@ -60,17 +62,23 @@ export async function plan({ source, target }: PlannerInput): Promise<PlanResult
     };
   }
 
-  const plannedSkills = resolveAssignmentSkills(manifest, assignment);
+  const selectedSkills = skills === undefined ? null : new Set(skills);
+  const plannedSkills = resolveAssignmentSkills(manifest, assignment)
+    .filter((skillName) => selectedSkills === null || selectedSkills.has(skillName));
   const compatibilityTargets = targetCompatibilityNames(manifest, target);
   const planned: PlanItem[] = [];
   const blocked: PlanItem[] = [];
+  const errors: PlanError[] = [];
 
   for (const skillName of plannedSkills) {
     const compatibility = manifest.compatibility[skillName] ?? {};
     const variant = selectSkillVariant(manifest, skillName, compatibilityTargets);
 
     if (variant !== null) {
-      planned.push(await plannedSkill(sourceRoot, skillName, compatibility, variant));
+      const item = await safePlannedSkill(sourceRoot, skillName, compatibility, errors, variant);
+      if (item !== null) {
+        planned.push(item);
+      }
       continue;
     }
 
@@ -98,17 +106,39 @@ export async function plan({ source, target }: PlannerInput): Promise<PlanResult
       continue;
     }
 
-    planned.push(await plannedSkill(sourceRoot, skillName, compatibility));
+    const item = await safePlannedSkill(sourceRoot, skillName, compatibility, errors);
+    if (item !== null) {
+      planned.push(item);
+    }
   }
 
   return {
-    ok: blocked.length === 0,
+    ok: blocked.length === 0 && errors.length === 0,
     source: sourceRoot,
     target,
     planned,
     blocked,
-    errors: []
+    errors
   };
+}
+
+async function safePlannedSkill(
+  sourceRoot: string,
+  skillName: string,
+  compatibility: Catalog["compatibility"][string],
+  errors: PlanError[],
+  variant: ResolvedSkillVariant | null = null
+): Promise<PlanItem | null> {
+  try {
+    return await plannedSkill(sourceRoot, skillName, compatibility, variant);
+  } catch (error) {
+    errors.push({
+      code: "source_missing",
+      message: error instanceof Error ? error.message : `Missing skill directory for ${skillName}`,
+      skill: skillName
+    });
+    return null;
+  }
 }
 
 function resolveAssignmentSkills(manifest: Catalog, assignment: Catalog["assignments"][string]): string[] {

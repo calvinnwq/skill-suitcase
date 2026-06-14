@@ -8,9 +8,11 @@ export const trackCommand: CommandModule = {
     return args.command === "track" && hasSource(args) && hasTarget(args) && hasJson(args);
   },
   async run(args) {
-    return track({
+    const input = {
       source: requireStringValue("source", args.source),
-      target: requireStringValue("target", args.target)
-    });
+      target: requireStringValue("target", args.target),
+      ...(args.skill !== undefined ? { skills: args.skill } : {})
+    };
+    return track(input);
   }
 };

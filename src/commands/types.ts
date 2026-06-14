@@ -33,6 +33,7 @@ export type ParsedCommandArgs = {
   lock?: string;
   artifact?: string;
   receipt?: string;
+  skill?: string[];
 };
 
 export type ValueFlagName = "source" | "target" | "output" | "lock" | "artifact" | "receipt";

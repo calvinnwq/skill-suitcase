@@ -22,6 +22,7 @@ type DiffSourceFileRead =
 type DiffResultError = {
   code: string;
   message: string;
+  skill?: string;
   candidates?: string[];
 };
 
@@ -89,7 +90,7 @@ type ResolveAssignmentInstallRootResult =
   | ResolveAssignmentInstallRootFailure;
 
 export async function diff(
-  { source, target }: { source: string; target: string }
+  { source, target, skills }: { source: string; target: string; skills?: string[] }
 ): Promise<DiffResult> {
   if (!source) {
     throw new Error("source is required");
@@ -101,7 +102,11 @@ export async function diff(
   const { manifest } = await loadCatalog(source);
   const installation = await resolveAssignmentInstallRoot(manifest, target);
   const planTarget = installation.assignment ?? target;
-  const planResult = await plan({ source, target: planTarget });
+  const planResult = await plan({
+    source,
+    target: planTarget,
+    ...(skills !== undefined ? { skills } : {})
+  });
   const sourceRoot = planResult.source;
 
   const result: DiffResult = {
@@ -205,7 +210,7 @@ async function comparePlannedSkill(
 ): Promise<{ entries: DiffEntry[]; errors: DiffResultError[] }> {
   const sourceRoot = plannedSkill.sourcePath;
   const targetRoot = path.join(installRoot, plannedSkill.skill);
-  const sourceListing = await collectSourceEntries(sourceRoot);
+  const sourceListing = await collectSourceEntries(sourceRoot, plannedSkill.skill);
   if (!sourceListing.ok) {
     return { entries: [], errors: sourceListing.errors };
   }
@@ -321,7 +326,8 @@ async function collectExtraEntries(
 }
 
 async function collectSourceEntries(
-  root: string
+  root: string,
+  skill: string
 ): Promise<{ ok: boolean; entries: string[]; errors: DiffResultError[] }> {
   try {
     const files = await listFiles(root);
@@ -343,7 +349,8 @@ async function collectSourceEntries(
         errors: [
           {
             code: "source_entry_list_failed",
-            message: "Failed to list source entries for unknown catalog path."
+            message: "Failed to list source entries for unknown catalog path.",
+            skill
           }
         ]
       };
@@ -355,7 +362,8 @@ async function collectSourceEntries(
       errors: [
         {
           code: "source_entry_list_failed",
-          message: `Failed to list source entries for ${root}: ${error.message}`
+          message: `Failed to list source entries for ${root}: ${error.message}`,
+          skill
         }
       ]
     };
