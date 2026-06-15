@@ -122,6 +122,50 @@ assignments:
   assert.equal(result.summary.warnings, 2);
 });
 
+test("ignores support-only directories marked under skills", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-import-support-directory-"));
+  await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });
+  await mkdir(path.join(source, "skills", "check-resolvable-local", "fixtures"), { recursive: true });
+  await writeFile(path.join(source, "skills", "office-hours", "SKILL.md"), "# Office Hours\n");
+  await writeFile(path.join(source, "skills", "check-resolvable-local", ".support-directory"), "");
+  await writeFile(
+    path.join(source, "skills", "check-resolvable-local", "fixtures", "routing-fixtures.json"),
+    "[]"
+  );
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    path: /tmp/openclaw/skills
+    assignment: openclaw
+
+compatibility:
+  office-hours:
+    agents:
+      - openclaw
+    variant: canonical
+`
+  );
+
+  const result = await inspectImportSource({ source });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.discoveredSkills, 1);
+  assert.deepEqual(result.skills.map((skill) => skill.name), ["office-hours"]);
+  assert.deepEqual(result.findings, []);
+});
+
 test("reports malformed assignment path metadata as deterministic errors", async () => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-import-bad-targets-"));
   await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });
