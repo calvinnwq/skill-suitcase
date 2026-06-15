@@ -57,6 +57,8 @@ type ImportArgs = {
   source: string;
 };
 
+const SUPPORT_DIRECTORY_MARKER = ".support-directory";
+
 export type ImportResult = {
   ok: boolean;
   source: string;
@@ -198,10 +200,18 @@ async function discoverSkillDirectories(
     return [];
   }
 
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  const skillDirectories: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    if (await isFile(path.join(skillsRoot, entry.name, SUPPORT_DIRECTORY_MARKER))) {
+      continue;
+    }
+    skillDirectories.push(entry.name);
+  }
+
+  return skillDirectories.sort();
 }
 
 function validateManifestShape(

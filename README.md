@@ -47,7 +47,9 @@ catalog portability metadata such as assignments, assignment paths,
 compatibility, and variants. Findings are emitted as deterministic JSON with
 `warning` or `error` levels; warnings keep `ok: true`, while errors make the
 command exit with failure status. The command never creates install roots,
-runtime homes, receipts, or bundle artifacts.
+runtime homes, receipts, or bundle artifacts. Directories under `skills/` that
+contain `.support-directory` are treated as support data and are not counted as
+installable skills.
 
 Targets currently exercised against fixture #1:
 
