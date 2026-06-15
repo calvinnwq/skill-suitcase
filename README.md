@@ -85,8 +85,9 @@ node dist/src/cli.js diff --source /path/to/skills-catalog --target claude-globa
 `skillsPath` to `<dir>/skills`. `--codex-skills <dir>` can override that skills
 path directly. `--claude-skills <dir>` overrides the `claude-global` skills root.
 These flags work with `targets`, `status`, `diff`, `pack`, `apply`, and `track`.
-Use `status --target <assignment-path>` to check one local target without
-requiring unrelated install roots, such as OpenClaw paths, to exist.
+Use `status --target <target>` with an assignment path id or assignment name to
+check one local target without requiring unrelated install roots, such as
+OpenClaw paths, to exist.
 
 See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
@@ -479,7 +480,10 @@ Retention and cleanup:
 - This CLI does not auto-delete artifacts; operators must prune old snapshot
   directories explicitly when retention policy requires it.
 
-`targets` returns assignment target discovery details instead of install plans:
+`targets` returns assignment target discovery details instead of install plans.
+Local target overrides are applied before discovery, so the returned
+`codex-global` and `claude-global` paths reflect any override flags passed to
+the command:
 
 ```json
 {
@@ -516,11 +520,13 @@ Retention and cleanup:
 
 ## `status` Output
 
-`status` walks every manifest `assignmentPaths` entry, resolves the referenced
-assignment plan, reads each install root and optional `.skill-suitcase-receipt.json`
-receipt (or `.skills-sync.json` for migration compatibility), and reports one
-status per planned or blocked skill. It uses `path` for `openclaw-skills-root`
-and `claude-skills-root` entries, and `skillsPath` for `codex-home` and
+`status` walks manifest `assignmentPaths` entries, resolves the referenced
+assignment plans, reads each install root and optional
+`.skill-suitcase-receipt.json` receipt (or `.skills-sync.json` for migration
+compatibility), and reports one status per planned or blocked skill. Pass
+`--target <target>` to limit the walk to matching assignment path ids or
+assignment names. It uses `path` for `openclaw-skills-root` and
+`claude-skills-root` entries, and `skillsPath` for `codex-home` and
 `nested-home-codex` entries. Install roots must already exist.
 
 ```json
@@ -616,6 +622,9 @@ multi-target installs. `status` selects the record whose `targetPath` resolves
 to either the assignment install root or `<installRoot>/<skill-name>`; relative
 `targetPath` values resolve under `installRoot`. Ambiguous or missing matches
 are reported as `invalid_receipt`.
+
+When `--target <target>` does not match any assignment path id or assignment
+name, `status` returns `ok: false` with an `unknown_target` error.
 
 ## `apply` Output
 
