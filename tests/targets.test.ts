@@ -99,6 +99,43 @@ test("local target overrides replace global Codex and Claude install paths", asy
   assert.equal(claudeGlobal.exists.path, true);
 });
 
+test("--codex-skills alone overrides only skillsPath and preserves codexHome", async (t) => {
+  const codexSkills = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-codex-skills-"));
+  t.after(() => rm(codexSkills, { recursive: true, force: true }));
+
+  const result = await targets({
+    source: fixtureSource,
+    targetOverrides: {
+      codexSkills
+    }
+  });
+
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+
+  assert.ok(codexGlobal);
+  assert.equal(codexGlobal.codexHome, "/tmp/codex");
+  assert.equal(codexGlobal.skillsPath, codexSkills);
+  assert.equal(codexGlobal.platform?.installRoot, codexSkills);
+});
+
+test("--codex-home alone overrides codexHome and defaults skillsPath to <home>/skills", async (t) => {
+  const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-codex-home-only-"));
+  t.after(() => rm(codexHome, { recursive: true, force: true }));
+
+  const result = await targets({
+    source: fixtureSource,
+    targetOverrides: {
+      codexHome
+    }
+  });
+
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+
+  assert.ok(codexGlobal);
+  assert.equal(codexGlobal.codexHome, codexHome);
+  assert.equal(codexGlobal.skillsPath, path.join(codexHome, "skills"));
+});
+
 test("reports malformed assignmentPaths as errors and classifies them as invalid", async () => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-invalid-"));
   const existingPath = path.join(source, "skills-root");

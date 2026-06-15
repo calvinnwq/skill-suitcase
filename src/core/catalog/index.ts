@@ -51,9 +51,7 @@ function applyTargetOverrides(manifest: Catalog, overrides: TargetOverrides | un
   if (codexGlobal !== undefined && (overrides.codexHome !== undefined || overrides.codexSkills !== undefined)) {
     const codexHome = overrides.codexHome !== undefined
       ? path.resolve(overrides.codexHome)
-      : overrides.codexSkills !== undefined
-        ? path.dirname(path.resolve(overrides.codexSkills))
-        : undefined;
+      : undefined;
     const skillsPath = overrides.codexSkills !== undefined
       ? path.resolve(overrides.codexSkills)
       : codexHome !== undefined
