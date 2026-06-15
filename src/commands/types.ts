@@ -33,10 +33,22 @@ export type ParsedCommandArgs = {
   lock?: string;
   artifact?: string;
   receipt?: string;
+  codexHome?: string;
+  codexSkills?: string;
+  claudeSkills?: string;
   skill?: string[];
 };
 
-export type ValueFlagName = "source" | "target" | "output" | "lock" | "artifact" | "receipt";
+export type ValueFlagName =
+  | "source"
+  | "target"
+  | "output"
+  | "lock"
+  | "artifact"
+  | "receipt"
+  | "codexHome"
+  | "codexSkills"
+  | "claudeSkills";
 
 export type CommandJsonResult =
   | Awaited<ReturnType<typeof plan>>

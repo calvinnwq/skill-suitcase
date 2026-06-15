@@ -66,6 +66,32 @@ test("parseCommandArgs preserves repeated track skill filters", () => {
   });
 });
 
+test("parseCommandArgs supports local target override flags", () => {
+  assert.deepEqual(parseCommandArgs([
+    "status",
+    "--source",
+    fixtureSource,
+    "--target",
+    "codex-global",
+    "--codex-home",
+    "/tmp/local-codex",
+    "--codex-skills",
+    "/tmp/local-codex-skills",
+    "--claude-skills",
+    "/tmp/local-claude-skills",
+    "--json"
+  ]), {
+    command: "status",
+    source: fixtureSource,
+    target: "codex-global",
+    codexHome: "/tmp/local-codex",
+    codexSkills: "/tmp/local-codex-skills",
+    claudeSkills: "/tmp/local-claude-skills",
+    dryRun: false,
+    json: true
+  });
+});
+
 test("parseCommandArgs rejects blank track skill filters", () => {
   assert.throws(
     () => parseCommandArgs([

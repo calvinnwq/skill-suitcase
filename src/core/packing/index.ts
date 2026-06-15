@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { loadCatalog, type LoadedCatalog } from "../catalog/index.js";
+import { loadCatalog, type LoadedCatalog, type TargetOverrides } from "../catalog/index.js";
 import { plan } from "../planning/index.js";
 import { type PlanResult } from "../planning/index.js";
 
@@ -18,6 +18,7 @@ type PackInput = {
   target: string;
   dryRun?: boolean;
   output?: string | null;
+  targetOverrides?: TargetOverrides | undefined;
 };
 
 type PackResult = {
@@ -95,7 +96,13 @@ type WriteBundleInput = {
   files: PackedFile[];
 };
 
-export async function pack({ source, target, dryRun = false, output = null }: PackInput): Promise<PackResult> {
+export async function pack({
+  source,
+  target,
+  dryRun = false,
+  output = null,
+  targetOverrides
+}: PackInput): Promise<PackResult> {
   if (dryRun && output) {
     throw new Error("pack accepts either --dry-run or --output, not both");
   }
@@ -104,7 +111,7 @@ export async function pack({ source, target, dryRun = false, output = null }: Pa
     throw new Error("pack requires --output unless --dry-run is set");
   }
 
-  const { sourceRoot, manifestPath, manifest } = await loadCatalog(source);
+  const { sourceRoot, manifestPath, manifest } = await loadCatalog(source, { targetOverrides });
   const planTarget = resolvePlanTarget(manifest, target);
   const planResult: PlanResult = await plan({ source: sourceRoot, target: planTarget });
   const files: PackedFile[] = [];

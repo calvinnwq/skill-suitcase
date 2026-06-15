@@ -1,5 +1,6 @@
 import { apply } from "../core/apply/index.js";
 import { hasJson, hasSource, hasTarget, requireStringValue } from "./helpers.js";
+import { targetOverridesFromArgs } from "./target-overrides.js";
 import type { CommandModule } from "./types.js";
 
 export const applyCommand: CommandModule = {
@@ -16,10 +17,16 @@ export const applyCommand: CommandModule = {
       target: string;
       lock?: string;
       artifact?: string;
+      targetOverrides?: ReturnType<typeof targetOverridesFromArgs>;
     } = {
       source: requireStringValue("source", args.source),
       target: requireStringValue("target", args.target)
     };
+
+    const targetOverrides = targetOverridesFromArgs(args);
+    if (targetOverrides !== undefined) {
+      input.targetOverrides = targetOverrides;
+    }
 
     if (args.lock !== undefined) {
       input.lock = args.lock;

@@ -36,6 +36,22 @@ node dist/src/cli.js pack --source /path/to/skills-catalog --target openclaw --d
 node dist/src/cli.js status --source /path/to/skills-catalog --json
 ```
 
+For a Codex/Claude-only machine, smoke local target overrides and target-scoped
+status without requiring OpenClaw paths from the shared catalog to exist:
+
+```bash
+node dist/src/cli.js targets --source /path/to/skills-catalog --codex-home ~/.codex --claude-skills ~/.claude/skills --json
+node dist/src/cli.js status --source /path/to/skills-catalog --target codex-global --codex-home ~/.codex --json
+node dist/src/cli.js diff --source /path/to/skills-catalog --target codex-global --codex-home ~/.codex --json
+node dist/src/cli.js status --source /path/to/skills-catalog --target claude-global --claude-skills ~/.claude/skills --json
+node dist/src/cli.js diff --source /path/to/skills-catalog --target claude-global --claude-skills ~/.claude/skills --json
+```
+
+`--codex-home`, `--codex-skills`, and `--claude-skills` are local overrides for
+global target paths. They are intended for `targets`, `status`, `diff`, `pack`,
+`apply`, and `track`; `status --target` accepts either an assignment path id or
+an assignment name.
+
 For Codex or Claude paths that have source variants, `plan`, `diff`, `pack`,
 `apply`, `track`, receipts, and `status` should carry the selected variant name.
 If a slimmer live variant is required but no source variant exists, those same

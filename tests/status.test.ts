@@ -30,6 +30,88 @@ function requireValue<T>(value: T | undefined, label: string): T {
   return value;
 }
 
+test("status can scope to a locally overridden Codex target without OpenClaw paths", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-local-source-"));
+  const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-local-codex-"));
+  const codexSkills = path.join(codexHome, "skills");
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(codexHome, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  const targetSkill = path.join(codexSkills, "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(codexSkills, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), [
+    "---",
+    "name: office-hours",
+    "version: 2026.06.10",
+    "---",
+    "",
+    "# Office Hours"
+  ].join("\n"));
+  await cp(sourceSkill, targetSkill, { recursive: true });
+  await writeReceipt({
+    installRoot: codexSkills,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(sourceSkill),
+    installedFiles: await buildInstalledFiles(targetSkill)
+  });
+
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: /definitely/missing/openclaw/skills
+  codex-global:
+    kind: codex-home
+    assignment: codex
+    codexHome: /definitely/wrong/codex
+    skillsPath: /definitely/wrong/codex/skills
+
+compatibility:
+  office-hours:
+    agents:
+      - openclaw
+      - codex
+    variant: canonical
+`);
+
+  const result = await status({
+    source: sourceRoot,
+    target: "codex-global",
+    targetOverrides: { codexHome }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.summary, {
+    current: 1,
+    behind: 0,
+    version: 0,
+    dirty: 0,
+    missing: 0,
+    unknown: 0,
+    blocked: 0
+  });
+  assert.equal(result.assignments.length, 1);
+  assert.equal(result.assignments[0]?.assignmentPath, "codex-global");
+  assert.equal(result.assignments[0]?.installRoot, codexSkills);
+});
+
 test("status reports manifest-wide statuses for all assignments and respects receipt state", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-test-"));
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));

@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, readFile, readlink, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { loadCatalog } from "../catalog/index.js";
+import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { plan, type PlanResult } from "../planning/index.js";
 import {
   LEGACY_RECEIPT_FILE,
@@ -133,12 +133,20 @@ type PlanBlockedItem = {
   [key: string]: unknown;
 };
 
-export async function status({ source }: { source: string }): Promise<StatusResult> {
+export async function status({
+  source,
+  target,
+  targetOverrides
+}: {
+  source: string;
+  target?: string | undefined;
+  targetOverrides?: TargetOverrides | undefined;
+}): Promise<StatusResult> {
   if (!source) {
     throw new Error("source is required");
   }
 
-  const { manifestPath, sourceRoot, manifest } = await loadCatalog(source);
+  const { manifestPath, sourceRoot, manifest } = await loadCatalog(source, { targetOverrides });
   const summary: StatusSummary = {
     current: 0,
     behind: 0,
@@ -170,6 +178,9 @@ export async function status({ source }: { source: string }): Promise<StatusResu
   }
 
   for (const [assignmentPathId, assignmentPath] of Object.entries(assignmentPaths)) {
+    if (!shouldIncludeAssignmentPath({ target, assignmentPathId, assignmentPath })) {
+      continue;
+    }
     const assignmentResult: StatusAssignment = {
       assignmentPath: assignmentPathId,
       assignment: null,
@@ -365,6 +376,13 @@ export async function status({ source }: { source: string }): Promise<StatusResu
     }
 
     assignments.push(assignmentResult);
+  }
+
+  if (target !== undefined && target.trim().length > 0 && assignments.length === 0) {
+    errors.push({
+      code: "unknown_target",
+      message: `No assignment path or assignment found for target ${target}.`
+    });
   }
 
   return {
@@ -1478,6 +1496,26 @@ function normalizeValue(value: unknown): string | null {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function shouldIncludeAssignmentPath({
+  target,
+  assignmentPathId,
+  assignmentPath
+}: {
+  target?: string | undefined;
+  assignmentPathId: string;
+  assignmentPath: unknown;
+}): boolean {
+  if (target === undefined || target.trim().length === 0) {
+    return true;
+  }
+
+  if (assignmentPathId === target) {
+    return true;
+  }
+
+  return isRecord(assignmentPath) && normalizeValue(assignmentPath.assignment) === target;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

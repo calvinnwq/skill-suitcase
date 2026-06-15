@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import { loadCatalog, type Catalog } from "./index.js";
+import { loadCatalog, type Catalog, type TargetOverrides } from "./index.js";
 import {
   platformPathFields,
   resolvePlatformAdapter
@@ -50,16 +50,17 @@ type TargetResult = {
 
 type TargetInput = {
   source: string;
+  targetOverrides?: TargetOverrides | undefined;
 };
 
 const PATH_FIELDS = platformPathFields();
 
-export async function targets({ source }: TargetInput): Promise<TargetResult> {
+export async function targets({ source, targetOverrides }: TargetInput): Promise<TargetResult> {
   if (!source) {
     throw new Error("source is required");
   }
 
-  const { sourceRoot, manifestPath, manifest } = await loadCatalog(source);
+  const { sourceRoot, manifestPath, manifest } = await loadCatalog(source, { targetOverrides });
   const findings: TargetFinding[] = [];
   const discovered: Target[] = [];
 

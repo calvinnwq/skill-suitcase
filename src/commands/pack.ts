@@ -1,5 +1,6 @@
 import { pack } from "../core/packing/index.js";
 import { hasJson, hasSource, hasTarget, requireStringValue } from "./helpers.js";
+import { targetOverridesFromArgs } from "./target-overrides.js";
 import type { CommandModule } from "./types.js";
 
 export const packCommand: CommandModule = {
@@ -14,7 +15,8 @@ export const packCommand: CommandModule = {
       source: requireStringValue("source", args.source),
       target: requireStringValue("target", args.target),
       dryRun: args.dryRun,
-      output: args.output ?? null
+      output: args.output ?? null,
+      targetOverrides: targetOverridesFromArgs(args)
     });
   }
 };

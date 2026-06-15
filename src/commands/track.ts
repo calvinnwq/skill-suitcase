@@ -1,5 +1,6 @@
 import { track } from "../core/track/index.js";
 import { hasJson, hasSource, hasTarget, requireStringValue } from "./helpers.js";
+import { targetOverridesFromArgs } from "./target-overrides.js";
 import type { CommandModule } from "./types.js";
 
 export const trackCommand: CommandModule = {
@@ -11,6 +12,7 @@ export const trackCommand: CommandModule = {
     const input = {
       source: requireStringValue("source", args.source),
       target: requireStringValue("target", args.target),
+      targetOverrides: targetOverridesFromArgs(args),
       ...(args.skill !== undefined ? { skills: args.skill } : {})
     };
     return track(input);
