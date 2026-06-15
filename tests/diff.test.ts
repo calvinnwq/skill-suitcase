@@ -197,7 +197,7 @@ assignments:
       - core
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${codexHome}
@@ -210,10 +210,10 @@ compatibility:
 `
   );
 
-  const result = await diff({ source, target: "codex-global" });
+  const result = await diff({ source, target: "codex" });
 
   assert.equal(result.ok, true);
-  assert.equal(result.target, "codex-global");
+  assert.equal(result.target, "codex");
   assert.equal(result.assignment, "codex");
   assert.equal(result.installRoot, skillsPath);
   assert.equal(result.summary.unchanged, 1);
@@ -246,7 +246,7 @@ assignments:
       - core
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${codexHome}
@@ -385,7 +385,7 @@ assignments:
       - openclaw-builder
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${codexHome}
@@ -404,7 +404,7 @@ compatibility:
 `
   );
 
-  const result = await diff({ source, target: "codex-global" });
+  const result = await diff({ source, target: "codex" });
 
   assert.equal(result.ok, false);
   const blockedEntries = result.entries.filter((entry) => entry.action === "blocked");

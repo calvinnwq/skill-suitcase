@@ -17,8 +17,8 @@ export function usageText(): string {
     "  suitcase track --source <skills-repo> --target <target> [--skill <name> ...] --json",
     "",
     "Target path overrides:",
-    "  --codex-home <dir>     Override codex-global codexHome; skillsPath defaults to <dir>/skills",
-    "  --codex-skills <dir>   Override codex-global skillsPath",
-    "  --claude-skills <dir>  Override claude-global path"
+    "  --codex-home <dir>     Override codex codexHome; skillsPath defaults to <dir>/skills",
+    "  --codex-skills <dir>   Override codex skillsPath",
+    "  --claude-skills <dir>  Override claude path"
   ].join("\n");
 }

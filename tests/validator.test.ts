@@ -13,7 +13,7 @@ test("validates the skills repo fixture", async () => {
   assert.equal(result.ok, true);
   assert.equal(result.summary.suitcases, 2);
   assert.equal(result.summary.assignments, 4);
-  assert.equal(result.summary.assignmentPaths, 5);
+  assert.equal(result.summary.assignmentPaths, 4);
   assert.equal(result.summary.referencedSkills, 3);
   assert.deepEqual(result.findings, []);
 });

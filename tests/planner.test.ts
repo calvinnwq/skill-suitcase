@@ -29,8 +29,8 @@ test("codex plans only portable core skills", async () => {
   assert.deepEqual(result.blocked, []);
 });
 
-test("openclaw-kody-codex plans only portable core skills", async () => {
-  const result = await plan({ source: fixtureSource, target: "openclaw-kody-codex" });
+test("openclaw-codex plans only portable core skills", async () => {
+  const result = await plan({ source: fixtureSource, target: "openclaw-codex" });
 
   assert.equal(result.ok, true);
   assert.deepEqual(
@@ -182,7 +182,7 @@ assignments:
       - builder
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${path.join(source, "codex")}

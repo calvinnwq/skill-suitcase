@@ -47,7 +47,7 @@ function applyTargetOverrides(manifest: Catalog, overrides: TargetOverrides | un
     assignmentPaths[targetId] = { ...assignmentPath };
   }
 
-  const codexGlobal = assignmentPaths["codex-global"];
+  const codexGlobal = assignmentPaths["codex"];
   if (codexGlobal !== undefined && (overrides.codexHome !== undefined || overrides.codexSkills !== undefined)) {
     const codexHome = overrides.codexHome !== undefined
       ? path.resolve(overrides.codexHome)
@@ -66,7 +66,7 @@ function applyTargetOverrides(manifest: Catalog, overrides: TargetOverrides | un
     }
   }
 
-  const claudeGlobal = assignmentPaths["claude-global"];
+  const claudeGlobal = assignmentPaths["claude"];
   if (claudeGlobal !== undefined && overrides.claudeSkills !== undefined) {
     claudeGlobal.path = path.resolve(overrides.claudeSkills);
   }

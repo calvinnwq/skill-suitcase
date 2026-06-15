@@ -515,7 +515,7 @@ assignments:
       - builder
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${codexHome}
@@ -532,13 +532,13 @@ compatibility:
   );
   const manifestPath = await writeArtifactManifest(artifactRoot, {
     sourceRoot,
-    target: "codex-global",
+    target: "codex",
     plannedSkills: ["gnhf-postflight"]
   });
 
   const result = await apply({
     source: sourceRoot,
-    target: "codex-global",
+    target: "codex",
     artifact: manifestPath
   });
 
@@ -578,7 +578,7 @@ assignments:
       - builder
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${codexHome}
@@ -622,13 +622,13 @@ variants:
   await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.13-codex\n---\nnew\n");
   const manifestPath = await writeArtifactManifest(artifactRoot, {
     sourceRoot,
-    target: "codex-global",
+    target: "codex",
     plannedSkills: ["gnhf-postflight"]
   });
 
   const result = await apply({
     source: sourceRoot,
-    target: "codex-global",
+    target: "codex",
     artifact: manifestPath
   });
 

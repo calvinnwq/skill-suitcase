@@ -14,7 +14,7 @@ test("parses the skills repo suitcase manifest shape", async () => {
   const core = manifest.suitcases.core;
   const openclawBuilder = manifest.suitcases["openclaw-builder"];
   const openclawAssignment = manifest.assignments.openclaw;
-  const codexGlobal = manifest.assignmentPaths["codex-global"];
+  const codexGlobal = manifest.assignmentPaths["codex"];
   const gnhfCompatibility = manifest.compatibility["gnhf-postflight"];
   const gnhfVariants = manifest.variants["gnhf-postflight"];
 

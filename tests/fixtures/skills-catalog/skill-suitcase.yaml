@@ -16,7 +16,7 @@ assignments:
   codex:
     suitcases:
       - core
-  openclaw-kody-codex:
+  openclaw-codex:
     suitcases:
       - core
   claude:
@@ -29,26 +29,19 @@ assignmentPaths:
     path: /tmp/openclaw/skills
     assignment: openclaw
 
-  codex-global:
+  codex:
     kind: codex-home
     codexHome: /tmp/codex
     skillsPath: /tmp/codex/skills
     assignment: codex
 
-  openclaw-kody-codex:
+  openclaw-codex:
     kind: codex-home
     codexHome: /tmp/openclaw-codex
     skillsPath: /tmp/openclaw-codex/skills
-    assignment: openclaw-kody-codex
+    assignment: openclaw-codex
 
-  openclaw-workspace-codex:
-    kind: nested-home-codex
-    home: /tmp/workspace-codex/home
-    codexHome: /tmp/workspace-codex/home/.codex
-    skillsPath: /tmp/workspace-codex/home/.codex/skills
-    assignment: codex
-
-  claude-global:
+  claude:
     kind: claude-skills-root
     path: /tmp/claude/skills
     assignment: claude

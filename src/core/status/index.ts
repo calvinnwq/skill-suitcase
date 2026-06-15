@@ -176,9 +176,12 @@ export async function status({
       errors
     };
   }
+  const exactTargetExists = target !== undefined &&
+    target.trim().length > 0 &&
+    Object.prototype.hasOwnProperty.call(assignmentPaths, target);
 
   for (const [assignmentPathId, assignmentPath] of Object.entries(assignmentPaths)) {
-    if (!shouldIncludeAssignmentPath({ target, assignmentPathId, assignmentPath })) {
+    if (!shouldIncludeAssignmentPath({ target, exactTargetExists, assignmentPathId, assignmentPath })) {
       continue;
     }
     const assignmentResult: StatusAssignment = {
@@ -1500,10 +1503,12 @@ function normalizeValue(value: unknown): string | null {
 
 function shouldIncludeAssignmentPath({
   target,
+  exactTargetExists,
   assignmentPathId,
   assignmentPath
 }: {
   target?: string | undefined;
+  exactTargetExists: boolean;
   assignmentPathId: string;
   assignmentPath: unknown;
 }): boolean {
@@ -1513,6 +1518,10 @@ function shouldIncludeAssignmentPath({
 
   if (assignmentPathId === target) {
     return true;
+  }
+
+  if (exactTargetExists) {
+    return false;
   }
 
   return isRecord(assignmentPath) && normalizeValue(assignmentPath.assignment) === target;
