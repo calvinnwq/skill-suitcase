@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
+import {
+  findTargetRegistryEntriesByAssignment,
+  resolveTargetRegistryEntryFromManifest,
+  type TargetRegistryEntry
+} from "../catalog/target-registry.js";
 import { type PlanResult, plan } from "../planning/index.js";
 import type { Catalog } from "../catalog/index.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
@@ -62,6 +67,7 @@ type DiffResult = {
   target: string;
   assignment: string | null;
   installRoot: string | null;
+  readOnly: boolean;
   planned: PlanItem[];
   blocked: PlanItem[];
   entries: DiffEntry[];
@@ -76,6 +82,7 @@ type ResolveAssignmentInstallRootSuccess = {
   errors: DiffResultError[];
   installRoot: string | null;
   assignment: string | null;
+  readOnly: boolean;
 };
 
 type ResolveAssignmentInstallRootFailure = {
@@ -83,6 +90,7 @@ type ResolveAssignmentInstallRootFailure = {
   errors: DiffResultError[];
   installRoot: string | null;
   assignment: string | null;
+  readOnly: boolean;
 };
 
 type ResolveAssignmentInstallRootResult =
@@ -104,22 +112,45 @@ export async function diff(
     throw new Error("target is required");
   }
 
-  const { manifest } = await loadCatalog(source, { targetOverrides });
-  const installation = await resolveAssignmentInstallRoot(manifest, target);
+  const { manifest, sourceRoot } = await loadCatalog(source, { targetOverrides });
+  const installation = await resolveAssignmentInstallRoot(manifest, target, targetOverrides);
+  if (installation.readOnly) {
+    return {
+      ok: installation.errors.length === 0,
+      source: sourceRoot,
+      target,
+      assignment: installation.assignment ?? target,
+      installRoot: installation.installRoot,
+      readOnly: true,
+      planned: [],
+      blocked: [],
+      entries: [],
+      summary: {
+        create: 0,
+        update: 0,
+        unchanged: 0,
+        extra: 0,
+        missing: 0,
+        blocked: 0
+      },
+      errors: installation.errors
+    };
+  }
   const planTarget = installation.assignment ?? target;
   const planResult = await plan({
     source,
     target: planTarget,
     ...(skills !== undefined ? { skills } : {})
   });
-  const sourceRoot = planResult.source;
+  const planSourceRoot = planResult.source;
 
   const result: DiffResult = {
     ok: false,
-    source: sourceRoot,
+    source: planSourceRoot,
     target,
     assignment: planTarget,
     installRoot: null,
+    readOnly: installation.readOnly,
     planned: planResult.planned ?? [],
     blocked: planResult.blocked ?? [],
     entries: [],
@@ -445,7 +476,8 @@ function entry(
 
 async function resolveAssignmentInstallRoot(
   manifest: Catalog,
-  target: string
+  target: string,
+  targetOverrides?: TargetOverrides | undefined
 ): Promise<ResolveAssignmentInstallRootResult> {
   const assignmentPaths = manifest.assignmentPaths ?? {};
   const errors: DiffResultError[] = [];
@@ -455,20 +487,12 @@ async function resolveAssignmentInstallRoot(
       code: "invalid_assignment_paths",
       message: "Manifest assignmentPaths is not a valid mapping."
     });
-    return { ok: false, errors, installRoot: null, assignment: null };
+    return { ok: false, errors, installRoot: null, assignment: null, readOnly: false };
   }
 
-  const directAssignmentPath = assignmentPaths[target];
-  if (directAssignmentPath !== undefined && !isRecord(directAssignmentPath)) {
-    errors.push({
-      code: "missing_target_assignment_path",
-      message: `No assignmentPath declared for target ${target}.`
-    });
-    return { ok: false, errors, installRoot: null, assignment: null };
-  }
-
-  if (isRecord(directAssignmentPath)) {
-    return resolveSingleAssignmentPath(manifest, target, directAssignmentPath);
+  const directRegistryEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides);
+  if (directRegistryEntry !== null) {
+    return resolveSingleAssignmentPath(manifest, directRegistryEntry);
   }
 
   if (!isRecord(manifest.assignments?.[target])) {
@@ -476,16 +500,16 @@ async function resolveAssignmentInstallRoot(
       code: "missing_target_assignment_path",
       message: `No assignmentPath declared for target ${target}.`
     });
-    return { ok: false, errors, installRoot: null, assignment: null };
+    return { ok: false, errors, installRoot: null, assignment: null, readOnly: false };
   }
 
-  const matchingAssignmentPaths = findAssignmentPathByAssignment(assignmentPaths, target);
+  const matchingAssignmentPaths = findTargetRegistryEntriesByAssignment(manifest, target, targetOverrides);
   if (matchingAssignmentPaths.length === 0) {
     errors.push({
       code: "missing_install_root",
       message: `No install root declared for assignment ${target}.`
     });
-    return { ok: false, errors, installRoot: null, assignment: target };
+    return { ok: false, errors, installRoot: null, assignment: target, readOnly: false };
   }
 
   if (matchingAssignmentPaths.length > 1) {
@@ -494,38 +518,41 @@ async function resolveAssignmentInstallRoot(
       message: `Target ${target} matches multiple assignment paths; pass a concrete assignmentPath target selector.`,
       candidates: matchingAssignmentPaths.map((candidate) => candidate.id)
     });
-    return { ok: false, errors, installRoot: null, assignment: target };
+    return { ok: false, errors, installRoot: null, assignment: target, readOnly: false };
   }
 
   const match = matchingAssignmentPaths[0];
   if (!match) {
-    return { ok: false, errors, installRoot: null, assignment: target };
+    return { ok: false, errors, installRoot: null, assignment: target, readOnly: false };
   }
 
-  return resolveSingleAssignmentPath(manifest, match.id, match.path);
+  return resolveSingleAssignmentPath(manifest, match);
 }
 
 async function resolveSingleAssignmentPath(
   manifest: Catalog,
-  assignmentPathId: string,
-  assignmentPath: Record<string, unknown>
+  registryEntry: TargetRegistryEntry
 ): Promise<ResolveAssignmentInstallRootResult> {
   const errors: DiffResultError[] = [];
+  const assignmentPathId = registryEntry.id;
+  const assignmentPath = registryEntry.assignmentPath;
   const assignment = normalizeValue(assignmentPath.assignment);
   if (!assignment) {
     errors.push({
       code: "invalid_assignment_path",
       message: `Assignment path ${assignmentPathId} is missing assignment.`
     });
-    return { ok: false, errors, installRoot: null, assignment: null };
+    return { ok: false, errors, installRoot: null, assignment: null, readOnly: registryEntry.readOnly };
   }
 
   if (!isRecord(manifest.assignments?.[assignment])) {
-    errors.push({
-      code: "unknown_assignment_path_target",
-      message: `Assignment path ${assignmentPathId} points at unknown assignment ${assignment}.`
-    });
-    return { ok: false, errors, installRoot: null, assignment };
+    if (!registryEntry.readOnly) {
+      errors.push({
+        code: "unknown_assignment_path_target",
+        message: `Assignment path ${assignmentPathId} points at unknown assignment ${assignment}.`
+      });
+      return { ok: false, errors, installRoot: null, assignment, readOnly: false };
+    }
   }
 
   const kind = normalizeValue(assignmentPath.kind);
@@ -536,7 +563,7 @@ async function resolveSingleAssignmentPath(
       code: "invalid_assignment_path",
       message: `Assignment path ${assignmentPathId} is missing kind.`
     });
-    return { ok: false, errors, installRoot: null, assignment };
+    return { ok: false, errors, installRoot: null, assignment, readOnly: registryEntry.readOnly };
   }
 
   if (rootResolution.adapter === null) {
@@ -544,7 +571,7 @@ async function resolveSingleAssignmentPath(
       code: "unsupported_assignment_path_kind",
       message: `Assignment path ${assignmentPathId} has unsupported kind ${kind}.`
     });
-    return { ok: false, errors, installRoot: null, assignment };
+    return { ok: false, errors, installRoot: null, assignment, readOnly: registryEntry.readOnly };
   }
 
   if (!rootResolution.ok) {
@@ -553,7 +580,7 @@ async function resolveSingleAssignmentPath(
       code: "invalid_assignment_path",
       message: `Assignment path ${assignmentPathId} is missing required field ${field}.`
     });
-    return { ok: false, errors, installRoot: rootResolution.installRoot, assignment };
+    return { ok: false, errors, installRoot: rootResolution.installRoot, assignment, readOnly: registryEntry.readOnly };
   }
 
   const installRoot = rootResolution.installRoot;
@@ -562,7 +589,11 @@ async function resolveSingleAssignmentPath(
       code: "invalid_assignment_path",
       message: `Assignment path ${assignmentPathId} is missing required field ${rootResolution.adapter.installRootField}.`
     });
-    return { ok: false, errors, installRoot: null, assignment };
+    return { ok: false, errors, installRoot: null, assignment, readOnly: registryEntry.readOnly };
+  }
+
+  if (registryEntry.readOnly) {
+    return { ok: true, errors: [], installRoot, assignment, readOnly: true };
   }
 
   if (!(await isDirectory(installRoot))) {
@@ -570,28 +601,10 @@ async function resolveSingleAssignmentPath(
       code: "missing_install_root",
       message: `Assignment path ${assignmentPathId} points at missing install root: ${installRoot}.`
     });
-    return { ok: false, errors, installRoot, assignment };
+    return { ok: false, errors, installRoot, assignment, readOnly: false };
   }
 
-  return { ok: true, errors: [], installRoot, assignment };
-}
-
-function findAssignmentPathByAssignment(
-  assignmentPaths: Record<string, unknown>,
-  assignment: string
-): { id: string; path: Record<string, unknown> }[] {
-  const matches: { id: string; path: Record<string, unknown> }[] = [];
-
-  for (const [pathId, assignmentPath] of Object.entries(assignmentPaths)) {
-    if (!isRecord(assignmentPath)) {
-      continue;
-    }
-    if (normalizeValue(assignmentPath.assignment) === assignment) {
-      matches.push({ id: pathId, path: assignmentPath });
-    }
-  }
-
-  return matches;
+  return { ok: true, errors: [], installRoot, assignment, readOnly: false };
 }
 
 async function isDirectory(candidate: string): Promise<boolean> {

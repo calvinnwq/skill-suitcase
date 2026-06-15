@@ -117,6 +117,80 @@ compatibility:
   assert.equal(result.assignments[0]?.installRoot, codexSkills);
 });
 
+test("status reports provider-modeled read-only targets without requiring live roots", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-provider-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\n---\n");
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  codex:
+    kind: codex-home
+    assignment: codex
+    codexHome: /definitely/missing/codex
+    skillsPath: /definitely/missing/codex/skills
+
+compatibility:
+  office-hours:
+    agents:
+      - codex
+`);
+
+  const result = await status({ source: sourceRoot, target: "opencode" });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.statuses.length, 0);
+  assert.deepEqual(result.summary, {
+    current: 0,
+    behind: 0,
+    version: 0,
+    dirty: 0,
+    missing: 0,
+    unknown: 0,
+    blocked: 0
+  });
+  assert.equal(result.assignments.length, 1);
+  assert.equal(result.assignments[0]?.assignmentPath, "opencode");
+  assert.equal(result.assignments[0]?.assignment, "opencode");
+  assert.equal(result.assignments[0]?.kind, "opencode-skills-root");
+  assert.equal(result.assignments[0]?.installRoot.endsWith("/.config/opencode/skills"), true);
+  assert.deepEqual(result.assignments[0]?.errors, []);
+  assert.deepEqual(result.errors, []);
+});
+
+test("manifest-wide status includes provider-modeled OpenCode and Pi inventory entries", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-provider-all-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+
+assignments:
+
+assignmentPaths:
+`);
+
+  const result = await status({ source: sourceRoot });
+  const assignmentPaths = result.assignments.map((entry) => entry.assignmentPath);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(assignmentPaths, ["opencode", "pi"]);
+  assert.deepEqual(result.assignments.map((entry) => entry.statusCount), [0, 0]);
+  assert.equal(result.statuses.length, 0);
+});
+
 test("status reports manifest-wide statuses for all assignments and respects receipt state", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-test-"));
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));
@@ -263,7 +337,7 @@ assignmentPaths:
 
   assert.equal(result.ok, true);
   assert.equal(result.manifestPath, manifestPath);
-  assert.equal(result.assignments.length, 6);
+  assert.equal(result.assignments.length, 8);
   assert.equal(result.statuses.length, 6);
   assert.equal(result.summary.current, 1);
   assert.equal(result.summary.missing, 1);
@@ -2424,7 +2498,7 @@ assignmentPaths:
   const result = await status({ source: sourceRoot });
 
   assert.equal(result.ok, false);
-  assert.equal(result.assignments.length, 2);
+  assert.equal(result.assignments.length, 4);
 
   const validAssignment = requireValue(
     result.assignments.find((entry) => entry.assignmentPath === "openclaw"),
@@ -2520,7 +2594,7 @@ assignmentPaths:
   const result = await status({ source: sourceRoot });
 
   assert.equal(result.ok, false);
-  assert.equal(result.assignments.length, 2);
+  assert.equal(result.assignments.length, 4);
   assert.equal(result.errors.some((entry) => entry.code === "plan_failed"), true);
 
   const validAssignment = requireValue(

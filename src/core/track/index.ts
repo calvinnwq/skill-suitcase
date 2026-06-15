@@ -33,6 +33,7 @@ type DiffForTrack = {
   target: string;
   assignment: string | null;
   installRoot: string | null;
+  readOnly?: boolean;
   planned: Array<{ skill: string; sourcePath: string; variant?: string }>;
   blocked: Array<{ skill: string; reason?: string }>;
   entries: Array<{
@@ -119,6 +120,13 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
   const plannedForTrack = selectPlannedForTrack(diffResult.planned, selectedSkillSet);
   const blockedForTrack = countBlockedForTrack(diffResult.blocked, selectedSkillSet);
   const errors = collectTrackErrors(diffResult, selectedSkillSet, selectedSkills);
+
+  if (diffResult.readOnly === true) {
+    errors.push({
+      code: "read_only_target",
+      message: `Target ${target} is modeled read-only and cannot be tracked.`
+    });
+  }
 
   if (installRoot === null) {
     errors.push({

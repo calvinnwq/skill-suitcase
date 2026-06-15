@@ -347,6 +347,60 @@ assignments:
   assert.ok(result.summary);
 });
 
+test("diff reports provider-modeled read-only targets without creating absent roots", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-provider-readonly-"));
+  const missingParent = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-provider-parent-"));
+  const opencodeRoot = path.join(missingParent, ".config", "opencode", "skills");
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(missingParent, { recursive: true, force: true }));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "Office Hours\n");
+
+  await createCatalog(
+    source,
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  codex:
+    kind: codex-home
+    assignment: codex
+    codexHome: /definitely/missing/codex
+    skillsPath: /definitely/missing/codex/skills
+
+compatibility:
+  office-hours:
+    agents:
+      - codex
+`
+  );
+
+  const result = await diff({
+    source,
+    target: "opencode",
+    targetOverrides: {
+      home: missingParent
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.target, "opencode");
+  assert.equal(result.assignment, "opencode");
+  assert.equal(result.installRoot, opencodeRoot);
+  assert.equal(result.entries.length, 0);
+  assert.deepEqual(result.errors, []);
+  await assert.rejects(() => access(opencodeRoot));
+});
+
 test("diff includes installable skill diffs when other skills are blocked", async (t) => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-blocked-installable-"));
   const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-blocked-installable-home-"));

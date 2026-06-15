@@ -109,6 +109,42 @@ test("track records existing matching office-hours and OpenClaw gnhf-postflight 
   assert.equal(statusResult.summary.current, 2);
 });
 
+test("track refuses provider-modeled read-only targets without creating roots", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-provider-src-"));
+  const fakeHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-provider-home-"));
+  const opencodeRoot = path.join(fakeHome, ".config", "opencode", "skills");
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(fakeHome, { recursive: true, force: true }));
+
+  await mkdir(path.join(sourceRoot, "skills", "office-hours"), { recursive: true });
+  await writeFile(path.join(sourceRoot, "skills", "office-hours", "SKILL.md"), "---\nname: office-hours\n---\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+
+assignmentPaths:
+`
+  );
+
+  const result = await track({
+    source: sourceRoot,
+    target: "opencode",
+    targetOverrides: {
+      home: fakeHome
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.installRoot, opencodeRoot);
+  assert.ok(result.errors.some((error) => error.code === "read_only_target"));
+  await assert.rejects(() => stat(opencodeRoot));
+});
+
 test("track refuses canonical gnhf-postflight for Codex slimmer variant targets", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-codex-blocked-src-"));
   const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-codex-blocked-home-"));
