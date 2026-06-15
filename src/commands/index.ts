@@ -69,11 +69,17 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
     }
 
     if (token === "--dry-run") {
+      if (!isFlagAllowedForCommand(args.command, token)) {
+        throw new Error(`Unknown argument: ${token}`);
+      }
       args.dryRun = true;
       continue;
     }
 
     if (token === "--strict") {
+      if (!isFlagAllowedForCommand(args.command, token)) {
+        throw new Error(`Unknown argument: ${token}`);
+      }
       args.strict = true;
       continue;
     }
@@ -95,6 +101,9 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
     }
 
     if (isValueArg(token)) {
+      if (!isFlagAllowedForCommand(args.command, token)) {
+        throw new Error(`Unknown argument: ${token}`);
+      }
       const value = rest[index + 1];
       if (value === undefined || value === "" || value.startsWith("--")) {
         throw new Error(`${token} requires a value`);
@@ -149,4 +158,33 @@ function isKnownCommand(command: string): command is CommandName {
 function isValueArg(token: string): token is `--${ValueFlagName}` {
   return token === "--source" || token === "--target" || token === "--output" || token === "--lock"
     || token === "--artifact" || token === "--receipt";
+}
+
+function isFlagAllowedForCommand(command: CommandName | "help", token: string): boolean {
+  if (command === "help") {
+    return true;
+  }
+
+  switch (token) {
+    case "--source":
+      return command === "plan" || command === "diff" || command === "pack" || command === "import"
+        || command === "validate" || command === "targets" || command === "status" || command === "apply"
+        || command === "track";
+    case "--target":
+      return command === "plan" || command === "diff" || command === "pack" || command === "apply"
+        || command === "track";
+    case "--output":
+      return command === "pack";
+    case "--lock":
+    case "--artifact":
+      return command === "apply";
+    case "--receipt":
+      return command === "rollback";
+    case "--dry-run":
+      return command === "pack";
+    case "--strict":
+      return command === "validate";
+    default:
+      return false;
+  }
 }

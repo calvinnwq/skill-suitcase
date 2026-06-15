@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
@@ -14,6 +14,41 @@ function runCli(args: string[]) {
 function parseJsonOutput(stdout: string): unknown {
   return JSON.parse(stdout.trim());
 }
+
+test("cli rejects unsupported track flags before writing receipts", async (t) => {
+  const sourceRoot = await mkdtemp(join(os.tmpdir(), "skill-suitcase-cli-track-src-"));
+  const targetRoot = await mkdtemp(join(os.tmpdir(), "skill-suitcase-cli-track-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await mkdir(join(sourceRoot, "skills", "office-hours"), { recursive: true });
+  await mkdir(join(targetRoot, "office-hours"), { recursive: true });
+  await writeFile(
+    join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\n\nassignments:\n  openclaw:\n    suitcases:\n      - core\n\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\n`
+  );
+  const skillFile = "---\nname: office-hours\nversion: 2026.06.15\n---\n# Office Hours\n";
+  await writeFile(join(sourceRoot, "skills", "office-hours", "SKILL.md"), skillFile);
+  await writeFile(join(targetRoot, "office-hours", "SKILL.md"), skillFile);
+
+  const result = runCli([
+    "track",
+    "--source",
+    sourceRoot,
+    "--target",
+    "openclaw",
+    "--skill",
+    "office-hours",
+    "--json",
+    "--dry-run"
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr.includes("Unknown argument: --dry-run"), true);
+  assert.equal(result.stderr.includes("Usage:"), true);
+  await assert.rejects(readFile(join(targetRoot, ".skill-suitcase-receipt.json"), "utf8"), /ENOENT/);
+});
 
 test("cli apply requires exactly one approval input", async (t) => {
   const sourceRoot = await mkdtemp(join(os.tmpdir(), "skill-suitcase-cli-apply-missing-input-"));
