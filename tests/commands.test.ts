@@ -82,6 +82,35 @@ test("parseCommandArgs rejects blank track skill filters", () => {
   );
 });
 
+test("parseCommandArgs rejects unsupported known flags before command dispatch", () => {
+  assert.throws(
+    () => parseCommandArgs([
+      "track",
+      "--source",
+      fixtureSource,
+      "--target",
+      "openclaw",
+      "--skill",
+      "office-hours",
+      "--json",
+      "--dry-run"
+    ]),
+    /Unknown argument: --dry-run/
+  );
+
+  assert.throws(
+    () => parseCommandArgs([
+      "validate",
+      "--source",
+      fixtureSource,
+      "--json",
+      "--target",
+      "openclaw"
+    ]),
+    /Unknown argument: --target/
+  );
+});
+
 test("dispatcher routes import and rejects invalid import argument shapes", async () => {
   const success = await dispatchCommand([
     "import",
