@@ -116,6 +116,139 @@ contract.
 `src/shared/` is only for truly shared types and small helpers. Do not turn it
 into a junk drawer.
 
+## Source Of Truth
+
+Skill Suitcase is the source-of-truth manager for approved skill installs. The
+catalog repository, such as `/Users/ngxcalvin/repos/skills`, owns skill source
+files, variant metadata, assignments, and target policy. Agent homes are install
+targets, not canonical source directories.
+
+The durable state model belongs to Skill Suitcase:
+
+- manifests describe approved skills, variants, assignments, and target paths
+- plans and diffs explain what would change before any mutation
+- receipts record ownership, source provenance, install mode, file hashes, and
+  rollback state
+- status decides whether a target is current, missing, dirty, blocked, unknown,
+  or intentionally unmanaged
+- rollback restores or removes what Skill Suitcase installed
+
+External installers or registries may provide useful compatibility data, but
+they must not bypass this model.
+
+## Target Registry Providers
+
+Target resolution should converge on an explicit provider stack. The current
+manifest-defined assignment paths remain the highest-priority source because
+they are reviewed with the catalog and can encode machine-specific intent.
+
+Provider priority:
+
+1. Local CLI overrides, such as `--codex-home`, `--codex-skills`, and
+   `--claude-skills`.
+2. Manifest-defined `assignmentPaths`.
+3. Native Skill Suitcase adapters for targets with richer semantics or local
+   policy.
+4. A vendored or generated compatibility snapshot derived from `skills.sh`
+   agent mappings.
+
+The `skills.sh` layer is a compatibility/reference provider, not the canonical
+authoring model. It can reduce duplicated agent path knowledge for broad target
+coverage, such as OpenCode and Pi, but Skill Suitcase still owns planning,
+receipts, dirty detection, rollback, and approval boundaries.
+
+Do not call `npx skills` from normal target discovery, planning, status, diff,
+apply, or track paths. If a future issue adds optional `skills.sh` installer
+delegation, it must be wrapped behind a narrow adapter and reconciled back into
+Skill Suitcase receipts before the install is considered managed.
+
+Provider data must be deterministic in tests. Prefer a vendored/generated
+snapshot over runtime network or package execution. Snapshot refreshes should be
+reviewable like other source changes.
+
+## Install Modes
+
+Skill Suitcase supports copy-style installs today. Future install modes should
+be modeled explicitly in plans, receipts, status, and rollback. Do not infer an
+install mode from filesystem shape alone when a receipt can state it directly.
+
+The intended symlink direction is:
+
+```txt
+agent skill path -> catalog repo source path
+```
+
+Example:
+
+```txt
+~/.codex/skills/my-skill -> /Users/ngxcalvin/repos/skills/skills/my-skill
+```
+
+The reverse direction is not allowed for managed installs. The catalog repo must
+not point back into an agent home as its source of truth, because that makes Git
+history, review, portability, dirty detection, and rollback ambiguous.
+
+Symlink mode must treat these states as distinct:
+
+- correct symlink to the selected source path
+- broken symlink
+- symlink to the wrong target
+- real directory where symlink mode expected a link
+- matching real directory that can be tracked or converted only with approval
+- unmanaged extras outside the approved plan
+
+Rollback for symlink installs should remove a Skill Suitcase-created symlink or
+restore the previous target state recorded in the receipt. It must not delete a
+real directory that was not first captured as rollback state.
+
+## Command Semantics
+
+Keep the command verbs separate:
+
+- `track` adopts an existing target that already matches the selected catalog
+  source. It writes receipts only and does not rewrite skill files.
+- `apply` installs or updates skills from an approved plan lock or artifact.
+  Future symlink support belongs here as an explicit install mode, not as an
+  implicit side effect.
+- `rollback` reverses a prior `apply` using receipt rollback state.
+- `promote` or `import-target` is the future workflow for target-created skills
+  that should become repo-owned.
+
+A target-created skill must not be handled by `track` unless it already exists
+in the catalog and matches the selected source. For a new skill created inside
+an agent home, the future promote/import-target workflow should:
+
+1. inspect the target skill directory read-only
+2. copy the skill into the catalog repo, or an approved variant source path
+3. update catalog manifest metadata only after approval
+4. hash-verify the copied repo source against the original target content
+5. replace the agent-home directory with a symlink back to the repo source
+6. write a receipt that records source provenance, install mode, and rollback
+   state
+
+Promotion must preserve a rollback path. Do not remove the original target
+directory before the repo copy has been verified. If a conflict exists, such as
+an existing repo skill name or unsafe path, report it as a machine-readable
+planning error before mutation.
+
+## Mutation Boundaries
+
+Read-only commands may discover provider data and report missing targets, but
+they must not create target roots, receipts, symlinks, or source repo files.
+
+Live mutations require explicit approval input or an approved command mode:
+
+- installing or replacing target files
+- creating or replacing symlinks in an agent home
+- writing receipts
+- copying target-created skills into the catalog repo
+- editing manifest metadata during promotion
+- deleting or trashing prior target state
+
+The default path for new platform coverage is read-only first: `targets`,
+`status`, and `diff` should prove the target model before `track`, `apply`, or
+`promote` touches live paths.
+
 ## Import Direction
 
 Default dependency direction:
