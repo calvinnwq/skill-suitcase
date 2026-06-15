@@ -77,11 +77,16 @@ assignmentPaths:
     kind: openclaw-skills-root
     assignment: openclaw
     path: /definitely/missing/openclaw/skills
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: /definitely/wrong/codex
     skillsPath: /definitely/wrong/codex/skills
+  workspace-codex:
+    kind: codex-home
+    assignment: codex
+    codexHome: /definitely/missing/workspace-codex
+    skillsPath: /definitely/missing/workspace-codex/skills
 
 compatibility:
   office-hours:
@@ -93,7 +98,7 @@ compatibility:
 
   const result = await status({
     source: sourceRoot,
-    target: "codex-global",
+    target: "codex",
     targetOverrides: { codexHome }
   });
 
@@ -108,7 +113,7 @@ compatibility:
     blocked: 0
   });
   assert.equal(result.assignments.length, 1);
-  assert.equal(result.assignments[0]?.assignmentPath, "codex-global");
+  assert.equal(result.assignments[0]?.assignmentPath, "codex");
   assert.equal(result.assignments[0]?.installRoot, codexSkills);
 });
 
@@ -1345,7 +1350,7 @@ assignments:
       - core
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     skillsPath: ${installRoot}
@@ -1398,7 +1403,7 @@ assignments:
       - builder
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${codexHome}
@@ -1471,7 +1476,7 @@ assignments:
       - core
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${codexHome}
@@ -1483,7 +1488,7 @@ assignmentPaths:
   assert.equal(result.ok, false);
   assert.equal(result.statuses.length, 0);
   assert.equal(firstItem(result.errors, "result.errors").code, "invalid_assignment_path");
-  assert.equal(firstItem(result.errors, "result.errors").path, "assignmentPaths.codex-global.skillsPath");
+  assert.equal(firstItem(result.errors, "result.errors").path, "assignmentPaths.codex.skillsPath");
 });
 
 test("status reports missing install roots as assignment errors", async (t) => {

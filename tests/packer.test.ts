@@ -35,10 +35,10 @@ test("dry-run pack follows target assignment scope", async () => {
 });
 
 test("dry-run pack accepts assignment path target selectors", async () => {
-  const result = await pack({ source: fixtureSource, target: "codex-global", dryRun: true });
+  const result = await pack({ source: fixtureSource, target: "codex", dryRun: true });
 
   assert.equal(result.ok, true);
-  assert.equal(result.target, "codex-global");
+  assert.equal(result.target, "codex");
   assert.deepEqual(
     result.planned.map((item) => item.skill),
     ["office-hours"]
@@ -242,7 +242,7 @@ assignments:
       - builder
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${path.join(source, "codex")}
@@ -269,7 +269,7 @@ variants:
 `
   );
 
-  const result = await pack({ source, target: "codex-global", dryRun: true });
+  const result = await pack({ source, target: "codex", dryRun: true });
 
   assert.equal(result.ok, true);
   assert.equal(result.planned[0]?.variant, "codex");

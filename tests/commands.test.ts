@@ -72,7 +72,7 @@ test("parseCommandArgs supports local target override flags", () => {
     "--source",
     fixtureSource,
     "--target",
-    "codex-global",
+    "codex",
     "--codex-home",
     "/tmp/local-codex",
     "--codex-skills",
@@ -83,7 +83,7 @@ test("parseCommandArgs supports local target override flags", () => {
   ]), {
     command: "status",
     source: fixtureSource,
-    target: "codex-global",
+    target: "codex",
     codexHome: "/tmp/local-codex",
     codexSkills: "/tmp/local-codex-skills",
     claudeSkills: "/tmp/local-claude-skills",

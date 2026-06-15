@@ -28,7 +28,7 @@ test("inspects the fixture catalog as an importable source", async () => {
     referencedSkills: 3,
     suitcases: 2,
     assignments: 4,
-    assignmentPaths: 5,
+    assignmentPaths: 4,
     compatibilityEntries: 3,
     variantEntries: 3,
     warnings: 0,
@@ -284,7 +284,7 @@ assignments:
       - core
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     codexHome: /tmp/codex
     skillsPath: /tmp/codex/skills
@@ -325,7 +325,7 @@ assignments:
       - core
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     codexHome: ${liveHome}
     skillsPath: ${liveSkills}
@@ -381,7 +381,7 @@ assignments:
       - core
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     codexHome: /tmp/codex
     skillsPath: /tmp/codex/skills
@@ -435,7 +435,7 @@ assignments:
       - core
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     codexHome: /tmp/codex
     skillsPath: /tmp/codex/skills

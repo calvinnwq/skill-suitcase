@@ -12,19 +12,18 @@ test("lists all assignment paths with stability fields from the fixture catalog"
   const targetIds = result.targets.map((entry) => entry.id);
 
   assert.equal(result.ok, true);
-  assert.equal(result.targets.length, 5);
+  assert.equal(result.targets.length, 4);
   assert.deepEqual(targetIds.sort(), [
-    "claude-global",
-    "codex-global",
+    "claude",
+    "codex",
     "openclaw",
-    "openclaw-kody-codex",
-    "openclaw-workspace-codex"
+    "openclaw-codex"
   ]);
   assert.deepEqual(result.findings, []);
 
-  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex");
   if (codexGlobal === undefined) {
-    throw new Error("Expected codex-global target entry in fixture output.");
+    throw new Error("Expected codex target entry in fixture output.");
   }
   assert.equal(codexGlobal.path, "/tmp/codex");
   assert.equal(codexGlobal.codexHome, "/tmp/codex");
@@ -78,9 +77,9 @@ test("local target overrides replace global Codex and Claude install paths", asy
     }
   });
 
-  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
-  const kodyCodex = result.targets.find((entry) => entry.id === "openclaw-kody-codex");
-  const claudeGlobal = result.targets.find((entry) => entry.id === "claude-global");
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex");
+  const kodyCodex = result.targets.find((entry) => entry.id === "openclaw-codex");
+  const claudeGlobal = result.targets.find((entry) => entry.id === "claude");
 
   assert.ok(codexGlobal);
   assert.equal(codexGlobal.codexHome, codexHome);
@@ -110,7 +109,7 @@ test("--codex-skills alone overrides only skillsPath and preserves codexHome", a
     }
   });
 
-  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex");
 
   assert.ok(codexGlobal);
   assert.equal(codexGlobal.codexHome, "/tmp/codex");
@@ -129,7 +128,7 @@ test("--codex-home alone overrides codexHome and defaults skillsPath to <home>/s
     }
   });
 
-  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex");
 
   assert.ok(codexGlobal);
   assert.equal(codexGlobal.codexHome, codexHome);
@@ -204,7 +203,7 @@ assignments:
       - core
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     codexHome: ${source}
     assignment: codex
@@ -212,18 +211,18 @@ assignmentPaths:
   );
 
   const result = await targets({ source });
-  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex");
 
   assert.equal(result.ok, false);
   if (codexGlobal === undefined) {
-    throw new Error("Expected codex-global target entry in fixture output.");
+    throw new Error("Expected codex target entry in fixture output.");
   }
   assert.equal(codexGlobal.safety.classification, "invalid");
   assert.ok(
     result.findings.some(
       (finding) =>
         finding.code === "invalid_assignment_path" &&
-        finding.path === "assignmentPaths.codex-global.skillsPath"
+        finding.path === "assignmentPaths.codex.skillsPath"
     )
   );
 });

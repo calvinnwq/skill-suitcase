@@ -68,10 +68,10 @@ test("resolves install roots and missing required adapter fields deterministical
 test("derives compatibility aliases from explicit platform adapter metadata", () => {
   assert.deepEqual(
     platformCompatibilityNames({
-      assignment: "openclaw-kody-codex",
+      assignment: "openclaw-codex",
       kind: "codex-home"
     }),
-    ["openclaw-kody-codex", "codex"]
+    ["openclaw-codex", "codex"]
   );
   assert.deepEqual(
     platformCompatibilityNames({

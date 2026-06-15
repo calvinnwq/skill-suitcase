@@ -34,7 +34,7 @@ node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --json
 node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
-node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --target codex-global --codex-home ~/.codex --json
+node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --target codex --codex-home ~/.codex --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --artifact /tmp/skill-suitcase-bundle.json --json
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
@@ -55,15 +55,15 @@ installable skills.
 Targets currently exercised against fixture #1:
 
 - `openclaw`
-- `codex` / `codex-global`
-- `openclaw-kody-codex`
-- `openclaw-workspace-codex`
-- `claude` / `claude-global`
+- `codex`
+- `openclaw-codex`
+- `claude`
 
 Platform adapters are explicit. `openclaw-skills-root` uses the declared `path`
-as the workspace skill root. `codex-home` and `nested-home-codex` install into
-`skillsPath` without assuming a universal Codex home. `claude-skills-root` uses
-the declared `path`.
+as the workspace skill root. `codex-home` installs into `skillsPath` without
+assuming a universal Codex home. `claude-skills-root` uses the declared `path`.
+The `nested-home-codex` adapter is still supported for legacy nested homes, but
+it is not part of the current default target set.
 
 Smoke-test discovery with:
 
@@ -77,17 +77,17 @@ catalog:
 
 ```bash
 node dist/src/cli.js targets --source /path/to/skills-catalog --codex-home ~/.codex --claude-skills ~/.claude/skills --json
-node dist/src/cli.js status --source /path/to/skills-catalog --target codex-global --codex-home ~/.codex --json
-node dist/src/cli.js diff --source /path/to/skills-catalog --target claude-global --claude-skills ~/.claude/skills --json
+node dist/src/cli.js status --source /path/to/skills-catalog --target codex --codex-home ~/.codex --json
+node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --claude-skills ~/.claude/skills --json
 ```
 
-`--codex-home <dir>` overrides the `codex-global` `codexHome` and defaults its
+`--codex-home <dir>` overrides the `codex` `codexHome` and defaults its
 `skillsPath` to `<dir>/skills`. `--codex-skills <dir>` can override that skills
-path directly. `--claude-skills <dir>` overrides the `claude-global` skills root.
+path directly. `--claude-skills <dir>` overrides the `claude` skills root.
 These flags work with `targets`, `status`, `diff`, `pack`, `apply`, and `track`.
-Use `status --target <target>` with an assignment path id or assignment name to
-check one local target without requiring unrelated install roots, such as
-OpenClaw paths, to exist.
+Use `status --target <target>` with an assignment path id or assignment name. If
+an exact assignment path id exists, it wins, so `--target codex` means the global
+Codex target rather than every target assigned to Codex.
 
 See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
@@ -113,33 +113,33 @@ node "$CLI" validate --source "$SRC" --strict --json
 node "$CLI" plan --source "$SRC" --target codex --json
 node "$CLI" plan --source "$SRC" --target claude --json
 
-node "$CLI" status --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --json
-node "$CLI" diff --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --json
+node "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+node "$CLI" diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 
-node "$CLI" status --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --json
-node "$CLI" diff --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --json
+node "$CLI" status --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
+node "$CLI" diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
 ```
 
 If matching skills already exist, adopt them without rewriting files:
 
 ```bash
-node "$CLI" track --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --skill office-hours --skill gnhf-postflight --json
-node "$CLI" track --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --skill office-hours --skill gnhf-postflight --json
+node "$CLI" track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --skill gnhf-postflight --json
+node "$CLI" track --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --skill office-hours --skill gnhf-postflight --json
 ```
 
 Then apply missing or behind skills from a temporary bundle:
 
 ```bash
 TMP=$(mktemp -d /tmp/skill-suitcase-codex.XXXXXX)
-node "$CLI" pack --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --output "$TMP" --json
+node "$CLI" pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$TMP" --json
 ARTIFACT=$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)
-node "$CLI" apply --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
+node "$CLI" apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
 rm -rf "$TMP"
 
 TMP=$(mktemp -d /tmp/skill-suitcase-claude.XXXXXX)
-node "$CLI" pack --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --output "$TMP" --json
+node "$CLI" pack --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --output "$TMP" --json
 ARTIFACT=$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)
-node "$CLI" apply --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --artifact "$ARTIFACT" --json
+node "$CLI" apply --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --artifact "$ARTIFACT" --json
 rm -rf "$TMP"
 ```
 
@@ -369,7 +369,7 @@ file-level `entries` and a summary:
 ```
 
 For `diff`, `target` may be either an assignment name (`openclaw`) or an
-`assignmentPath` id (`codex-global`). `assignment` is the resolved assignment
+`assignmentPath` id (`codex`). `assignment` is the resolved assignment
 name used to produce the package plan, while `installRoot` is the concrete target
 skills directory used for file comparison.
 
@@ -397,7 +397,7 @@ directory and writes no receipts.
 
 Like `diff`, `pack` resolves `--target` to an assignment plan, so `--target` may
 be either an assignment name (`openclaw`) or an `assignmentPath` id
-(`codex-global`). The resolved assignment drives the plan, while the output and
+(`codex`). The resolved assignment drives the plan, while the output and
 stored manifest `target` field echoes the value you passed.
 
 ```json
@@ -482,7 +482,7 @@ Retention and cleanup:
 
 `targets` returns assignment target discovery details instead of install plans.
 Local target overrides are applied before discovery, so the returned
-`codex-global` and `claude-global` paths reflect any override flags passed to
+`codex` and `claude` paths reflect any override flags passed to
 the command:
 
 ```json
@@ -491,8 +491,8 @@ the command:
   "source": "/Users/ngxcalvin/repos/skills",
   "targets": [
     {
-      "id": "codex-global",
-      "name": "codex-global",
+      "id": "codex",
+      "name": "codex",
       "assignment": "codex",
       "kind": "codex-home",
       "path": "/tmp/codex",
@@ -525,7 +525,8 @@ assignment plans, reads each install root and optional
 `.skill-suitcase-receipt.json` receipt (or `.skills-sync.json` for migration
 compatibility), and reports one status per planned or blocked skill. Pass
 `--target <target>` to limit the walk to matching assignment path ids or
-assignment names. It uses `path` for `openclaw-skills-root` and
+assignment names. Exact assignment path ids win over assignment-name expansion.
+It uses `path` for `openclaw-skills-root` and
 `claude-skills-root` entries, and `skillsPath` for `codex-home` and
 `nested-home-codex` entries. Install roots must already exist.
 
@@ -536,7 +537,7 @@ assignment names. It uses `path` for `openclaw-skills-root` and
   "manifestPath": "/Users/ngxcalvin/repos/skills/skill-suitcase.yaml",
   "assignments": [
     {
-      "assignmentPath": "codex-global",
+      "assignmentPath": "codex",
       "assignment": "codex",
       "kind": "codex-home",
       "installRoot": "/tmp/codex/skills",
@@ -544,7 +545,7 @@ assignment names. It uses `path` for `openclaw-skills-root` and
       "statuses": [
         {
           "assignment": "codex",
-          "assignmentPath": "codex-global",
+          "assignmentPath": "codex",
           "kind": "codex-home",
           "skill": "office-hours",
           "status": "current",
@@ -566,7 +567,7 @@ assignment names. It uses `path` for `openclaw-skills-root` and
   "statuses": [
     {
       "assignment": "codex",
-      "assignmentPath": "codex-global",
+      "assignmentPath": "codex",
       "kind": "codex-home",
       "skill": "office-hours",
       "status": "current",

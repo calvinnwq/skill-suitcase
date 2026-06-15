@@ -134,7 +134,7 @@ assignments:
       - builder
 
 assignmentPaths:
-  codex-global:
+  codex:
     kind: codex-home
     assignment: codex
     codexHome: ${codexHome}
@@ -150,7 +150,7 @@ compatibility:
 `
   );
 
-  const result = await track({ source: sourceRoot, target: "codex-global" });
+  const result = await track({ source: sourceRoot, target: "codex" });
 
   assert.equal(result.ok, false);
   assert.equal(result.errors.some((error) => error.code === "blocked_skill"), true);
@@ -341,12 +341,12 @@ test("targeted track refuses blocked and non-planned selected skills", async (t)
   await writeFile(path.join(skillsPath, "gnhf-postflight", "SKILL.md"), "# Slim Codex variant\n");
   await writeFile(
     path.join(sourceRoot, "skill-suitcase.yaml"),
-    `suitcases:\n  builder:\n    skills:\n      - gnhf-postflight\n\nassignments:\n  codex:\n    suitcases:\n      - builder\n\nassignmentPaths:\n  codex-global:\n    kind: codex-home\n    assignment: codex\n    codexHome: ${codexHome}\n    skillsPath: ${skillsPath}\n\ncompatibility:\n  gnhf-postflight:\n    agents:\n      - openclaw\n    variant: canonical\n    blockedAgents:\n      codex: Codex must use the slimmer platform variant.\n`
+    `suitcases:\n  builder:\n    skills:\n      - gnhf-postflight\n\nassignments:\n  codex:\n    suitcases:\n      - builder\n\nassignmentPaths:\n  codex:\n    kind: codex-home\n    assignment: codex\n    codexHome: ${codexHome}\n    skillsPath: ${skillsPath}\n\ncompatibility:\n  gnhf-postflight:\n    agents:\n      - openclaw\n    variant: canonical\n    blockedAgents:\n      codex: Codex must use the slimmer platform variant.\n`
   );
 
   const result = await track({
     source: sourceRoot,
-    target: "codex-global",
+    target: "codex",
     skills: ["gnhf-postflight", "office-hours"]
   });
 
