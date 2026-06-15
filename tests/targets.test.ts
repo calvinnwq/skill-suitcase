@@ -12,12 +12,14 @@ test("lists all assignment paths with stability fields from the fixture catalog"
   const targetIds = result.targets.map((entry) => entry.id);
 
   assert.equal(result.ok, true);
-  assert.equal(result.targets.length, 4);
+  assert.equal(result.targets.length, 6);
   assert.deepEqual(targetIds.sort(), [
     "claude",
     "codex",
     "openclaw",
-    "openclaw-codex"
+    "openclaw-codex",
+    "opencode",
+    "pi"
   ]);
   assert.deepEqual(result.findings, []);
 
@@ -48,6 +50,37 @@ test("lists all assignment paths with stability fields from the fixture catalog"
     }
   });
 
+  const opencode = result.targets.find((entry) => entry.id === "opencode");
+  const pi = result.targets.find((entry) => entry.id === "pi");
+  assert.ok(opencode);
+  assert.equal(opencode.assignment, "opencode");
+  assert.equal(opencode.kind, "opencode-skills-root");
+  assert.equal(opencode.path?.endsWith("/.config/opencode/skills"), true);
+  assert.equal(opencode.safety.classification, "missing");
+  assert.deepEqual(opencode.platform, {
+    adapter: "opencode",
+    installRoot: opencode.path,
+    compatibility: ["opencode"],
+    metadata: {
+      readOnly: true,
+      skillsShCompatibility: true
+    }
+  });
+  assert.ok(pi);
+  assert.equal(pi.assignment, "pi");
+  assert.equal(pi.kind, "pi-skills-root");
+  assert.equal(pi.path?.endsWith("/.pi/agent/skills"), true);
+  assert.equal(pi.safety.classification, "missing");
+  assert.deepEqual(pi.platform, {
+    adapter: "pi",
+    installRoot: pi.path,
+    compatibility: ["pi"],
+    metadata: {
+      readOnly: true,
+      skillsShCompatibility: true
+    }
+  });
+
   for (const entry of result.targets) {
     assert.equal(typeof entry.id, "string");
     assert.equal(typeof entry.name, "string");
@@ -58,6 +91,47 @@ test("lists all assignment paths with stability fields from the fixture catalog"
     assert.ok(typeof entry.exists.skillsPath === "boolean");
     assert.ok(["live-install-root", "missing", "invalid"].includes(entry.safety.classification));
   }
+});
+
+test("manifest assignment paths override provider default roots", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-provider-override-"));
+  const customOpenCodeRoot = path.join(source, "custom-opencode", "skills");
+  await mkdir(customOpenCodeRoot, { recursive: true });
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  opencode:
+    suitcases:
+      - core
+
+assignmentPaths:
+  opencode:
+    kind: opencode-skills-root
+    assignment: opencode
+    path: ${customOpenCodeRoot}
+`
+  );
+
+  const result = await targets({ source });
+  const opencode = result.targets.find((entry) => entry.id === "opencode");
+  const pi = result.targets.find((entry) => entry.id === "pi");
+
+  assert.equal(result.ok, true);
+  assert.ok(opencode);
+  assert.equal(opencode.path, customOpenCodeRoot);
+  assert.equal(opencode.exists.path, true);
+  assert.equal(opencode.safety.classification, "live-install-root");
+  assert.deepEqual(opencode.platform?.metadata, {
+    readOnly: true,
+    skillsShCompatibility: true
+  });
+  assert.ok(pi);
+  assert.equal(pi.safety.classification, "missing");
 });
 
 test("local target overrides replace global Codex and Claude install paths", async (t) => {
@@ -173,7 +247,7 @@ assignmentPaths:
   const findings = result.findings.map((item) => item.code);
 
   assert.equal(result.ok, false);
-  assert.equal(result.targets.length, 4);
+  assert.equal(result.targets.length, 6);
   assert.ok(findings.includes("unknown_assignment_path_target"));
   assert.ok(findings.includes("invalid_assignment_path"));
 

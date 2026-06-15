@@ -5,6 +5,10 @@ import {
   resolvePlatformAdapter,
   resolvePlatformInstallRoot
 } from "../src/core/platform-adapters.js";
+import {
+  resolveTargetRegistryEntry,
+  resolveTargetRegistryEntries
+} from "../src/core/catalog/target-registry.js";
 
 test("resolves explicit platform adapters for declared assignment path kinds", () => {
   const openclaw = resolvePlatformAdapter("openclaw-skills-root");
@@ -87,4 +91,47 @@ test("derives compatibility aliases from explicit platform adapter metadata", ()
     }),
     ["portable"]
   );
+});
+
+test("resolves deterministic skills.sh-derived target registry provider entries", () => {
+  const entries = resolveTargetRegistryEntries({
+    assignments: {},
+    assignmentPaths: {}
+  });
+  const opencode = resolveTargetRegistryEntry("opencode");
+  const pi = resolveTargetRegistryEntry("pi");
+
+  assert.ok(opencode);
+  assert.ok(pi);
+  assert.equal(opencode.kind, "opencode-skills-root");
+  assert.equal(opencode.path?.endsWith("/.config/opencode/skills"), true);
+  assert.equal(opencode.readOnly, true);
+  assert.equal(opencode.provider, "skills.sh");
+  assert.equal(pi.kind, "pi-skills-root");
+  assert.equal(pi.path?.endsWith("/.pi/agent/skills"), true);
+  assert.equal(pi.readOnly, true);
+  assert.equal(pi.provider, "skills.sh");
+  assert.deepEqual(entries.map((entry) => entry.id), ["opencode", "pi"]);
+  assert.equal(resolveTargetRegistryEntry("not-a-real-agent"), null);
+});
+
+test("manifest assignment paths outrank skills.sh provider defaults", () => {
+  const entries = resolveTargetRegistryEntries({
+    assignments: {
+      opencode: { suitcases: ["core"] }
+    },
+    assignmentPaths: {
+      opencode: {
+        kind: "opencode-skills-root",
+        assignment: "opencode",
+        path: "/tmp/custom-opencode-skills"
+      }
+    }
+  });
+
+  const opencode = entries.find((entry) => entry.id === "opencode");
+  assert.ok(opencode);
+  assert.equal(opencode.path, "/tmp/custom-opencode-skills");
+  assert.equal(opencode.source, "manifest");
+  assert.equal(opencode.readOnly, true);
 });

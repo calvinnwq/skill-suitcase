@@ -6,6 +6,7 @@ import { readTextFile } from "../../adapters/filesystem.js";
 export type Catalog = ReturnType<typeof parseSuitcaseManifest>;
 
 export type TargetOverrides = {
+  home?: string;
   codexHome?: string;
   codexSkills?: string;
   claudeSkills?: string;
@@ -80,5 +81,6 @@ function applyTargetOverrides(manifest: Catalog, overrides: TargetOverrides | un
 function isEmptyTargetOverrides(overrides: TargetOverrides): boolean {
   return overrides.codexHome === undefined &&
     overrides.codexSkills === undefined &&
-    overrides.claudeSkills === undefined;
+    overrides.claudeSkills === undefined &&
+    overrides.home === undefined;
 }

@@ -1,6 +1,10 @@
 import { stat } from "node:fs/promises";
 import { loadCatalog, type Catalog, type TargetOverrides } from "./index.js";
 import {
+  resolveTargetRegistryEntries,
+  type TargetRegistryEntry
+} from "./target-registry.js";
+import {
   platformPathFields,
   resolvePlatformAdapter
 } from "../platform-adapters.js";
@@ -82,8 +86,8 @@ export async function targets({ source, targetOverrides }: TargetInput): Promise
     };
   }
 
-  for (const [targetId, assignmentPath] of Object.entries(assignmentPaths)) {
-    discovered.push(await describeTarget(targetId, assignmentPath, manifest, findings));
+  for (const registryEntry of resolveTargetRegistryEntries(manifest, targetOverrides)) {
+    discovered.push(await describeTarget(registryEntry, manifest, findings));
   }
 
   return {
@@ -96,14 +100,15 @@ export async function targets({ source, targetOverrides }: TargetInput): Promise
 }
 
 async function describeTarget(
-  targetId: string,
-  assignmentPath: unknown,
+  registryEntry: TargetRegistryEntry,
   manifest: Catalog,
   findings: TargetFinding[]
 ): Promise<Target> {
+  const targetId = registryEntry.id;
+  const assignmentPath = registryEntry.assignmentPath;
   const target: Target = {
     id: targetId,
-    name: targetId,
+    name: registryEntry.name,
     assignment: null,
     kind: null,
     path: null,
@@ -123,18 +128,6 @@ async function describeTarget(
     }
   };
 
-  if (!isRecord(assignmentPath)) {
-    findings.push(
-      error(
-        "invalid_assignment_path",
-        `Assignment path ${targetId} must be an object mapping of target details.`,
-        `assignmentPaths.${targetId}`
-      )
-    );
-    target.safety.reason = "assignment path entry is malformed";
-    return target;
-  }
-
   const assignment = normalizeValue(assignmentPath.assignment);
   const rawKind = normalizeValue(assignmentPath.kind);
   const kind = rawKind;
@@ -149,7 +142,7 @@ async function describeTarget(
         `assignmentPaths.${targetId}.assignment`
       )
     );
-  } else if (!manifest.assignments[assignment]) {
+  } else if (!manifest.assignments[assignment] && !registryEntry.readOnly) {
     findings.push(
       error(
         "unknown_assignment_path_target",

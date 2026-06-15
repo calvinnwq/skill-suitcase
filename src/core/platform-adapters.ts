@@ -1,12 +1,14 @@
 export type PlatformPathField = "path" | "home" | "codexHome" | "skillsPath";
 
-export type PlatformAdapterId = "openclaw" | "codex" | "claude";
+export type PlatformAdapterId = "openclaw" | "codex" | "claude" | "opencode" | "pi";
 
 export type PlatformAdapterKind =
   | "openclaw-skills-root"
   | "codex-home"
   | "nested-home-codex"
-  | "claude-skills-root";
+  | "claude-skills-root"
+  | "opencode-skills-root"
+  | "pi-skills-root";
 
 export type PlatformAdapter = {
   id: PlatformAdapterId;
@@ -17,6 +19,8 @@ export type PlatformAdapter = {
   metadata: {
     workspaceSkillRoot?: boolean;
     nestedHome?: boolean;
+    readOnly?: boolean;
+    skillsShCompatibility?: boolean;
   };
 };
 
@@ -63,6 +67,28 @@ const PLATFORM_ADAPTERS: Record<PlatformAdapterKind, PlatformAdapter> = {
     requiredFields: ["path"],
     compatibilityNames: ["claude"],
     metadata: {}
+  },
+  "opencode-skills-root": {
+    id: "opencode",
+    kind: "opencode-skills-root",
+    installRootField: "path",
+    requiredFields: ["path"],
+    compatibilityNames: ["opencode"],
+    metadata: {
+      readOnly: true,
+      skillsShCompatibility: true
+    }
+  },
+  "pi-skills-root": {
+    id: "pi",
+    kind: "pi-skills-root",
+    installRootField: "path",
+    requiredFields: ["path"],
+    compatibilityNames: ["pi"],
+    metadata: {
+      readOnly: true,
+      skillsShCompatibility: true
+    }
   }
 };
 
