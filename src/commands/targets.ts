@@ -1,5 +1,6 @@
 import { targets } from "../core/catalog/targets.js";
 import { hasJson, hasNoTarget, hasSource, requireStringValue } from "./helpers.js";
+import { targetOverridesFromArgs } from "./target-overrides.js";
 import type { CommandModule } from "./types.js";
 
 export const targetsCommand: CommandModule = {
@@ -8,6 +9,9 @@ export const targetsCommand: CommandModule = {
     return args.command === "targets" && hasSource(args) && hasNoTarget(args) && hasJson(args);
   },
   async run(args) {
-    return targets({ source: requireStringValue("source", args.source) });
+    return targets({
+      source: requireStringValue("source", args.source),
+      targetOverrides: targetOverridesFromArgs(args)
+    });
   }
 };

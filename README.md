@@ -34,6 +34,7 @@ node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --json
 node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
+node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --target codex-global --codex-home ~/.codex --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --artifact /tmp/skill-suitcase-bundle.json --json
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
@@ -70,9 +71,79 @@ Smoke-test discovery with:
 node dist/src/cli.js targets --source /path/to/skills-catalog --json
 ```
 
+On machines where the shared catalog's checked-in install paths do not match
+the local runtime homes, pass local target overrides instead of editing the
+catalog:
+
+```bash
+node dist/src/cli.js targets --source /path/to/skills-catalog --codex-home ~/.codex --claude-skills ~/.claude/skills --json
+node dist/src/cli.js status --source /path/to/skills-catalog --target codex-global --codex-home ~/.codex --json
+node dist/src/cli.js diff --source /path/to/skills-catalog --target claude-global --claude-skills ~/.claude/skills --json
+```
+
+`--codex-home <dir>` overrides the `codex-global` `codexHome` and defaults its
+`skillsPath` to `<dir>/skills`. `--codex-skills <dir>` can override that skills
+path directly. `--claude-skills <dir>` overrides the `claude-global` skills root.
+These flags work with `targets`, `status`, `diff`, `pack`, `apply`, and `track`.
+Use `status --target <assignment-path>` to check one local target without
+requiring unrelated install roots, such as OpenClaw paths, to exist.
+
 See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
 canonical bundle versus platform variant rules.
+
+## Fresh Codex/Claude Machine
+
+For a machine with Codex and Claude but no OpenClaw, keep the catalog as the
+shared source of truth and supply local paths at command time:
+
+```bash
+cd ~/repos/skill-suitcase
+pnpm install
+pnpm build
+
+export SRC="$HOME/repos/skills"
+export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
+
+mkdir -p "$HOME/.codex/skills" "$HOME/.claude/skills"
+
+node "$CLI" import --source "$SRC" --json
+node "$CLI" validate --source "$SRC" --strict --json
+node "$CLI" plan --source "$SRC" --target codex --json
+node "$CLI" plan --source "$SRC" --target claude --json
+
+node "$CLI" status --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --json
+node "$CLI" diff --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --json
+
+node "$CLI" status --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --json
+node "$CLI" diff --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --json
+```
+
+If matching skills already exist, adopt them without rewriting files:
+
+```bash
+node "$CLI" track --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --skill office-hours --skill gnhf-postflight --json
+node "$CLI" track --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --skill office-hours --skill gnhf-postflight --json
+```
+
+Then apply missing or behind skills from a temporary bundle:
+
+```bash
+TMP=$(mktemp -d /tmp/skill-suitcase-codex.XXXXXX)
+node "$CLI" pack --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --output "$TMP" --json
+ARTIFACT=$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)
+node "$CLI" apply --source "$SRC" --target codex-global --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
+rm -rf "$TMP"
+
+TMP=$(mktemp -d /tmp/skill-suitcase-claude.XXXXXX)
+node "$CLI" pack --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --output "$TMP" --json
+ARTIFACT=$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)
+node "$CLI" apply --source "$SRC" --target claude-global --claude-skills "$HOME/.claude/skills" --artifact "$ARTIFACT" --json
+rm -rf "$TMP"
+```
+
+Final verification should show no creates, updates, dirty files, unknown entries,
+or blocked skills for the local targets.
 
 ## `import` Output
 

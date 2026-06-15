@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assessPlanLock, type PlanLock, PLAN_LOCK_SCHEMA } from "../planning/plan-lock.js";
+import type { TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
 import { RECEIPT_FILE, buildInstallRecord, buildInstalledFiles, upsertAndWriteReceipt } from "../receipts/index.js";
 import { status } from "../status/index.js";
@@ -11,6 +12,7 @@ type ApplyInput = {
   target: string;
   lock?: string;
   artifact?: string;
+  targetOverrides?: TargetOverrides | undefined;
   __test?: {
     failAfterSuccessfulWrites?: number;
     failAfterReceiptWrites?: number;
@@ -124,6 +126,7 @@ export async function apply({
   target,
   lock,
   artifact,
+  targetOverrides,
   __test
 }: ApplyInput): Promise<ApplyResult> {
   if (!source) {
@@ -170,7 +173,7 @@ export async function apply({
     });
   }
 
-  const diffResult = await diff({ source, target }) as DiffForApply;
+  const diffResult = await diff({ source, target, targetOverrides }) as DiffForApply;
   if (!diffResult.ok) {
     return failure({
       source: diffResult.source,
@@ -203,7 +206,11 @@ export async function apply({
     });
   }
 
-  const preStatus = await status({ source: diffResult.source });
+  const preStatus = await status({
+    source: diffResult.source,
+    target,
+    targetOverrides
+  });
   const targetAssignment = diffResult.assignment ?? target;
   const targetStatuses = preStatus.statuses.filter(
     (entry) => entry.target === installRoot && entry.assignment === targetAssignment
@@ -496,7 +503,11 @@ export async function apply({
 
   let postApplyStatus: StatusResult | null = null;
   try {
-    postApplyStatus = await status({ source: diffResult.source });
+    postApplyStatus = await status({
+      source: diffResult.source,
+      target,
+      targetOverrides
+    });
   } catch {
     postApplyStatus = null;
   }

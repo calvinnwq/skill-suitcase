@@ -5,13 +5,22 @@ import { readTextFile } from "../../adapters/filesystem.js";
 
 export type Catalog = ReturnType<typeof parseSuitcaseManifest>;
 
+export type TargetOverrides = {
+  codexHome?: string;
+  codexSkills?: string;
+  claudeSkills?: string;
+};
+
 export type LoadedCatalog = {
   sourceRoot: string;
   manifestPath: string;
   manifest: Catalog;
 };
 
-export async function loadCatalog(source: string): Promise<LoadedCatalog> {
+export async function loadCatalog(
+  source: string,
+  { targetOverrides }: { targetOverrides?: TargetOverrides | undefined } = {}
+): Promise<LoadedCatalog> {
   if (!source) {
     throw new Error("source is required");
   }
@@ -19,10 +28,59 @@ export async function loadCatalog(source: string): Promise<LoadedCatalog> {
   const sourceRoot = path.resolve(source);
   const manifestPath = path.join(sourceRoot, DEFAULT_SUITCASE_MANIFEST_FILE);
   const manifestText = await readTextFile(manifestPath);
+  const manifest = parseSuitcaseManifest(manifestText);
 
   return {
     sourceRoot,
     manifestPath,
-    manifest: parseSuitcaseManifest(manifestText)
+    manifest: applyTargetOverrides(manifest, targetOverrides)
   };
+}
+
+function applyTargetOverrides(manifest: Catalog, overrides: TargetOverrides | undefined): Catalog {
+  if (overrides === undefined || isEmptyTargetOverrides(overrides)) {
+    return manifest;
+  }
+
+  const assignmentPaths: Catalog["assignmentPaths"] = {};
+  for (const [targetId, assignmentPath] of Object.entries(manifest.assignmentPaths)) {
+    assignmentPaths[targetId] = { ...assignmentPath };
+  }
+
+  const codexGlobal = assignmentPaths["codex-global"];
+  if (codexGlobal !== undefined && (overrides.codexHome !== undefined || overrides.codexSkills !== undefined)) {
+    const codexHome = overrides.codexHome !== undefined
+      ? path.resolve(overrides.codexHome)
+      : overrides.codexSkills !== undefined
+        ? path.dirname(path.resolve(overrides.codexSkills))
+        : undefined;
+    const skillsPath = overrides.codexSkills !== undefined
+      ? path.resolve(overrides.codexSkills)
+      : codexHome !== undefined
+        ? path.join(codexHome, "skills")
+        : undefined;
+
+    if (codexHome !== undefined) {
+      codexGlobal.codexHome = codexHome;
+    }
+    if (skillsPath !== undefined) {
+      codexGlobal.skillsPath = skillsPath;
+    }
+  }
+
+  const claudeGlobal = assignmentPaths["claude-global"];
+  if (claudeGlobal !== undefined && overrides.claudeSkills !== undefined) {
+    claudeGlobal.path = path.resolve(overrides.claudeSkills);
+  }
+
+  return {
+    ...manifest,
+    assignmentPaths
+  };
+}
+
+function isEmptyTargetOverrides(overrides: TargetOverrides): boolean {
+  return overrides.codexHome === undefined &&
+    overrides.codexSkills === undefined &&
+    overrides.claudeSkills === undefined;
 }

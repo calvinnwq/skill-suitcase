@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { diff } from "../diffing/index.js";
+import type { TargetOverrides } from "../catalog/index.js";
 import {
   buildInstallRecord,
   buildInstalledFiles,
@@ -16,6 +17,7 @@ type TrackInput = {
   source: string;
   target: string;
   skills?: string[];
+  targetOverrides?: TargetOverrides | undefined;
 };
 
 type TrackError = {
@@ -81,7 +83,7 @@ export type TrackResult = {
   errors: TrackError[];
 };
 
-export async function track({ source, target, skills }: TrackInput): Promise<TrackResult> {
+export async function track({ source, target, skills, targetOverrides }: TrackInput): Promise<TrackResult> {
   if (!source) {
     throw new Error("source is required");
   }
@@ -110,6 +112,7 @@ export async function track({ source, target, skills }: TrackInput): Promise<Tra
   const diffResult = await diff({
     source,
     target,
+    targetOverrides,
     ...(selectedSkillSet !== null ? { skills: selectedSkills } : {})
   }) as DiffForTrack;
   const installRoot = diffResult.installRoot;

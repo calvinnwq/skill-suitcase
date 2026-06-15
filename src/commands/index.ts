@@ -108,7 +108,7 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       if (value === undefined || value === "" || value.startsWith("--")) {
         throw new Error(`${token} requires a value`);
       }
-      const key = token.slice(2) as ValueFlagName;
+      const key = valueFlagName(token);
       args[key] = value;
       index += 1;
       continue;
@@ -155,9 +155,23 @@ function isKnownCommand(command: string): command is CommandName {
   return KNOWN_COMMAND_NAMES.has(command);
 }
 
-function isValueArg(token: string): token is `--${ValueFlagName}` {
+function isValueArg(token: string): boolean {
   return token === "--source" || token === "--target" || token === "--output" || token === "--lock"
-    || token === "--artifact" || token === "--receipt";
+    || token === "--artifact" || token === "--receipt" || token === "--codex-home"
+    || token === "--codex-skills" || token === "--claude-skills";
+}
+
+function valueFlagName(token: string): ValueFlagName {
+  switch (token) {
+    case "--codex-home":
+      return "codexHome";
+    case "--codex-skills":
+      return "codexSkills";
+    case "--claude-skills":
+      return "claudeSkills";
+    default:
+      return token.slice(2) as ValueFlagName;
+  }
 }
 
 function isFlagAllowedForCommand(command: CommandName | "help", token: string): boolean {
@@ -172,7 +186,7 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
         || command === "track";
     case "--target":
       return command === "plan" || command === "diff" || command === "pack" || command === "apply"
-        || command === "track";
+        || command === "track" || command === "status";
     case "--output":
       return command === "pack";
     case "--lock":
@@ -180,6 +194,11 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
       return command === "apply";
     case "--receipt":
       return command === "rollback";
+    case "--codex-home":
+    case "--codex-skills":
+    case "--claude-skills":
+      return command === "diff" || command === "pack" || command === "targets" || command === "status"
+        || command === "apply" || command === "track";
     case "--dry-run":
       return command === "pack";
     case "--strict":

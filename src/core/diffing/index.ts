@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { loadCatalog } from "../catalog/index.js";
+import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { type PlanResult, plan } from "../planning/index.js";
 import type { Catalog } from "../catalog/index.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
@@ -90,7 +90,12 @@ type ResolveAssignmentInstallRootResult =
   | ResolveAssignmentInstallRootFailure;
 
 export async function diff(
-  { source, target, skills }: { source: string; target: string; skills?: string[] }
+  { source, target, skills, targetOverrides }: {
+    source: string;
+    target: string;
+    skills?: string[];
+    targetOverrides?: TargetOverrides | undefined;
+  }
 ): Promise<DiffResult> {
   if (!source) {
     throw new Error("source is required");
@@ -99,7 +104,7 @@ export async function diff(
     throw new Error("target is required");
   }
 
-  const { manifest } = await loadCatalog(source);
+  const { manifest } = await loadCatalog(source, { targetOverrides });
   const installation = await resolveAssignmentInstallRoot(manifest, target);
   const planTarget = installation.assignment ?? target;
   const planResult = await plan({

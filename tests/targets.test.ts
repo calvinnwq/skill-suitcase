@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -59,6 +59,44 @@ test("lists all assignment paths with stability fields from the fixture catalog"
     assert.ok(typeof entry.exists.skillsPath === "boolean");
     assert.ok(["live-install-root", "missing", "invalid"].includes(entry.safety.classification));
   }
+});
+
+test("local target overrides replace global Codex and Claude install paths", async (t) => {
+  const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-codex-home-"));
+  const codexSkills = path.join(codexHome, "custom-skills");
+  const claudeSkills = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-claude-skills-"));
+  await mkdir(codexSkills, { recursive: true });
+  t.after(() => rm(codexHome, { recursive: true, force: true }));
+  t.after(() => rm(claudeSkills, { recursive: true, force: true }));
+
+  const result = await targets({
+    source: fixtureSource,
+    targetOverrides: {
+      codexHome,
+      codexSkills,
+      claudeSkills
+    }
+  });
+
+  const codexGlobal = result.targets.find((entry) => entry.id === "codex-global");
+  const kodyCodex = result.targets.find((entry) => entry.id === "openclaw-kody-codex");
+  const claudeGlobal = result.targets.find((entry) => entry.id === "claude-global");
+
+  assert.ok(codexGlobal);
+  assert.equal(codexGlobal.codexHome, codexHome);
+  assert.equal(codexGlobal.skillsPath, codexSkills);
+  assert.equal(codexGlobal.platform?.installRoot, codexSkills);
+  assert.equal(codexGlobal.exists.codexHome, true);
+  assert.equal(codexGlobal.exists.skillsPath, true);
+
+  assert.ok(kodyCodex);
+  assert.equal(kodyCodex.codexHome, "/tmp/openclaw-codex");
+  assert.equal(kodyCodex.skillsPath, "/tmp/openclaw-codex/skills");
+
+  assert.ok(claudeGlobal);
+  assert.equal(claudeGlobal.path, claudeSkills);
+  assert.equal(claudeGlobal.platform?.installRoot, claudeSkills);
+  assert.equal(claudeGlobal.exists.path, true);
 });
 
 test("reports malformed assignmentPaths as errors and classifies them as invalid", async () => {
