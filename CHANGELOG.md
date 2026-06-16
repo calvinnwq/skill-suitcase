@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.3.0](https://github.com/calvinnwq/skill-suitcase/compare/skill-suitcase-v0.2.0...skill-suitcase-v0.3.0) (2026-06-16)
+
+
+### Features
+
+* add import onboarding command for NGX-385 ([1fc0e31](https://github.com/calvinnwq/skill-suitcase/commit/1fc0e31688fe6b3b3fd7a59ef0613f90049b0bbd))
+* add skills.sh target registry coverage ([#24](https://github.com/calvinnwq/skill-suitcase/issues/24)) ([67b5f02](https://github.com/calvinnwq/skill-suitcase/commit/67b5f02461d66bb16b853a8084c69c0a2e699fb9))
+* add targeted track skill filters ([5319c6c](https://github.com/calvinnwq/skill-suitcase/commit/5319c6caa4ed6bb17987b4f5114f7d18c0e9e913))
+* **apply:** implement apply --mode symlink with source-root escape guard ([e43994e](https://github.com/calvinnwq/skill-suitcase/commit/e43994e3dc3081194ad8e1c94612952cb1ca5e74))
+* **cli:** add import onboarding command ([4398a09](https://github.com/calvinnwq/skill-suitcase/commit/4398a097bc74abfbd5d0911dd8f48ef5ea90b703))
+* **cli:** add targeted track skill filters ([7edd362](https://github.com/calvinnwq/skill-suitcase/commit/7edd362f1be9371c6bfc8b85ab2fd87422bc93f9))
+* **cli:** support local target path overrides ([9ea56ad](https://github.com/calvinnwq/skill-suitcase/commit/9ea56ad4dfb73b834907e1bee0c21fb5c107776f))
+* **core:** add native symlink install mode ([d5dffde](https://github.com/calvinnwq/skill-suitcase/commit/d5dffde5d00837e43117155e4362b39e63571d14))
+* **rollback:** remove apply-created symlinks in rollback while refusing drifted real directories ([4335cf9](https://github.com/calvinnwq/skill-suitcase/commit/4335cf91f1002df1f20f26c85bae73202aba4f32))
+* **rollback:** treat adopted and refreshed symlink installs as safe no-ops in rollback ([d1f7acc](https://github.com/calvinnwq/skill-suitcase/commit/d1f7acc228d782a4a64a8aa403939d0f83bfc427))
+* **status:** add symlink-install-state classifier for correct/broken/wrong-target/real-directory receipts ([b2f4e36](https://github.com/calvinnwq/skill-suitcase/commit/b2f4e36544190244c750e10161393a2ed40d166d))
+* support local target path overrides ([5ce2488](https://github.com/calvinnwq/skill-suitcase/commit/5ce2488e90489e6576d2b801d9fe468f2e2d8e19))
+* **track:** adopt existing correct symlinks as symlink-mode receipts without rewriting files ([e4c752b](https://github.com/calvinnwq/skill-suitcase/commit/e4c752b489284b5abab54d7b43374c37f7812eaa))
+* **validate:** add strict Skillify-10 contract validation mode ([46ce993](https://github.com/calvinnwq/skill-suitcase/commit/46ce99399332950fc9ae1b14db6461d6fdb57904))
+* **validate:** add strict Skillify-10 contract validation mode for NGX-386 ([59ab28f](https://github.com/calvinnwq/skill-suitcase/commit/59ab28f4ca3c4bb68170fdd1698ae2d40d50d5c4))
+
+
+### Bug Fixes
+
+* **cli:** reject unsupported command flags ([41440c6](https://github.com/calvinnwq/skill-suitcase/commit/41440c681e24cf05c6d728c84b4cfc34d73a39c7))
+* **cli:** reject unsupported command flags ([c09c764](https://github.com/calvinnwq/skill-suitcase/commit/c09c7646ee281ce1d6684513eb198c9546a5df9b))
+* **cli:** use canonical target names ([917d10d](https://github.com/calvinnwq/skill-suitcase/commit/917d10df6897cb001cad57959c13f399305dda91))
+* **cli:** use canonical target names ([4f12fcb](https://github.com/calvinnwq/skill-suitcase/commit/4f12fcbb37ff055f76218d8635eea676f93f2c7a))
+* **import:** ignore support skill directories ([#20](https://github.com/calvinnwq/skill-suitcase/issues/20)) ([6ad8093](https://github.com/calvinnwq/skill-suitcase/commit/6ad8093849329757affead515ec747e6887bf9dd))
+
 ## [0.2.0](https://github.com/calvinnwq/skill-suitcase/compare/skill-suitcase-v0.1.0...skill-suitcase-v0.2.0) (2026-06-13)
 
 
