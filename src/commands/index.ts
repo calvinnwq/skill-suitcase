@@ -3,6 +3,7 @@ import { diffCommand } from "./diff.js";
 import { importCommand } from "./import.js";
 import { packCommand } from "./pack.js";
 import { planCommand } from "./plan.js";
+import { promoteCommand } from "./promote.js";
 import { rollbackCommand } from "./rollback.js";
 import { statusCommand } from "./status.js";
 import { targetsCommand } from "./targets.js";
@@ -22,7 +23,8 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   statusCommand,
   applyCommand,
   rollbackCommand,
-  trackCommand
+  trackCommand,
+  promoteCommand
 ];
 
 const KNOWN_COMMAND_NAMES: ReadonlySet<string> = new Set(
@@ -81,6 +83,14 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
         throw new Error(`Unknown argument: ${token}`);
       }
       args.strict = true;
+      continue;
+    }
+
+    if (token === "--apply") {
+      if (!isFlagAllowedForCommand(args.command, token)) {
+        throw new Error(`Unknown argument: ${token}`);
+      }
+      args.apply = true;
       continue;
     }
 
@@ -156,13 +166,15 @@ function isKnownCommand(command: string): command is CommandName {
 }
 
 function isValueArg(token: string): boolean {
-  return token === "--source" || token === "--target" || token === "--output" || token === "--lock"
-    || token === "--artifact" || token === "--mode" || token === "--receipt" || token === "--codex-home"
-    || token === "--codex-skills" || token === "--claude-skills";
+  return token === "--source" || token === "--target" || token === "--target-skill" || token === "--output"
+    || token === "--lock" || token === "--artifact" || token === "--mode" || token === "--receipt"
+    || token === "--codex-home" || token === "--codex-skills" || token === "--claude-skills";
 }
 
 function valueFlagName(token: string): ValueFlagName {
   switch (token) {
+    case "--target-skill":
+      return "targetSkill";
     case "--codex-home":
       return "codexHome";
     case "--codex-skills":
@@ -183,10 +195,12 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--source":
       return command === "plan" || command === "diff" || command === "pack" || command === "import"
         || command === "validate" || command === "targets" || command === "status" || command === "apply"
-        || command === "track";
+        || command === "track" || command === "promote";
     case "--target":
       return command === "plan" || command === "diff" || command === "pack" || command === "apply"
         || command === "track" || command === "status";
+    case "--target-skill":
+      return command === "promote";
     case "--output":
       return command === "pack";
     case "--lock":
@@ -201,7 +215,9 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
       return command === "diff" || command === "pack" || command === "targets" || command === "status"
         || command === "apply" || command === "track";
     case "--dry-run":
-      return command === "pack";
+      return command === "pack" || command === "promote";
+    case "--apply":
+      return command === "promote";
     case "--strict":
       return command === "validate";
     default:

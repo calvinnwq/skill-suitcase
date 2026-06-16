@@ -64,3 +64,17 @@ artifact path as copy installs and add `--mode symlink` to `apply`. The target
 skill root should become a symlink pointing back to the selected catalog source
 path, `status` should report it as `current`, and `rollback` should remove only
 a symlink that `apply --mode symlink` created.
+
+When smoke testing a target-created skill, create a throwaway skill directory
+outside the catalog with `SKILL.md`, then run promote in read-only mode first:
+
+```bash
+node dist/src/cli.js promote --source /path/to/skills-catalog --target-skill /path/to/agent-home/skills/new-skill --dry-run --json
+```
+
+The dry run should report `ok: true`, `readOnly: true`, and the
+`copy`/`verify`/`symlink`/`receipt` plan. Only run `--apply` against disposable
+fixtures or an intentionally approved target-created skill; live promotion
+copies the skill into `skills/<name>`, replaces the target with a symlink back to
+that catalog source, writes a receipt, and preserves the original target in a
+hidden backup path.
