@@ -7,19 +7,21 @@ Read-only commands (`plan`, `diff`, `pack`, `import`, `validate`, `targets`,
 emit JSON plans, diffs, import findings, target discovery, bundle manifests, or
 status reports without touching target install paths or runtime homes.
 
-The `apply` command writes skill files into target install paths. It requires
+The `apply` command materializes skills in target install paths. It requires
 an explicit approval input (plan-lock or staging artifact), refuses dirty or
-unmanaged targets, writes transactionally, and emits receipts.
+unmanaged targets, writes copy installs transactionally, can create approved
+repo-pointing symlinks with `--mode symlink`, and emits receipts.
 
 The `rollback` command reverses an apply using the rollback state captured in a
-receipt. It restores each written file to its pre-apply contents (or removes
-files the apply created), refusing when the target has drifted from the recorded
-applied state.
+receipt. It restores each written copy file to its pre-apply contents, removes
+files or symlinks the apply created, and refuses when the target has drifted from
+the recorded applied state.
 
 The `track` command adopts skills that are already installed in a target. It
-verifies the live files match the catalog source, then writes receipts so the
-existing install comes under Suitcase management without rewriting any skill
-files. Repeat `--skill <name>` to adopt only selected matching skills.
+verifies the live files or root symlink match the catalog source, then writes
+receipts so the existing install comes under Suitcase management without
+rewriting any skill files. Repeat `--skill <name>` to adopt only selected
+matching skills.
 
 ## Usage
 
@@ -37,6 +39,7 @@ node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --target codex --codex-home ~/.codex --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --artifact /tmp/skill-suitcase-bundle.json --json
+node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --mode symlink --json
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
@@ -599,6 +602,7 @@ It uses `path` for `openclaw-skills-root` and
 `status.status` values:
 
 - `current`: installed receipt version and content match the source skill
+  (for symlink installs, the target link points at the selected source path)
 - `behind`: source content changed after the recorded install
 - `version`: source `SKILL.md` frontmatter `version` changed
 - `dirty`: target files or symlink differ from the recorded install
@@ -631,20 +635,22 @@ name, `status` returns `ok: false` with an `unknown_target` error.
 
 `apply` requires exactly one of `--lock` (a plan-lock file path) or `--artifact`
 (a staging bundle path or directory). It validates the approval input, checks
-pre-apply target status, writes skill files transactionally, and emits a receipt
-per skill. Each receipt also captures the pre-apply state of every written file
-(a `rollback` record) so the install can later be reversed with
-`suitcase rollback`.
+pre-apply target status, materializes planned skills, and emits a receipt per
+skill. Copy-mode receipts capture the pre-apply state of every written file (a
+`rollback` record) so the install can later be reversed with `suitcase
+rollback`.
 
 `--mode` selects how each planned skill is materialized. The default
 `--mode copy` writes the source files into the target root. `--mode symlink`
-instead links each agent skill path at its catalog source path (agent skill
+instead links each agent skill path to its catalog source path (agent skill
 path -> repo source path) and records `mode: "symlink"` in the receipt rather
 than inferring the mode from filesystem shape. Symlink mode runs the same
 approval and pre-apply safety checks, refuses to point a managed link outside
 the approved source root, and refuses to replace an existing real directory or
 wrong/broken link (converting those requires explicit approval). Unknown values
-return an `invalid_apply_mode` error.
+return an `invalid_apply_mode` error. The top-level output `mode` still reports
+the approval input kind (`lock` or `artifact`); the install mode is recorded per
+receipt install record.
 
 On success (`ok: true`):
 

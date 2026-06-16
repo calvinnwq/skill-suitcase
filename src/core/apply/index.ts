@@ -37,7 +37,7 @@ type ApplyInput = {
 /**
  * How apply materializes a planned skill in the target root. "copy" writes the
  * source files (the default, unchanged behavior). "symlink" links the agent
- * skill path at the catalog source path (agent skill path -> repo source path),
+ * skill path to the catalog source path (agent skill path -> repo source path),
  * recorded explicitly in the receipt rather than inferred from filesystem shape.
  */
 export type ApplyInstallMode = "copy" | typeof SYMLINK_MODE;

@@ -13,6 +13,7 @@ export function usageText(): string {
     "  suitcase status --source <skills-repo> --target <target> --json",
     "  suitcase apply --source <skills-repo> --target <target> --lock <path> --json",
     "  suitcase apply --source <skills-repo> --target <target> --artifact <path> --json",
+    "  suitcase apply --source <skills-repo> --target <target> --lock <path> --mode symlink --json",
     "  suitcase rollback --receipt <path> --json",
     "  suitcase track --source <skills-repo> --target <target> [--skill <name> ...] --json",
     "",

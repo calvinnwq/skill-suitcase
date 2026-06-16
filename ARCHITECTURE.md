@@ -33,6 +33,7 @@ src/
     track/
     receipts/
     status/
+    install-modes.ts
     catalog/
     validation/
   adapters/
@@ -79,6 +80,7 @@ Command modules should stay thin. They adapt the outside world to core code.
 - import/onboarding inspection
 - apply/install workflows
 - rollback and existing-install adoption workflows
+- install mode classification and safety checks
 - receipt creation and validation
 - catalog, manifest, target, and validation rules
 
@@ -168,9 +170,10 @@ reviewable like other source changes.
 
 ## Install Modes
 
-Skill Suitcase supports copy-style installs today. Future install modes should
-be modeled explicitly in plans, receipts, status, and rollback. Do not infer an
-install mode from filesystem shape alone when a receipt can state it directly.
+Skill Suitcase supports copy and native symlink installs. Install modes should
+be selected explicitly by approved apply input and recorded in receipts, status,
+and rollback. Do not infer an install mode from filesystem shape alone when a
+receipt can state it directly.
 
 The intended symlink direction is:
 
@@ -208,8 +211,8 @@ Keep the command verbs separate:
 - `track` adopts an existing target that already matches the selected catalog
   source. It writes receipts only and does not rewrite skill files.
 - `apply` installs or updates skills from an approved plan lock or artifact.
-  Future symlink support belongs here as an explicit install mode, not as an
-  implicit side effect.
+  Symlink support belongs here as an explicit `--mode symlink` install mode,
+  not as an implicit side effect.
 - `rollback` reverses a prior `apply` using receipt rollback state.
 - `promote` or `import-target` is the future workflow for target-created skills
   that should become repo-owned.
