@@ -6,6 +6,7 @@
 ### Features
 
 * add import onboarding command for NGX-385 ([1fc0e31](https://github.com/calvinnwq/skill-suitcase/commit/1fc0e31688fe6b3b3fd7a59ef0613f90049b0bbd))
+* add promote flow for target-created skills ([4ab30e6](https://github.com/calvinnwq/skill-suitcase/commit/4ab30e6d9979b40b0abcf513ff8ffc38914e5532))
 * add skills.sh target registry coverage ([#24](https://github.com/calvinnwq/skill-suitcase/issues/24)) ([67b5f02](https://github.com/calvinnwq/skill-suitcase/commit/67b5f02461d66bb16b853a8084c69c0a2e699fb9))
 * add targeted track skill filters ([5319c6c](https://github.com/calvinnwq/skill-suitcase/commit/5319c6caa4ed6bb17987b4f5114f7d18c0e9e913))
 * **apply:** implement apply --mode symlink with source-root escape guard ([e43994e](https://github.com/calvinnwq/skill-suitcase/commit/e43994e3dc3081194ad8e1c94612952cb1ca5e74))

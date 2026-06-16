@@ -225,7 +225,7 @@ in the catalog and matches the selected source. For a new skill created inside
 an agent home, the promote workflow:
 
 1. inspect the target skill directory read-only (`--dry-run`)
-2. copy the skill into the catalog repo, or an approved variant source path
+2. copy the skill into the catalog repo source path (`skills/<name>`)
 3. hash-verify the copied repo source against the original target content
 4. preserve the original target by moving it aside, then replace the agent-home
    directory with a symlink back to the repo source

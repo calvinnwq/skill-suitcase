@@ -23,6 +23,11 @@ receipts so the existing install comes under Suitcase management without
 rewriting any skill files. Repeat `--skill <name>` to adopt only selected
 matching skills.
 
+The `promote` command converts a target-created skill into a repo-owned catalog
+skill. `promote --dry-run` reports the read-only plan and conflicts; `promote
+--apply` copies the target into the catalog, verifies it, replaces the target
+with a repo-pointing symlink, and writes a receipt.
+
 ## Usage
 
 ```bash
@@ -44,6 +49,7 @@ node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-re
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --dry-run --json
+node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --apply --json
 ```
 
 `import --json` is a read-only onboarding inspection for existing skills repos.
@@ -904,12 +910,14 @@ Conflict codes are machine-readable:
 - `existing_repo_skill` — the catalog already has a skill at `repoSkillPath`; a
   conflict decision is required before overwriting it
 - `unsafe_path` — the skill name is not a plain directory segment, the promoted
-  path would escape the catalog `skills/` directory, or the target skill already
-  lives inside the source repo (so it is not a target-created skill)
+  path would escape the catalog `skills/` directory, the catalog `skills/`
+  directory resolves outside the source repo, the promoted path would be nested
+  inside the target skill, or the target skill already lives inside the source
+  repo (so it is not a target-created skill)
 - `dirty_target` — the target skill root is itself a symlink, or its tree
   contains a nested symlink, so it cannot be hash-verified or copied faithfully
-- `unsupported_layout` — the target path is missing, is not a directory, or has
-  no `SKILL.md`
+- `unsupported_layout` — the source root, catalog `skills/` directory, or target
+  path is missing or not a directory; the target also must have `SKILL.md`
 
 ### Live promotion (`--apply`)
 
@@ -956,6 +964,18 @@ The promote receipt uses a distinct `calvinnwq.skills.promote-rollback.v0`
 rollback schema, so the existing `rollback` command treats it as a safe no-op
 rather than removing the link (reversing a promote means restoring the backup,
 not just unlinking).
+
+Live promotion failures are reported with stable `errors[].code` values:
+
+- `promote_conflicts` — one or more dry-run conflicts blocked mutation
+- `existing_repo_skill` — a catalog path appeared after planning and before copy
+- `promote_receipt_failed` — the existing receipt could not be snapshotted or
+  the new receipt could not be written
+- `promote_copy_failed` — copying the target into the catalog failed
+- `promote_verify_failed` — hash verification could not be completed
+- `promote_verify_mismatch` — the copied catalog tree did not match the target
+- `promote_swap_failed` — moving the original aside or creating the symlink
+  failed, after which the original target is restored best-effort
 
 ## Receipt Module
 
