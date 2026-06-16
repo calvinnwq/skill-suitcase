@@ -686,6 +686,9 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
   (for example when a required source variant is missing)
 - `unmanaged_target` — target has no managed status entries; install it first
 - `unsafe_target_state` — a planned skill is `dirty` or `unknown`
+- `symlink_source_escape` — a planned symlink source path escapes the approved source root
+- `symlink_target_conflict` — a planned symlink target already exists as a real directory, wrong link, or broken link and would require explicit approval to replace
+- `symlink_write_error` — a symlink creation or receipt write failed during symlink-mode apply
 - `status_*` — a pre-apply status-layer error (prefixed with `status_`)
 - `write_error` — a file write or rollback failure
 
@@ -814,9 +817,11 @@ On success (`ok: true`):
 }
 ```
 
-Each tracked skill is written with `mode: "track"` and a `priorState` of
-`{ "status": "unknown", "reason": "target existed before Suitcase tracking" }`,
-since Suitcase did not perform the original install. On success, `tracked.skills`
+Each tracked copy install is written with `mode: "track"` and a `priorState` of
+`{ "status": "unknown", "reason": "target existed before Suitcase tracking" }`.
+A tracked symlink adoption is written with `mode: "symlink"` and a `priorState`
+of `{ "status": "unknown", "reason": "existing symlink adopted by Suitcase tracking" }`.
+In both cases Suitcase did not perform the original install. On success, `tracked.skills`
 lists the adopted skills (sorted), `tracked.files` counts the receipted files,
 and `selected.skills` lists the normalized requested filters (empty for
 all-skills mode). On refusal, `refused.skills` lists the selected or planned
@@ -835,7 +840,8 @@ and `summary.planned` counts only selected planned skills. Error codes include:
 - `target_missing` — a planned skill's target directory or file is absent
 - `target_mismatch` — target files do not match the source (`update`/`extra`)
 - `target_unreadable` — a target skill path is not a directory or cannot be read
-- `target_symlink` — the target skill tree contains a symlink
+- `target_symlink` — the target skill tree contains a file-level symlink (copy installs only)
+- `target_symlink_mismatch` — an existing symlink at the skill root does not point at the selected source path and cannot be tracked
 - `source_missing` — a source entry is absent
 - `source_unreadable` — a source skill directory cannot be read
 - `blocked_skill` — compatibility rules block the skill for that assignment
