@@ -157,7 +157,7 @@ function isKnownCommand(command: string): command is CommandName {
 
 function isValueArg(token: string): boolean {
   return token === "--source" || token === "--target" || token === "--output" || token === "--lock"
-    || token === "--artifact" || token === "--receipt" || token === "--codex-home"
+    || token === "--artifact" || token === "--mode" || token === "--receipt" || token === "--codex-home"
     || token === "--codex-skills" || token === "--claude-skills";
 }
 
@@ -191,6 +191,7 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
       return command === "pack";
     case "--lock":
     case "--artifact":
+    case "--mode":
       return command === "apply";
     case "--receipt":
       return command === "rollback";

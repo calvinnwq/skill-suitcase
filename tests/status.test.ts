@@ -14,6 +14,7 @@ import {
   upsertAndWriteReceipt
 } from "../src/receipt.js";
 import { status } from "../src/status.js";
+import { SYMLINK_MODE } from "../src/core/install-modes.js";
 
 
 
@@ -2935,6 +2936,191 @@ assignmentPaths:
   );
   assert.equal(targetReadError.path, path.join(installRoot, "office-hours"));
 });
+
+test("status reports a correct symlink install as current", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-ok-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-ok-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await symlink(sourceSkill, path.join(installRoot, "office-hours"), "dir");
+  await writeSymlinkReceipt({ installRoot, sourceRoot, skillName: "office-hours", version: "2026.06.10" });
+  await writeSymlinkManifest(sourceRoot, installRoot);
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.dirty, 0);
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
+});
+
+test("status keeps a correct symlink current even after the source content changes", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-live-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-live-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"old\");\n");
+  await symlink(sourceSkill, path.join(installRoot, "office-hours"), "dir");
+  await writeSymlinkReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceHash: await hashDirectory(sourceSkill)
+  });
+  await writeSymlinkManifest(sourceRoot, installRoot);
+
+  // Source content drifts after the receipt was written; the symlink still
+  // reflects it, so the install is not "behind" the way a copy would be.
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"new\");\n");
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.behind, 0);
+  assert.equal(result.summary.dirty, 0);
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
+});
+
+test("status reports a broken symlink install as dirty", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-broken-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-broken-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  // Symlink points at a path that does not exist.
+  await symlink(path.join(sourceRoot, "skills", "gone"), path.join(installRoot, "office-hours"), "dir");
+  await writeSymlinkReceipt({ installRoot, sourceRoot, skillName: "office-hours", version: "2026.06.10" });
+  await writeSymlinkManifest(sourceRoot, installRoot);
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.summary.dirty, 1);
+  assert.equal(result.summary.current, 0);
+  const item = firstItem(result.statuses, "result.statuses");
+  assert.equal(item.status, "dirty");
+  assert.match(item.reason, /broken/i);
+});
+
+test("status reports a symlink pointing at the wrong target as dirty", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-wrong-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-wrong-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  const otherDir = path.join(sourceRoot, "elsewhere", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(otherDir, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(otherDir, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await symlink(otherDir, path.join(installRoot, "office-hours"), "dir");
+  await writeSymlinkReceipt({ installRoot, sourceRoot, skillName: "office-hours", version: "2026.06.10" });
+  await writeSymlinkManifest(sourceRoot, installRoot);
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.summary.dirty, 1);
+  assert.equal(result.summary.current, 0);
+  const item = firstItem(result.statuses, "result.statuses");
+  assert.equal(item.status, "dirty");
+  assert.match(item.reason, /unexpected target|wrong/i);
+});
+
+test("status reports a real directory where a symlink was expected as dirty", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-realdir-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-realdir-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  // Receipt says symlink mode, but a real directory occupies the target.
+  await cp(sourceSkill, path.join(installRoot, "office-hours"), { recursive: true });
+  await writeSymlinkReceipt({ installRoot, sourceRoot, skillName: "office-hours", version: "2026.06.10" });
+  await writeSymlinkManifest(sourceRoot, installRoot);
+
+  const result = await status({ source: sourceRoot });
+
+  assert.equal(result.summary.dirty, 1);
+  assert.equal(result.summary.current, 0);
+  const item = firstItem(result.statuses, "result.statuses");
+  assert.equal(item.status, "dirty");
+  assert.match(item.reason, /real directory/i);
+});
+
+async function writeSymlinkManifest(sourceRoot: string, installRoot: string): Promise<void> {
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+`
+  );
+}
+
+async function writeSymlinkReceipt({
+  installRoot,
+  sourceRoot,
+  skillName,
+  version,
+  sourceCommit = "deadbeef",
+  sourceHash = null
+}: {
+  installRoot: string;
+  sourceRoot: string;
+  skillName: string;
+  version: string;
+  sourceCommit?: string | null;
+  sourceHash?: string | null;
+}) {
+  const installRecord = buildInstallRecord({
+    agent: "openclaw",
+    mode: SYMLINK_MODE,
+    sourcePath: path.join(sourceRoot, "skills", skillName),
+    targetPath: path.join(installRoot, skillName),
+    version,
+    sourceCommit,
+    sourceHash
+  });
+  const receipt = buildReceipt({
+    sourceRoot,
+    sourceCommit,
+    installs: { [skillName]: installRecord },
+    sourceRef: "refs/heads/main"
+  });
+
+  await writeFile(
+    path.join(installRoot, RECEIPT_FILE),
+    `${JSON.stringify(receipt, null, 2)}\n`,
+    "utf8"
+  );
+}
 
 async function writeReceipt({
   installRoot,

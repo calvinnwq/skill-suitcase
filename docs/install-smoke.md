@@ -58,3 +58,9 @@ For Codex or Claude paths that have source variants, `plan`, `diff`, `pack`,
 If a slimmer live variant is required but no source variant exists, those same
 boundaries should report blocked canonical entries instead of silently replacing
 the live variant.
+
+When smoke testing native symlink installs, use the same approved lock or
+artifact path as copy installs and add `--mode symlink` to `apply`. The target
+skill root should become a symlink pointing back to the selected catalog source
+path, `status` should report it as `current`, and `rollback` should remove only
+a symlink that `apply --mode symlink` created.

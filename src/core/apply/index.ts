@@ -1,10 +1,24 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assessPlanLock, type PlanLock, PLAN_LOCK_SCHEMA } from "../planning/plan-lock.js";
 import type { TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
-import { RECEIPT_FILE, buildInstallRecord, buildInstalledFiles, upsertAndWriteReceipt } from "../receipts/index.js";
+import {
+  classifySymlinkInstall,
+  isPathWithinRoot,
+  SYMLINK_MODE
+} from "../install-modes.js";
+import {
+  RECEIPT_FILE,
+  buildInstallRecord,
+  buildInstalledFiles,
+  readReceipt,
+  upsertAndWriteReceipt,
+  type Receipt,
+  type ReceiptInstallRecord
+} from "../receipts/index.js";
+import { readSkillVersion } from "../skill-metadata.js";
 import { status } from "../status/index.js";
 
 type ApplyInput = {
@@ -12,12 +26,21 @@ type ApplyInput = {
   target: string;
   lock?: string;
   artifact?: string;
+  mode?: string;
   targetOverrides?: TargetOverrides | undefined;
   __test?: {
     failAfterSuccessfulWrites?: number;
     failAfterReceiptWrites?: number;
   };
 };
+
+/**
+ * How apply materializes a planned skill in the target root. "copy" writes the
+ * source files (the default, unchanged behavior). "symlink" links the agent
+ * skill path to the catalog source path (agent skill path -> repo source path),
+ * recorded explicitly in the receipt rather than inferred from filesystem shape.
+ */
+export type ApplyInstallMode = "copy" | typeof SYMLINK_MODE;
 
 type ApplyFinding = {
   code: string;
@@ -121,12 +144,14 @@ export type ApplyResult = {
 
 const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_FILE = "skill-suitcase-bundle.json";
+const SYMLINK_ROLLBACK_SCHEMA = "calvinnwq.skills.symlink-rollback.v0";
 
 export async function apply({
   source,
   target,
   lock,
   artifact,
+  mode,
   targetOverrides,
   __test
 }: ApplyInput): Promise<ApplyResult> {
@@ -151,6 +176,22 @@ export async function apply({
         {
           code: hasLock || hasArtifact ? "invalid_apply_input" : "missing_apply_input",
           message: "apply requires exactly one of --lock or --artifact"
+        }
+      ]
+    });
+  }
+
+  const installMode = normalizeInstallMode(mode);
+  if (installMode === null) {
+    return failure({
+      source,
+      target,
+      mode: hasLock ? "lock" : "artifact",
+      input: null,
+      errors: [
+        {
+          code: "invalid_apply_mode",
+          message: `Unknown apply mode: ${String(mode)}. Use "copy" or "symlink".`
         }
       ]
     });
@@ -282,6 +323,19 @@ export async function apply({
         summary: preApplySummary
       },
       errors: preApplyErrors
+    });
+  }
+
+  if (installMode === SYMLINK_MODE) {
+    return applySymlinkInstalls({
+      diffResult,
+      context,
+      installRoot,
+      preStatusSource: preStatus.source,
+      targetStatuses,
+      preApplySummary,
+      targetOverrides,
+      target
     });
   }
 
@@ -556,6 +610,331 @@ export async function apply({
     },
     errors: []
   };
+}
+
+function normalizeInstallMode(mode: string | undefined): ApplyInstallMode | null {
+  if (mode === undefined) {
+    return "copy";
+  }
+  if (mode === "copy" || mode === SYMLINK_MODE) {
+    return mode;
+  }
+  return null;
+}
+
+type SymlinkApplyPlanItem = {
+  skill: string;
+  sourcePath: string;
+  targetPath: string;
+  variant: string | undefined;
+  action: "create" | "noop";
+};
+
+/**
+ * Install planned skills as symlinks (agent skill path -> catalog source path).
+ *
+ * This is reached only after the same approval (lock/artifact) and pre-apply
+ * safety checks the copy path runs, so the plan is approved and the target is in
+ * a safe state. It never enters the per-file copy/write path: each skill becomes
+ * a single managed symlink and a receipt with mode "symlink". The link target is
+ * guarded to stay inside the approved source root, and an existing real
+ * directory / wrong link is refused rather than clobbered (converting those
+ * requires explicit approval, per the mutation boundaries in ARCHITECTURE.md).
+ */
+async function applySymlinkInstalls({
+  diffResult,
+  context,
+  installRoot,
+  preStatusSource,
+  targetStatuses,
+  preApplySummary,
+  targetOverrides,
+  target
+}: {
+  diffResult: DiffForApply;
+  context: ApprovalContext;
+  installRoot: string;
+  preStatusSource: string;
+  targetStatuses: StatusItem[];
+  preApplySummary: ApplyStatusSummary;
+  targetOverrides: TargetOverrides | undefined;
+  target: string;
+}): Promise<ApplyResult> {
+  const sourceRoot = diffResult.source;
+  const assignment = diffResult.assignment ?? target;
+  const statusBySkill = new Map<string, StatusItem>();
+  for (const item of targetStatuses) {
+    statusBySkill.set(item.skill, item);
+  }
+
+  const preApplyStatus: TargetStatusState = {
+    source: preStatusSource,
+    statuses: targetStatuses,
+    summary: preApplySummary
+  };
+
+  const failSymlink = (errors: ApplyFinding[]): ApplyResult =>
+    failure({
+      source: sourceRoot,
+      target,
+      mode: context.mode,
+      input: context.input,
+      assignment: diffResult.assignment,
+      planTarget: diffResult.target,
+      installRoot,
+      summary: asSummary(diffResult),
+      preApplyStatus,
+      errors
+    });
+
+  // Phase 1: validate every planned skill before mutating anything, so a refusal
+  // never leaves a half-applied target root.
+  const errors: ApplyFinding[] = [];
+  const plannedItems: SymlinkApplyPlanItem[] = [];
+  for (const planned of diffResult.planned) {
+    const sourcePath = planned.sourcePath;
+    const targetPath = path.join(installRoot, planned.skill);
+
+    if (!(await isPathWithinRoot({ candidatePath: sourcePath, rootPath: sourceRoot }))) {
+      errors.push({
+        code: "symlink_source_escape",
+        message: `Refusing to symlink ${planned.skill}: source ${sourcePath} escapes the approved source root ${sourceRoot}.`
+      });
+      continue;
+    }
+
+    const classification = await classifySymlinkInstall({ targetPath, expectedSourcePath: sourcePath });
+    if (classification.state === "missing") {
+      plannedItems.push({ skill: planned.skill, sourcePath, targetPath, variant: symlinkVariant(planned), action: "create" });
+      continue;
+    }
+    if (classification.state === "correct") {
+      // Already linked at the selected source: idempotent re-apply, refresh the
+      // receipt only.
+      plannedItems.push({ skill: planned.skill, sourcePath, targetPath, variant: symlinkVariant(planned), action: "noop" });
+      continue;
+    }
+    errors.push({
+      code: "symlink_target_conflict",
+      message: `Refusing to symlink ${planned.skill}: target ${targetPath} is a ${classification.state} and would require explicit approval to replace.`
+    });
+  }
+
+  if (errors.length > 0) {
+    return failSymlink(errors);
+  }
+
+  // Phase 2: create links (only for missing targets) and write symlink receipts.
+  const receiptPath = path.join(installRoot, RECEIPT_FILE);
+  const previousReceiptText = await readFileSafeText(receiptPath);
+  const previousReceipt = await readReceipt({ installRoot }).catch((): Receipt => ({}));
+  const linkedSkills: string[] = [];
+  const createdLinks: string[] = [];
+  try {
+    for (const item of plannedItems) {
+      if (item.action === "create") {
+        await mkdir(path.dirname(item.targetPath), { recursive: true });
+        await symlink(item.sourcePath, item.targetPath, "dir");
+        createdLinks.push(item.targetPath);
+      }
+
+      const priorState = statusBySkill.get(item.skill);
+      const installedFiles = await buildInstalledFiles(item.sourcePath);
+      const version = await readSkillVersion(item.sourcePath).catch(() => null);
+      const previousRecord = findReceiptInstallRecord({
+        receipt: previousReceipt,
+        skillName: item.skill,
+        targetPath: item.targetPath,
+        installRoot
+      });
+      const preserveApplyCreatedRollback = item.action === "noop" && previousRecord !== null && hasAvailableApplyCreatedSymlinkRollback({
+        record: previousRecord,
+        targetPath: item.targetPath,
+        sourcePath: item.sourcePath,
+        installRoot
+      });
+      const createdByApply = item.action === "create" || preserveApplyCreatedRollback;
+
+      const nextRecord: Record<string, unknown> = {
+        skill: item.skill,
+        agent: assignment,
+        target: assignment,
+        mode: SYMLINK_MODE,
+        source: { path: item.sourcePath },
+        sourcePath: item.sourcePath,
+        targetPath: item.targetPath,
+        sourceHash: await hashDirectory(item.sourcePath),
+        installedFiles
+      };
+      if (version !== null) {
+        nextRecord.version = version;
+      }
+      if (context.sourceCommit.length > 0) {
+        nextRecord.sourceCommit = context.sourceCommit;
+      }
+      if (item.variant !== undefined) {
+        nextRecord.variant = item.variant;
+      }
+      nextRecord.priorState = {
+        status: priorState?.status ?? "missing",
+        reason: item.action === "create"
+          ? "symlink created by Suitcase apply --mode symlink"
+          : "existing correct symlink refreshed by Suitcase apply --mode symlink"
+      };
+      nextRecord.rollback = {
+        schema: SYMLINK_ROLLBACK_SCHEMA,
+        status: "available",
+        mode: SYMLINK_MODE,
+        targetPath: item.targetPath,
+        created: createdByApply,
+        previous: { kind: createdByApply ? "missing" : "symlink" }
+      };
+
+      await upsertAndWriteReceipt({
+        installRoot,
+        skillName: item.skill,
+        installRecord: buildInstallRecord(nextRecord)
+      });
+      linkedSkills.push(item.skill);
+    }
+  } catch (error) {
+    // Best-effort: remove only the links this run created and restore the prior
+    // receipt. Never touch the source tree the link points at.
+    for (const linkPath of [...createdLinks].reverse()) {
+      await unlinkSafe(linkPath);
+    }
+    await restoreOriginalReceipt({ receiptPath, previousReceiptText });
+    return failSymlink([{
+      code: "symlink_write_error",
+      message: error instanceof Error ? error.message : "Unknown symlink write error"
+    }]);
+  }
+
+  let postApplyStatus: StatusResult | null = null;
+  try {
+    postApplyStatus = await status({ source: sourceRoot, target, targetOverrides });
+  } catch {
+    postApplyStatus = null;
+  }
+
+  return {
+    ok: true,
+    source: sourceRoot,
+    target,
+    mode: context.mode,
+    input: context.input,
+    assignment: diffResult.assignment,
+    planTarget: diffResult.target,
+    installRoot,
+    preApplyStatus,
+    postApplyStatus,
+    summary: asSummary(diffResult),
+    applied: {
+      skills: linkedSkills.sort(),
+      files: 0
+    },
+    errors: []
+  };
+}
+
+function symlinkVariant(planned: DiffForApply["planned"][number]): string | undefined {
+  if (typeof planned.variant === "string" && planned.variant.trim().length > 0) {
+    return planned.variant;
+  }
+  return undefined;
+}
+
+function findReceiptInstallRecord({
+  receipt,
+  skillName,
+  targetPath,
+  installRoot
+}: {
+  receipt: Receipt;
+  skillName: string;
+  targetPath: string;
+  installRoot: string;
+}): ReceiptInstallRecord | null {
+  const entry = receipt.installs?.[skillName];
+  const records = Array.isArray(entry) ? entry : entry === undefined ? [] : [entry];
+  const normalizedTarget = path.resolve(targetPath);
+  return records.find((record) => normalizeTargetPathForInstallRoot(record.targetPath, installRoot) === normalizedTarget) ?? null;
+}
+
+function hasAvailableApplyCreatedSymlinkRollback({
+  record,
+  targetPath,
+  sourcePath,
+  installRoot
+}: {
+  record: ReceiptInstallRecord;
+  targetPath: string;
+  sourcePath: string;
+  installRoot: string;
+}): boolean {
+  if (record.mode !== SYMLINK_MODE) {
+    return false;
+  }
+  const rollback = record.rollback;
+  if (!isRecord(rollback) || rollback.schema !== SYMLINK_ROLLBACK_SCHEMA || rollback.status !== "available" || rollback.created !== true) {
+    return false;
+  }
+  const rollbackTargetPath = normalizeTargetPathForInstallRoot(rollback.targetPath, installRoot)
+    ?? normalizeTargetPathForInstallRoot(record.targetPath, installRoot);
+  if (rollbackTargetPath !== path.resolve(targetPath)) {
+    return false;
+  }
+  const recordSourcePath = normalizeSymlinkRecordSourcePath(record);
+  return recordSourcePath !== null && path.resolve(recordSourcePath) === path.resolve(sourcePath);
+}
+
+function normalizeTargetPathForInstallRoot(value: unknown, installRoot: string): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  return path.isAbsolute(value) ? path.resolve(value) : path.resolve(installRoot, value);
+}
+
+function normalizeSymlinkRecordSourcePath(record: ReceiptInstallRecord): string | null {
+  if (typeof record.sourcePath === "string" && record.sourcePath.trim().length > 0) {
+    return record.sourcePath;
+  }
+  if (isRecord(record.source) && typeof record.source.path === "string" && record.source.path.trim().length > 0) {
+    return record.source.path;
+  }
+  return null;
+}
+
+async function hashDirectory(root: string): Promise<string> {
+  const files = await listFiles(root);
+  const digest = createHash("sha256");
+  for (const relativePath of files) {
+    const bytes = await readFile(path.join(root, relativePath));
+    digest.update(relativePath);
+    digest.update("\0");
+    digest.update(bytes);
+    digest.update("\0");
+  }
+  return digest.digest("hex");
+}
+
+async function listFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
+      continue;
+    }
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listFiles(entryPath)).map((item) => path.join(entry.name, item)));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(entry.name);
+    }
+  }
+  return files.sort();
 }
 
 type ApprovalContext = {

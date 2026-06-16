@@ -4,6 +4,11 @@ import path from "node:path";
 import { diff } from "../diffing/index.js";
 import type { TargetOverrides } from "../catalog/index.js";
 import {
+  classifySymlinkInstall,
+  SYMLINK_MODE,
+  type SymlinkInstallState
+} from "../install-modes.js";
+import {
   buildInstallRecord,
   buildInstalledFiles,
   readReceipt,
@@ -57,6 +62,17 @@ type SourceHashResult =
 type TargetTreeValidationResult =
   | { ok: true }
   | { ok: false; error: TrackError };
+
+type TrackRecord = {
+  skill: string;
+  sourcePath: string;
+  variant?: string;
+  targetPath: string;
+  mode: "track" | typeof SYMLINK_MODE;
+  version: string | null;
+  sourceHash: string;
+  installedFiles: Awaited<ReturnType<typeof buildInstalledFiles>>;
+};
 
 export type TrackResult = {
   ok: boolean;
@@ -148,18 +164,55 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
     });
   }
 
-  const records: Array<{
-    skill: string;
-    sourcePath: string;
-    variant?: string;
-    targetPath: string;
-    version: string | null;
-    sourceHash: string;
-    installedFiles: Awaited<ReturnType<typeof buildInstalledFiles>>;
-  }> = [];
+  const records: TrackRecord[] = [];
 
   for (const planned of plannedForTrack) {
     const targetPath = path.join(installRoot, planned.skill);
+    const classification = await classifySymlinkInstall({
+      targetPath,
+      expectedSourcePath: planned.sourcePath
+    });
+
+    if (isSymlinkRootState(classification.state)) {
+      // A symlinked skill root is adopted as a symlink install only when it
+      // already points at the selected catalog source. Any other symlink target
+      // is refused rather than silently receipted against the wrong source.
+      if (classification.state !== "correct") {
+        errors.push(trackError({
+          code: "target_symlink_mismatch",
+          message: `Target symlink for ${planned.skill} does not point at the selected source path and cannot be tracked.`,
+          skill: planned.skill,
+          path: targetPath
+        }));
+        continue;
+      }
+
+      const sourceHash = await readSourceHash(planned.sourcePath, planned.skill);
+      if (!sourceHash.ok) {
+        errors.push(sourceHash.error);
+        continue;
+      }
+      const sourceFiles = await readSourceInstalledFiles(planned.sourcePath, planned.skill);
+      if (!sourceFiles.ok) {
+        errors.push(sourceFiles.error);
+        continue;
+      }
+      const record: TrackRecord = {
+        skill: planned.skill,
+        sourcePath: planned.sourcePath,
+        targetPath,
+        mode: SYMLINK_MODE,
+        version: await readSkillVersion(planned.sourcePath).catch(() => null),
+        sourceHash: sourceHash.hash,
+        installedFiles: sourceFiles.files
+      };
+      if (typeof planned.variant === "string" && planned.variant.trim().length > 0) {
+        record.variant = planned.variant;
+      }
+      records.push(record);
+      continue;
+    }
+
     const installedFiles = await readInstalledFiles(targetPath, planned.skill);
     if (!installedFiles.ok) {
       errors.push(installedFiles.error);
@@ -170,18 +223,11 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
       errors.push(sourceHash.error);
       continue;
     }
-    const record: {
-      skill: string;
-      sourcePath: string;
-      variant?: string;
-      targetPath: string;
-      version: string | null;
-      sourceHash: string;
-      installedFiles: Awaited<ReturnType<typeof buildInstalledFiles>>;
-    } = {
+    const record: TrackRecord = {
       skill: planned.skill,
       sourcePath: planned.sourcePath,
       targetPath,
+      mode: "track",
       version: await readSkillVersion(planned.sourcePath).catch(() => null),
       sourceHash: sourceHash.hash,
       installedFiles: installedFiles.files
@@ -231,7 +277,7 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
       skill: record.skill,
       agent: diffResult.assignment ?? target,
       target: diffResult.assignment ?? target,
-      mode: "track",
+      mode: record.mode,
       source: {
         path: record.sourcePath
       },
@@ -241,7 +287,9 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
       installedFiles: record.installedFiles,
       priorState: {
         status: "unknown",
-        reason: "target existed before Suitcase tracking"
+        reason: record.mode === SYMLINK_MODE
+          ? "existing symlink adopted by Suitcase tracking"
+          : "target existed before Suitcase tracking"
       }
     };
     if (record.variant !== undefined) {
@@ -623,6 +671,26 @@ function unreadableTargetTree(targetPath: string, skill: string, error: unknown)
 async function readSourceHash(sourcePath: string, skill: string): Promise<SourceHashResult> {
   try {
     return { ok: true, hash: await hashDirectory(sourcePath) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: trackError({
+        code: "source_unreadable",
+        message: `Source directory could not be read for ${skill}: ${errorMessage(error)}`,
+        skill,
+        path: sourcePath
+      })
+    };
+  }
+}
+
+function isSymlinkRootState(state: SymlinkInstallState): boolean {
+  return state === "correct" || state === "wrong-target" || state === "broken";
+}
+
+async function readSourceInstalledFiles(sourcePath: string, skill: string): Promise<InstalledFilesResult> {
+  try {
+    return { ok: true, files: await buildInstalledFiles(sourcePath) };
   } catch (error) {
     return {
       ok: false,

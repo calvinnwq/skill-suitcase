@@ -7,19 +7,21 @@ Read-only commands (`plan`, `diff`, `pack`, `import`, `validate`, `targets`,
 emit JSON plans, diffs, import findings, target discovery, bundle manifests, or
 status reports without touching target install paths or runtime homes.
 
-The `apply` command writes skill files into target install paths. It requires
+The `apply` command materializes skills in target install paths. It requires
 an explicit approval input (plan-lock or staging artifact), refuses dirty or
-unmanaged targets, writes transactionally, and emits receipts.
+unmanaged targets, writes copy installs transactionally, can create approved
+repo-pointing symlinks with `--mode symlink`, and emits receipts.
 
 The `rollback` command reverses an apply using the rollback state captured in a
-receipt. It restores each written file to its pre-apply contents (or removes
-files the apply created), refusing when the target has drifted from the recorded
-applied state.
+receipt. It restores each written copy file to its pre-apply contents, removes
+files or symlinks the apply created, and refuses when the target has drifted from
+the recorded applied state.
 
 The `track` command adopts skills that are already installed in a target. It
-verifies the live files match the catalog source, then writes receipts so the
-existing install comes under Suitcase management without rewriting any skill
-files. Repeat `--skill <name>` to adopt only selected matching skills.
+verifies the live files or root symlink match the catalog source, then writes
+receipts so the existing install comes under Suitcase management without
+rewriting any skill files. Repeat `--skill <name>` to adopt only selected
+matching skills.
 
 ## Usage
 
@@ -37,6 +39,7 @@ node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
 node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --target codex --codex-home ~/.codex --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --json
 node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --artifact /tmp/skill-suitcase-bundle.json --json
+node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --mode symlink --json
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
@@ -599,6 +602,7 @@ It uses `path` for `openclaw-skills-root` and
 `status.status` values:
 
 - `current`: installed receipt version and content match the source skill
+  (for symlink installs, the target link points at the selected source path)
 - `behind`: source content changed after the recorded install
 - `version`: source `SKILL.md` frontmatter `version` changed
 - `dirty`: target files or symlink differ from the recorded install
@@ -631,10 +635,22 @@ name, `status` returns `ok: false` with an `unknown_target` error.
 
 `apply` requires exactly one of `--lock` (a plan-lock file path) or `--artifact`
 (a staging bundle path or directory). It validates the approval input, checks
-pre-apply target status, writes skill files transactionally, and emits a receipt
-per skill. Each receipt also captures the pre-apply state of every written file
-(a `rollback` record) so the install can later be reversed with
-`suitcase rollback`.
+pre-apply target status, materializes planned skills, and emits a receipt per
+skill. Copy-mode receipts capture the pre-apply state of every written file (a
+`rollback` record) so the install can later be reversed with `suitcase
+rollback`.
+
+`--mode` selects how each planned skill is materialized. The default
+`--mode copy` writes the source files into the target root. `--mode symlink`
+instead links each agent skill path to its catalog source path (agent skill
+path -> repo source path) and records `mode: "symlink"` in the receipt rather
+than inferring the mode from filesystem shape. Symlink mode runs the same
+approval and pre-apply safety checks, refuses to point a managed link outside
+the approved source root, and refuses to replace an existing real directory or
+wrong/broken link (converting those requires explicit approval). Unknown values
+return an `invalid_apply_mode` error. The top-level output `mode` still reports
+the approval input kind (`lock` or `artifact`); the install mode is recorded per
+receipt install record.
 
 On success (`ok: true`):
 
@@ -676,6 +692,9 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
   (for example when a required source variant is missing)
 - `unmanaged_target` — target has no managed status entries; install it first
 - `unsafe_target_state` — a planned skill is `dirty` or `unknown`
+- `symlink_source_escape` — a planned symlink source path escapes the approved source root
+- `symlink_target_conflict` — a planned symlink target already exists as a real directory, wrong link, or broken link and would require explicit approval to replace
+- `symlink_write_error` — a symlink creation or receipt write failed during symlink-mode apply
 - `status_*` — a pre-apply status-layer error (prefixed with `status_`)
 - `write_error` — a file write or rollback failure
 
@@ -732,6 +751,16 @@ of a previously installed skill, the receipt's rollback record is marked
 `rolled-back`, so re-running `rollback` is a deterministic no-op. If the apply
 created the whole skill install, rollback removes that install record from the
 receipt.
+
+For `mode: "symlink"` installs, rollback reverses only links that `apply --mode
+symlink` created (recorded with `created: true`): it removes the
+Suitcase-created link — the link itself, never the catalog source it points at —
+reports it under `removed`, and drops the install record from the receipt.
+Track-adopted symlinks (no rollback state) and links `apply` only refreshed
+(`created: false`) are a safe `noop`. Rollback refuses (`target_drift`) rather
+than delete a real directory, a retargeted link, or a broken link found where
+the created symlink was expected, so it can never delete state it did not
+capture.
 
 On failure (`ok: false`), `errors` contains objects with `code` and `message`
 (plus optional `skill` and `path`). Error codes include:
@@ -794,9 +823,11 @@ On success (`ok: true`):
 }
 ```
 
-Each tracked skill is written with `mode: "track"` and a `priorState` of
-`{ "status": "unknown", "reason": "target existed before Suitcase tracking" }`,
-since Suitcase did not perform the original install. On success, `tracked.skills`
+Each tracked copy install is written with `mode: "track"` and a `priorState` of
+`{ "status": "unknown", "reason": "target existed before Suitcase tracking" }`.
+A tracked symlink adoption is written with `mode: "symlink"` and a `priorState`
+of `{ "status": "unknown", "reason": "existing symlink adopted by Suitcase tracking" }`.
+In both cases Suitcase did not perform the original install. On success, `tracked.skills`
 lists the adopted skills (sorted), `tracked.files` counts the receipted files,
 and `selected.skills` lists the normalized requested filters (empty for
 all-skills mode). On refusal, `refused.skills` lists the selected or planned
@@ -815,7 +846,8 @@ and `summary.planned` counts only selected planned skills. Error codes include:
 - `target_missing` — a planned skill's target directory or file is absent
 - `target_mismatch` — target files do not match the source (`update`/`extra`)
 - `target_unreadable` — a target skill path is not a directory or cannot be read
-- `target_symlink` — the target skill tree contains a symlink
+- `target_symlink` — the target skill tree contains a file-level symlink (copy installs only)
+- `target_symlink_mismatch` — an existing symlink at the skill root does not point at the selected source path and cannot be tracked
 - `source_missing` — a source entry is absent
 - `source_unreadable` — a source skill directory cannot be read
 - `blocked_skill` — compatibility rules block the skill for that assignment

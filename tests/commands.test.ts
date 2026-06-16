@@ -92,6 +92,45 @@ test("parseCommandArgs supports local target override flags", () => {
   });
 });
 
+test("parseCommandArgs parses the apply install mode flag", () => {
+  assert.deepEqual(parseCommandArgs([
+    "apply",
+    "--source",
+    fixtureSource,
+    "--target",
+    "openclaw",
+    "--lock",
+    "/tmp/plan-lock.json",
+    "--mode",
+    "symlink",
+    "--json"
+  ]), {
+    command: "apply",
+    source: fixtureSource,
+    target: "openclaw",
+    lock: "/tmp/plan-lock.json",
+    mode: "symlink",
+    dryRun: false,
+    json: true
+  });
+});
+
+test("parseCommandArgs rejects the install mode flag outside apply", () => {
+  assert.throws(
+    () => parseCommandArgs([
+      "plan",
+      "--source",
+      fixtureSource,
+      "--target",
+      "openclaw",
+      "--mode",
+      "symlink",
+      "--json"
+    ]),
+    /Unknown argument: --mode/
+  );
+});
+
 test("parseCommandArgs rejects blank track skill filters", () => {
   assert.throws(
     () => parseCommandArgs([

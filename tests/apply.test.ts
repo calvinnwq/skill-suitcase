@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -2635,4 +2635,165 @@ test("apply applies artifact-mode multi-skill plans", async (t) => {
   const expectedTrackerHash = await hashDirectory(sourceTracker);
   assert.equal(officeRecord.sourceHash, expectedOfficeHash);
   assert.equal(trackerRecord.sourceHash, expectedTrackerHash);
+});
+
+test("apply --mode symlink installs a missing skill as a symlink into the target root", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath,
+    mode: "symlink"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied.skills.includes("office-hours"), true);
+
+  const targetSkill = path.join(targetRoot, "office-hours");
+  const linkInfo = await lstat(targetSkill);
+  assert.equal(linkInfo.isSymbolicLink(), true);
+  const rawLink = await readlink(targetSkill);
+  assert.equal(path.resolve(path.dirname(targetSkill), rawLink), path.resolve(sourceSkill));
+
+  const receipt = JSON.parse(await readFile(path.join(targetRoot, ".skill-suitcase-receipt.json"), "utf8")) as {
+    installs: Record<string, unknown>;
+  };
+  const installEntry = receipt.installs["office-hours"];
+  const installRecord = Array.isArray(installEntry) ? installEntry[0] : installEntry;
+  assert.equal((installRecord as { mode?: string }).mode, "symlink");
+  assert.equal((installRecord as { sourceHash?: string }).sourceHash, await hashDirectory(sourceSkill));
+
+  const officeStatus = result.postApplyStatus?.statuses.find((item) => item.skill === "office-hours");
+  assert.equal(officeStatus?.status, "current");
+  assert.equal(result.postApplyStatus?.summary.dirty, 0);
+});
+
+test("apply --mode symlink refuses to convert a managed real directory without approval", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-conflict-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-conflict-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  // A real, copy-installed directory already exists and is recorded as current.
+  const targetSkill = path.join(targetRoot, "office-hours");
+  await mkdir(targetSkill, { recursive: true });
+  await writeFile(path.join(targetSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(targetSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  const sourceHash = await hashDirectory(sourceSkill);
+  await upsertAndWriteReceipt({
+    installRoot: targetRoot,
+    skillName: "office-hours",
+    installRecord: {
+      skill: "office-hours",
+      agent: "openclaw",
+      target: "openclaw",
+      mode: "copy",
+      source: { path: sourceSkill },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      version: "2026.06.11",
+      sourceHash,
+      installedFiles: []
+    }
+  });
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-conflict-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath,
+    mode: "symlink"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "symlink_target_conflict"), true);
+
+  // The pre-existing real directory must be left intact (never clobbered).
+  const info = await lstat(targetSkill);
+  assert.equal(info.isDirectory(), true);
+  assert.equal(info.isSymbolicLink(), false);
+  const preserved = await readFile(path.join(targetSkill, "runtime.js"), "utf8");
+  assert.equal(preserved, "console.log(\"current\");\n");
+});
+
+test("apply --mode symlink rejects source paths whose realpath escapes the source root", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-realpath-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-realpath-target-"));
+  const externalRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-realpath-external-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(externalRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+
+  const externalSkill = path.join(externalRoot, "office-hours");
+  await mkdir(externalSkill, { recursive: true });
+  await writeFile(path.join(externalSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await mkdir(path.join(sourceRoot, "skills"), { recursive: true });
+  await symlink(externalSkill, path.join(sourceRoot, "skills", "office-hours"), "dir");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-realpath-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath,
+    mode: "symlink"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "symlink_source_escape"), true);
+  await assert.rejects(lstat(path.join(targetRoot, "office-hours")));
 });

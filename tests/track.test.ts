@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -488,5 +488,73 @@ test("track reports receipt write failures without partial adoption", async (t) 
   assert.equal(result.ok, false);
   assert.equal(result.errors.some((error) => error.code === "receipt_write_failed"), true);
   assert.equal(result.summary.tracked, 0);
+  await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
+});
+
+async function createSymlinkAdoptionFixture(t: { after(fn: () => Promise<void> | void): void }): Promise<{
+  sourceRoot: string;
+  targetRoot: string;
+  sourceSkillPath: string;
+  targetSkillPath: string;
+}> {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-symlink-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-symlink-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  const sourceSkillPath = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkillPath, { recursive: true });
+  await writeFile(
+    path.join(sourceSkillPath, "SKILL.md"),
+    `---\nname: office-hours\nversion: "2026.06.14"\n---\n# office-hours\n`
+  );
+  await writeFile(path.join(sourceSkillPath, "runtime.js"), `console.log("office-hours");\n`);
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\n\nassignments:\n  openclaw:\n    suitcases:\n      - core\n\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\n\ncompatibility:\n  office-hours:\n    agents:\n      - openclaw\n    variant: canonical\n`
+  );
+
+  const targetSkillPath = path.join(targetRoot, "office-hours");
+  await symlink(sourceSkillPath, targetSkillPath, "dir");
+
+  return { sourceRoot, targetRoot, sourceSkillPath, targetSkillPath };
+}
+
+test("track adopts an existing correct symlink as symlink mode without rewriting files", async (t) => {
+  const { sourceRoot, targetRoot, sourceSkillPath, targetSkillPath } = await createSymlinkAdoptionFixture(t);
+
+  const result = await track({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.tracked.skills, ["office-hours"]);
+  // Adoption must not replace the symlink with copied files.
+  assert.equal((await lstat(targetSkillPath)).isSymbolicLink(), true);
+
+  const receipt = JSON.parse(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  const officeRecord = singleRecord(receipt, "office-hours");
+  assert.equal(officeRecord.mode, "symlink");
+  assert.equal(officeRecord.sourcePath, sourceSkillPath);
+  assert.equal(typeof officeRecord.sourceHash, "string");
+
+  const statusResult = await status({ source: sourceRoot });
+  assert.equal(statusResult.ok, true);
+  assert.equal(statusResult.summary.current, 1);
+});
+
+test("track refuses a target symlink that points at the wrong source path", async (t) => {
+  const { sourceRoot, targetRoot, sourceSkillPath, targetSkillPath } = await createSymlinkAdoptionFixture(t);
+  // Repoint the install symlink at a decoy with identical content so the diff
+  // still sees an unchanged tree but the link target is not the selected source.
+  const decoyPath = path.join(sourceRoot, "skills", "office-hours-decoy");
+  await cp(sourceSkillPath, decoyPath, { recursive: true });
+  await rm(targetSkillPath, { force: true });
+  await symlink(decoyPath, targetSkillPath, "dir");
+
+  const result = await track({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "target_symlink_mismatch"), true);
+  assert.equal((await lstat(targetSkillPath)).isSymbolicLink(), true);
   await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
 });
