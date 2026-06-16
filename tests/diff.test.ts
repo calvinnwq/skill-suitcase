@@ -401,6 +401,59 @@ compatibility:
   await assert.rejects(() => access(opencodeRoot));
 });
 
+test("diff resolves assignment-named provider targets to manifest assignment paths first", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-provider-manifest-"));
+  const fakeHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-provider-manifest-home-"));
+  const reviewedRoot = path.join(source, "reviewed-opencode-skills");
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(fakeHome, { recursive: true, force: true }));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(skillRoot, { recursive: true });
+  await mkdir(reviewedRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "Office Hours\n");
+
+  await createCatalog(
+    source,
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  opencode:
+    suitcases:
+      - core
+
+assignmentPaths:
+  reviewed-opencode:
+    kind: opencode-skills-root
+    assignment: opencode
+    path: ${reviewedRoot}
+
+compatibility:
+  office-hours:
+    agents:
+      - opencode
+`
+  );
+
+  const result = await diff({
+    source,
+    target: "opencode",
+    targetOverrides: {
+      home: fakeHome
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.assignment, "opencode");
+  assert.equal(result.installRoot, reviewedRoot);
+  assert.equal(result.readOnly, false);
+  assert.equal(result.summary.create, 1);
+  assert.deepEqual(result.errors, []);
+});
+
 test("diff includes installable skill diffs when other skills are blocked", async (t) => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-blocked-installable-"));
   const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-blocked-installable-home-"));

@@ -61,24 +61,12 @@ export function resolveTargetRegistryEntries(
   manifest: Pick<Catalog, "assignments" | "assignmentPaths">,
   targetOverrides?: TargetOverrides | undefined
 ): TargetRegistryEntry[] {
-  const entries: TargetRegistryEntry[] = [];
-  const seen = new Set<string>();
-  const assignmentPaths = isRecord(manifest.assignmentPaths) ? manifest.assignmentPaths : {};
-
-  for (const [targetId, assignmentPath] of Object.entries(assignmentPaths)) {
-    if (!isRecord(assignmentPath)) {
-      entries.push(malformedManifestTarget(targetId, assignmentPath));
-      seen.add(targetId);
-      continue;
-    }
-
-    const provider = resolveTargetRegistryEntry(targetId, targetOverrides);
-    entries.push(manifestEntryToTarget(targetId, assignmentPath, provider));
-    seen.add(targetId);
-  }
+  const entries = resolveManifestTargetRegistryEntries(manifest, targetOverrides);
+  const seen = new Set(entries.map((entry) => entry.id));
+  const seenAssignments = new Set(entries.map((entry) => entry.assignment));
 
   for (const providerEntry of SKILLS_SH_TARGETS) {
-    if (seen.has(providerEntry.id)) {
+    if (seen.has(providerEntry.id) || seenAssignments.has(providerEntry.assignment)) {
       continue;
     }
     entries.push(providerEntryToTarget(providerEntry, targetOverrides));
@@ -92,7 +80,21 @@ export function resolveTargetRegistryEntryFromManifest(
   targetId: string,
   targetOverrides?: TargetOverrides | undefined
 ): TargetRegistryEntry | null {
-  return resolveTargetRegistryEntries(manifest, targetOverrides).find((entry) => entry.id === targetId) ?? null;
+  const manifestEntries = resolveManifestTargetRegistryEntries(manifest, targetOverrides);
+  const directManifestEntry = manifestEntries.find((entry) => entry.id === targetId);
+  if (directManifestEntry !== undefined) {
+    return directManifestEntry;
+  }
+
+  const assignmentMatches = manifestEntries.filter((entry) => entry.assignment === targetId);
+  if (assignmentMatches.length === 1) {
+    return assignmentMatches[0] ?? null;
+  }
+  if (assignmentMatches.length > 1) {
+    return null;
+  }
+
+  return resolveTargetRegistryEntry(targetId, targetOverrides);
 }
 
 export function findTargetRegistryEntriesByAssignment(
@@ -100,7 +102,35 @@ export function findTargetRegistryEntriesByAssignment(
   assignment: string,
   targetOverrides?: TargetOverrides | undefined
 ): TargetRegistryEntry[] {
-  return resolveTargetRegistryEntries(manifest, targetOverrides).filter((entry) => entry.assignment === assignment);
+  const manifestMatches = resolveManifestTargetRegistryEntries(manifest, targetOverrides)
+    .filter((entry) => entry.assignment === assignment);
+  if (manifestMatches.length > 0) {
+    return manifestMatches;
+  }
+
+  return SKILLS_SH_TARGETS
+    .filter((entry) => entry.assignment === assignment)
+    .map((entry) => providerEntryToTarget(entry, targetOverrides));
+}
+
+function resolveManifestTargetRegistryEntries(
+  manifest: Pick<Catalog, "assignments" | "assignmentPaths">,
+  targetOverrides?: TargetOverrides | undefined
+): TargetRegistryEntry[] {
+  const entries: TargetRegistryEntry[] = [];
+  const assignmentPaths = isRecord(manifest.assignmentPaths) ? manifest.assignmentPaths : {};
+
+  for (const [targetId, assignmentPath] of Object.entries(assignmentPaths)) {
+    if (!isRecord(assignmentPath)) {
+      entries.push(malformedManifestTarget(targetId, assignmentPath));
+      continue;
+    }
+
+    const provider = resolveTargetRegistryEntry(targetId, targetOverrides);
+    entries.push(manifestEntryToTarget(targetId, assignmentPath, provider));
+  }
+
+  return entries;
 }
 
 function providerEntryToTarget(

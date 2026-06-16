@@ -6,7 +6,9 @@ import {
   resolvePlatformInstallRoot
 } from "../src/core/platform-adapters.js";
 import {
+  findTargetRegistryEntriesByAssignment,
   resolveTargetRegistryEntry,
+  resolveTargetRegistryEntryFromManifest,
   resolveTargetRegistryEntries
 } from "../src/core/catalog/target-registry.js";
 
@@ -134,4 +136,30 @@ test("manifest assignment paths outrank skills.sh provider defaults", () => {
   assert.equal(opencode.path, "/tmp/custom-opencode-skills");
   assert.equal(opencode.source, "manifest");
   assert.equal(opencode.readOnly, true);
+});
+
+test("manifest assignment paths outrank provider fallbacks by assignment", () => {
+  const manifest = {
+    assignments: {
+      opencode: { suitcases: ["core"] }
+    },
+    assignmentPaths: {
+      "reviewed-opencode": {
+        kind: "opencode-skills-root",
+        assignment: "opencode",
+        path: "/tmp/reviewed-opencode-skills"
+      }
+    }
+  };
+
+  const direct = resolveTargetRegistryEntryFromManifest(manifest, "opencode");
+  const assignmentMatches = findTargetRegistryEntriesByAssignment(manifest, "opencode");
+  const allEntries = resolveTargetRegistryEntries(manifest);
+
+  assert.ok(direct);
+  assert.equal(direct.id, "reviewed-opencode");
+  assert.equal(direct.source, "manifest");
+  assert.equal(direct.path, "/tmp/reviewed-opencode-skills");
+  assert.deepEqual(assignmentMatches.map((entry) => entry.id), ["reviewed-opencode"]);
+  assert.equal(allEntries.some((entry) => entry.id === "opencode" && entry.source === "provider"), false);
 });
