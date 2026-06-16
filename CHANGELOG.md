@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.3](https://github.com/calvinnwq/skill-suitcase/compare/v0.4.2...v0.4.3) (2026-06-16)
+
+
+### Bug Fixes
+
+* **package:** preserve npm cli bin ([ce13dd5](https://github.com/calvinnwq/skill-suitcase/commit/ce13dd501928ac605f02f1ef8fb170bebe5aeb94))
+* **package:** preserve npm cli bin ([ce13dd5](https://github.com/calvinnwq/skill-suitcase/commit/ce13dd501928ac605f02f1ef8fb170bebe5aeb94))
+* **package:** preserve npm cli bin ([82a83d2](https://github.com/calvinnwq/skill-suitcase/commit/82a83d22c1efd362a433614930ffc1f55b96fbfb))
+
 ## [0.4.2](https://github.com/calvinnwq/skill-suitcase/compare/v0.4.1...v0.4.2) (2026-06-16)
 
 
