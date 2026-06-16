@@ -730,6 +730,34 @@ test("rollback removes an apply --mode symlink install and leaves the catalog so
   assert.equal(Object.prototype.hasOwnProperty.call(receipt.installs, "office-hours"), false);
 });
 
+test("rollback removes an apply-created symlink after idempotent re-apply", async (t) => {
+  const { sourceRoot, sourceSkill, targetSkill, receiptPath } = await createAppliedSymlink(t);
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-reapply-symlink-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const reapplied = await apply({ source: sourceRoot, target: "openclaw", lock: lockPath, mode: "symlink" });
+  assert.equal(reapplied.ok, true);
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.removed, 1);
+  assert.equal(result.summary.noop, 0);
+  assert.equal(result.rollbacks[0]?.status, "restored");
+  await assert.rejects(lstat(targetSkill), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+  assert.equal((await stat(sourceSkill)).isDirectory(), true);
+});
+
 test("rollback refuses to delete a real directory where an apply-created symlink was expected", async (t) => {
   const { sourceSkill, targetSkill, receiptPath } = await createAppliedSymlink(t);
 

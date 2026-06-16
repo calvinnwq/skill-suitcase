@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assessPlanLock, type PlanLock, PLAN_LOCK_SCHEMA } from "../planning/plan-lock.js";
 import type { TargetOverrides } from "../catalog/index.js";
@@ -9,7 +9,15 @@ import {
   isPathWithinRoot,
   SYMLINK_MODE
 } from "../install-modes.js";
-import { RECEIPT_FILE, buildInstallRecord, buildInstalledFiles, upsertAndWriteReceipt } from "../receipts/index.js";
+import {
+  RECEIPT_FILE,
+  buildInstallRecord,
+  buildInstalledFiles,
+  readReceipt,
+  upsertAndWriteReceipt,
+  type Receipt,
+  type ReceiptInstallRecord
+} from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import { status } from "../status/index.js";
 
@@ -719,6 +727,7 @@ async function applySymlinkInstalls({
   // Phase 2: create links (only for missing targets) and write symlink receipts.
   const receiptPath = path.join(installRoot, RECEIPT_FILE);
   const previousReceiptText = await readFileSafeText(receiptPath);
+  const previousReceipt = await readReceipt({ installRoot }).catch((): Receipt => ({}));
   const linkedSkills: string[] = [];
   const createdLinks: string[] = [];
   try {
@@ -732,6 +741,19 @@ async function applySymlinkInstalls({
       const priorState = statusBySkill.get(item.skill);
       const installedFiles = await buildInstalledFiles(item.sourcePath);
       const version = await readSkillVersion(item.sourcePath).catch(() => null);
+      const previousRecord = findReceiptInstallRecord({
+        receipt: previousReceipt,
+        skillName: item.skill,
+        targetPath: item.targetPath,
+        installRoot
+      });
+      const preserveApplyCreatedRollback = item.action === "noop" && previousRecord !== null && hasAvailableApplyCreatedSymlinkRollback({
+        record: previousRecord,
+        targetPath: item.targetPath,
+        sourcePath: item.sourcePath,
+        installRoot
+      });
+      const createdByApply = item.action === "create" || preserveApplyCreatedRollback;
 
       const nextRecord: Record<string, unknown> = {
         skill: item.skill,
@@ -741,7 +763,7 @@ async function applySymlinkInstalls({
         source: { path: item.sourcePath },
         sourcePath: item.sourcePath,
         targetPath: item.targetPath,
-        sourceHash: digestInstalledFiles(installedFiles),
+        sourceHash: await hashDirectory(item.sourcePath),
         installedFiles
       };
       if (version !== null) {
@@ -764,8 +786,8 @@ async function applySymlinkInstalls({
         status: "available",
         mode: SYMLINK_MODE,
         targetPath: item.targetPath,
-        created: item.action === "create",
-        previous: { kind: item.action === "create" ? "missing" : "symlink" }
+        created: createdByApply,
+        previous: { kind: createdByApply ? "missing" : "symlink" }
       };
 
       await upsertAndWriteReceipt({
@@ -822,15 +844,97 @@ function symlinkVariant(planned: DiffForApply["planned"][number]): string | unde
   return undefined;
 }
 
-function digestInstalledFiles(installedFiles: Awaited<ReturnType<typeof buildInstalledFiles>>): string {
+function findReceiptInstallRecord({
+  receipt,
+  skillName,
+  targetPath,
+  installRoot
+}: {
+  receipt: Receipt;
+  skillName: string;
+  targetPath: string;
+  installRoot: string;
+}): ReceiptInstallRecord | null {
+  const entry = receipt.installs?.[skillName];
+  const records = Array.isArray(entry) ? entry : entry === undefined ? [] : [entry];
+  const normalizedTarget = path.resolve(targetPath);
+  return records.find((record) => normalizeTargetPathForInstallRoot(record.targetPath, installRoot) === normalizedTarget) ?? null;
+}
+
+function hasAvailableApplyCreatedSymlinkRollback({
+  record,
+  targetPath,
+  sourcePath,
+  installRoot
+}: {
+  record: ReceiptInstallRecord;
+  targetPath: string;
+  sourcePath: string;
+  installRoot: string;
+}): boolean {
+  if (record.mode !== SYMLINK_MODE) {
+    return false;
+  }
+  const rollback = record.rollback;
+  if (!isRecord(rollback) || rollback.schema !== SYMLINK_ROLLBACK_SCHEMA || rollback.status !== "available" || rollback.created !== true) {
+    return false;
+  }
+  const rollbackTargetPath = normalizeTargetPathForInstallRoot(rollback.targetPath, installRoot)
+    ?? normalizeTargetPathForInstallRoot(record.targetPath, installRoot);
+  if (rollbackTargetPath !== path.resolve(targetPath)) {
+    return false;
+  }
+  const recordSourcePath = normalizeSymlinkRecordSourcePath(record);
+  return recordSourcePath !== null && path.resolve(recordSourcePath) === path.resolve(sourcePath);
+}
+
+function normalizeTargetPathForInstallRoot(value: unknown, installRoot: string): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  return path.isAbsolute(value) ? path.resolve(value) : path.resolve(installRoot, value);
+}
+
+function normalizeSymlinkRecordSourcePath(record: ReceiptInstallRecord): string | null {
+  if (typeof record.sourcePath === "string" && record.sourcePath.trim().length > 0) {
+    return record.sourcePath;
+  }
+  if (isRecord(record.source) && typeof record.source.path === "string" && record.source.path.trim().length > 0) {
+    return record.source.path;
+  }
+  return null;
+}
+
+async function hashDirectory(root: string): Promise<string> {
+  const files = await listFiles(root);
   const digest = createHash("sha256");
-  for (const file of installedFiles) {
-    digest.update(file.path);
+  for (const relativePath of files) {
+    const bytes = await readFile(path.join(root, relativePath));
+    digest.update(relativePath);
     digest.update("\0");
-    digest.update(file.hash);
+    digest.update(bytes);
     digest.update("\0");
   }
   return digest.digest("hex");
+}
+
+async function listFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
+      continue;
+    }
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listFiles(entryPath)).map((item) => path.join(entry.name, item)));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(entry.name);
+    }
+  }
+  return files.sort();
 }
 
 type ApprovalContext = {

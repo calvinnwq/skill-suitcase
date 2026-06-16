@@ -2684,6 +2684,7 @@ test("apply --mode symlink installs a missing skill as a symlink into the target
   const installEntry = receipt.installs["office-hours"];
   const installRecord = Array.isArray(installEntry) ? installEntry[0] : installEntry;
   assert.equal((installRecord as { mode?: string }).mode, "symlink");
+  assert.equal((installRecord as { sourceHash?: string }).sourceHash, await hashDirectory(sourceSkill));
 
   const officeStatus = result.postApplyStatus?.statuses.find((item) => item.skill === "office-hours");
   assert.equal(officeStatus?.status, "current");
