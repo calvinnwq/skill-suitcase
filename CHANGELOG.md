@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/calvinnwq/skill-suitcase/compare/v0.4.0...v0.4.1) (2026-06-16)
+
+
+### Bug Fixes
+
+* use plain release tags ([c44914d](https://github.com/calvinnwq/skill-suitcase/commit/c44914d99430d3e2072553488691cf7e996c6ca0))
+
 ## [0.4.0](https://github.com/calvinnwq/skill-suitcase/compare/skill-suitcase-v0.3.0...skill-suitcase-v0.4.0) (2026-06-16)
 
 
