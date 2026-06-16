@@ -102,6 +102,10 @@ Codex target rather than every target assigned to Codex.
 See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
 canonical bundle versus platform variant rules.
+The `skills.sh` installer delegation spike is documented in
+[`docs/skills-sh-delegation.md`](docs/skills-sh-delegation.md); current guidance
+is to defer runtime delegation and keep Skill Suitcase native installs
+authoritative.
 
 ## Fresh Codex/Claude Machine
 
