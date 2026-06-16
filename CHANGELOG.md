@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.2](https://github.com/calvinnwq/skill-suitcase/compare/v0.4.1...v0.4.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* **package:** prepare npm publish payload ([28862cd](https://github.com/calvinnwq/skill-suitcase/commit/28862cdce0b191d028c023fa9d125f8ce7934e6c))
+* **package:** prepare npm publish payload ([28862cd](https://github.com/calvinnwq/skill-suitcase/commit/28862cdce0b191d028c023fa9d125f8ce7934e6c))
+* **package:** prepare npm publish payload ([5d28c7e](https://github.com/calvinnwq/skill-suitcase/commit/5d28c7e54f3b3f66facf623f5733873386b48d2a))
+
 ## [0.4.1](https://github.com/calvinnwq/skill-suitcase/compare/v0.4.0...v0.4.1) (2026-06-16)
 
 
