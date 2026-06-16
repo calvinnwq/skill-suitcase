@@ -6,6 +6,11 @@ import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { resolveTargetRegistryEntries } from "../catalog/target-registry.js";
 import { plan, type PlanResult } from "../planning/index.js";
 import {
+  classifySymlinkInstall,
+  SYMLINK_MODE,
+  type SymlinkInstallState
+} from "../install-modes.js";
+import {
   LEGACY_RECEIPT_FILE,
   LEGACY_RECEIPT_SCHEMA,
   RECEIPT_FILE,
@@ -544,6 +549,21 @@ async function statusSkill({
     };
   }
 
+  if (installRecord.mode === SYMLINK_MODE) {
+    return statusSymlinkSkill({
+      classification: await classifySymlinkInstall({
+        targetPath,
+        expectedSourcePath: sourceSkillPath
+      }),
+      installRoot,
+      targetPath,
+      sourceVersion,
+      sourceHashValue,
+      currentCommit,
+      installRecord
+    });
+  }
+
   const currentVersion = sourceVersion;
   const installedVersion = installRecord.version ?? null;
   const installedHash = installRecord.sourceHash ?? null;
@@ -710,6 +730,71 @@ async function statusSkill({
     currentHash: sourceHashValue,
     errors: []
   };
+}
+
+function statusSymlinkSkill({
+  classification,
+  installRoot,
+  targetPath,
+  sourceVersion,
+  sourceHashValue,
+  currentCommit,
+  installRecord
+}: {
+  classification: Awaited<ReturnType<typeof classifySymlinkInstall>>;
+  installRoot: string;
+  targetPath: string;
+  sourceVersion: string | null;
+  sourceHashValue: string;
+  currentCommit: string | null;
+  installRecord: InstallRecord;
+}): StatusCheckResult {
+  const installedCommit = installRecord.sourceCommit ?? null;
+
+  if (classification.state === "correct") {
+    // A correct symlink reflects the live source, so it is current by
+    // definition: the installed tree is the source tree.
+    return {
+      status: "current",
+      reason: "symlink points at the selected source path",
+      target: installRoot,
+      targetPath,
+      installedVersion: sourceVersion,
+      currentVersion: sourceVersion,
+      installedCommit,
+      currentCommit,
+      installedHash: sourceHashValue,
+      currentHash: sourceHashValue,
+      errors: []
+    };
+  }
+
+  return {
+    status: "dirty",
+    reason: symlinkDirtyReason(classification.state),
+    target: installRoot,
+    targetPath,
+    installedVersion: installRecord.version ?? null,
+    currentVersion: sourceVersion,
+    installedCommit,
+    currentCommit,
+    installedHash: installRecord.sourceHash ?? null,
+    currentHash: sourceHashValue,
+    errors: []
+  };
+}
+
+function symlinkDirtyReason(state: SymlinkInstallState): string {
+  switch (state) {
+    case "broken":
+      return "symlink target is missing or broken";
+    case "wrong-target":
+      return "symlink points at an unexpected target instead of the selected source path";
+    case "real-directory":
+      return "expected a symlink but found a real directory";
+    default:
+      return "symlink install does not match the selected source path";
+  }
 }
 
 function targetReadFailureStatus({
