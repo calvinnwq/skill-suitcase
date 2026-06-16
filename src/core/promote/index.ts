@@ -383,6 +383,15 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
     return result;
   }
 
+  const receiptPath = path.join(installRoot, RECEIPT_FILE);
+  let previousReceiptText: string | null;
+  try {
+    previousReceiptText = await readOptionalFileText(receiptPath);
+  } catch (error) {
+    result.errors.push({ code: "promote_receipt_failed", message: describeError(error) });
+    return result;
+  }
+
   // Phase 1: copy the target tree into the catalog source path.
   try {
     await copyTree(targetSkillPath, repoSkillPath);
@@ -446,8 +455,6 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
   result.backupPath = backupPath;
 
   // Phase 4: write a receipt linking the target to the promoted catalog source.
-  const receiptPath = path.join(installRoot, RECEIPT_FILE);
-  const previousReceiptText = await readFileSafeText(receiptPath);
   try {
     if (__test?.corruptReceiptBeforeFailure === true) {
       await writeFile(receiptPath, "{", "utf8");
@@ -610,11 +617,14 @@ async function restoreOriginalReceipt({
   }
 }
 
-async function readFileSafeText(filePath: string): Promise<string | null> {
+async function readOptionalFileText(filePath: string): Promise<string | null> {
   try {
     return await readFile(filePath, "utf8");
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") {
+      return null;
+    }
+    throw error;
   }
 }
 

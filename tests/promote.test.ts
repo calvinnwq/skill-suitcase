@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -390,6 +390,40 @@ test("promote --apply restores the existing receipt when receipt persistence fai
   assert.equal((await lstat(skillPath)).isSymbolicLink(), false);
   assert.equal(await readFile(path.join(skillPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
   await assert.rejects(stat(repoSkillPath));
+});
+
+test("promote --apply preserves an unreadable existing receipt when receipt snapshot fails", async (t) => {
+  const sourceRoot = await makeRepo(t);
+  const { home, skillPath } = await makeTargetSkill(t);
+  const repoSkillPath = path.join(sourceRoot, "skills", "new-skill");
+  const receiptPath = path.join(home, "skills", ".skill-suitcase-receipt.json");
+  const beforeReceipt = `${JSON.stringify({
+    schema: "calvinnwq.skills.receipt.v0",
+    source: {
+      repo: sourceRoot,
+      ref: null,
+      commit: null
+    },
+    installs: {}
+  }, null, 2)}\n`;
+  await writeFile(receiptPath, beforeReceipt, "utf8");
+  await chmod(receiptPath, 0o000);
+  t.after(async () => {
+    await chmod(receiptPath, 0o600).catch(() => undefined);
+  });
+
+  const result = await executePromote({ source: sourceRoot, targetSkill: skillPath });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.code === "promote_receipt_failed"));
+  assert.deepEqual(result.steps, []);
+  assert.equal((await lstat(skillPath)).isDirectory(), true);
+  assert.equal((await lstat(skillPath)).isSymbolicLink(), false);
+  assert.equal(await readFile(path.join(skillPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
+  await assert.rejects(stat(repoSkillPath));
+  assert.equal((await stat(receiptPath)).isFile(), true);
+  await chmod(receiptPath, 0o600);
+  assert.equal(await readFile(receiptPath, "utf8"), beforeReceipt);
 });
 
 test("promote --apply refuses without mutating when the catalog already has the skill", async (t) => {
