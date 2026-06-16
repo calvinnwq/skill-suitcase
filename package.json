@@ -12,7 +12,7 @@
     "url": "https://github.com/calvinnwq/skill-suitcase/issues"
   },
   "bin": {
-    "suitcase": "./dist/src/cli.js"
+    "suitcase": "dist/src/cli.js"
   },
   "files": [
     "dist/src/**/*.js",
@@ -24,7 +24,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && chmod +x dist/src/cli.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "pnpm run typecheck",
     "test": "rm -rf dist && pnpm run build && node --test dist/tests/*.test.js",
