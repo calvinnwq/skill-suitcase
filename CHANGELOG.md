@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0](https://github.com/calvinnwq/skill-suitcase/compare/skill-suitcase-v0.3.0...skill-suitcase-v0.4.0) (2026-06-16)
+
+
+### Features
+
+* **promote:** add target skill promotion flow ([f12fedb](https://github.com/calvinnwq/skill-suitcase/commit/f12fedbeff1009d29ffab276578d2b7dd51a1127))
+* **promote:** Implemented the live `promote --apply` execution for NGX-457 (copy → hash-verify → backup+symlink → receipt, fully transactional) with TDD, completing all four acceptance criteria; all verification gates pass. ([d40e8f8](https://github.com/calvinnwq/skill-suitcase/commit/d40e8f893969af72ee4762f1dd178435c5ce2cbb))
+* **promote:** Implemented the read-only/dry-run `promote` plan for NGX-457 with machine-readable conflict detection, wired as a new CLI command with TDD; all verification gates pass. ([f60fe40](https://github.com/calvinnwq/skill-suitcase/commit/f60fe40120cfcac8c418f00acf9a58cd61fd6a5d))
+
 ## [0.3.0](https://github.com/calvinnwq/skill-suitcase/compare/skill-suitcase-v0.2.0...skill-suitcase-v0.3.0) (2026-06-16)
 
 
