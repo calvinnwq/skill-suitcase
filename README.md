@@ -743,6 +743,16 @@ of a previously installed skill, the receipt's rollback record is marked
 created the whole skill install, rollback removes that install record from the
 receipt.
 
+For `mode: "symlink"` installs, rollback reverses only links that `apply --mode
+symlink` created (recorded with `created: true`): it removes the
+Suitcase-created link — the link itself, never the catalog source it points at —
+reports it under `removed`, and drops the install record from the receipt.
+Track-adopted symlinks (no rollback state) and links `apply` only refreshed
+(`created: false`) are a safe `noop`. Rollback refuses (`target_drift`) rather
+than delete a real directory, a retargeted link, or a broken link found where
+the created symlink was expected, so it can never delete state it did not
+capture.
+
 On failure (`ok: false`), `errors` contains objects with `code` and `message`
 (plus optional `skill` and `path`). Error codes include:
 

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { SYMLINK_MODE } from "../install-modes.js";
+import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
 import {
   buildInstalledFiles,
   RECEIPT_FILE,
@@ -10,9 +10,20 @@ import {
   type ReceiptInstallRecord
 } from "../receipts/index.js";
 
+/**
+ * Schema marker apply --mode symlink writes into a symlink receipt's `rollback`
+ * field. Rollback only reverses links Suitcase created (created:true); see
+ * parseAppliedSymlinkRollback.
+ */
+const SYMLINK_ROLLBACK_SCHEMA = "calvinnwq.skills.symlink-rollback.v0";
+
 type RollbackInput = {
   receipt: string;
 };
+
+type AppliedSymlinkRollback =
+  | { kind: "apply-created"; targetPath: string; expectedSourcePath: string }
+  | { kind: "none" };
 
 type RollbackError = {
   code: string;
@@ -163,16 +174,73 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
   for (const { skill, record } of records) {
     if (record.mode === SYMLINK_MODE) {
       // A symlink install is a live link from the agent home into the catalog
-      // source (agent skill path -> repo source path). Skill Suitcase never
-      // owns copies of the source files for these installs, so rollback must
-      // never restore copy-style file bytes here: doing so would write through
-      // the link and mutate the catalog source. Adopted symlinks also carry no
-      // Suitcase-created rollback state (track only writes a receipt; it does
-      // not create or replace the link), so there is nothing to reverse. Report
-      // a safe no-op and leave the link and its source untouched. When apply
-      // gains symlink-install support it will record explicit symlink rollback
-      // state, which a dedicated branch here can then honor (removing the
-      // Suitcase-created link or restoring the captured prior target state).
+      // source (agent skill path -> repo source path). Skill Suitcase never owns
+      // copies of the source files for these installs, so rollback must never
+      // restore copy-style file bytes here: doing so would write through the
+      // link and mutate the catalog source.
+      //
+      // apply --mode symlink records explicit symlink-rollback state with
+      // created:true for links it created. Rollback reverses those by removing
+      // the Suitcase-created link (the link only, never the source it points
+      // at), per ARCHITECTURE.md. Adopted (track) links carry no rollback state
+      // and apply-refreshed links record created:false; in both cases Suitcase
+      // did not create the link, so there is nothing to reverse and rollback is
+      // a safe no-op that leaves the link and its source untouched.
+      const appliedSymlink = parseAppliedSymlinkRollback(record, installRoot);
+      if (appliedSymlink.kind === "apply-created") {
+        const removal = await removeAppliedSymlink(appliedSymlink);
+        if (removal.kind === "removed") {
+          result.summary.removed += 1;
+          removeReceiptInstallRecord(installs, skill, record);
+          changedReceipt = true;
+          receiptChangedSkills.add(skill);
+          result.rollbacks.push({
+            skill,
+            targetPath: appliedSymlink.targetPath,
+            status: "restored",
+            restored: 0,
+            removed: 1,
+            failed: 0
+          });
+          continue;
+        }
+        result.ok = false;
+        if (removal.kind === "refused") {
+          result.summary.refused += 1;
+          result.errors.push({
+            code: "target_drift",
+            message: removal.message,
+            skill,
+            path: appliedSymlink.targetPath
+          });
+          result.rollbacks.push({
+            skill,
+            targetPath: appliedSymlink.targetPath,
+            status: "refused",
+            restored: 0,
+            removed: 0,
+            failed: 0
+          });
+          continue;
+        }
+        result.summary.failed += 1;
+        result.errors.push({
+          code: "rollback_remove_failed",
+          message: removal.message,
+          skill,
+          path: appliedSymlink.targetPath
+        });
+        result.rollbacks.push({
+          skill,
+          targetPath: appliedSymlink.targetPath,
+          status: "refused",
+          restored: 0,
+          removed: 0,
+          failed: 1
+        });
+        continue;
+      }
+
       result.summary.noop += 1;
       result.rollbacks.push({
         skill,
@@ -421,6 +489,85 @@ function removeReceiptInstallRecord(
   }
   if (existing === record) {
     delete installs[skill];
+  }
+}
+
+/**
+ * Recognize the symlink-rollback state apply --mode symlink writes for a link it
+ * created. Returns "apply-created" only when the receipt explicitly records a
+ * Suitcase-created link that has not already been rolled back. Track-adopted
+ * links (no rollback field), apply-refreshed links (created:false), and
+ * already-rolled-back links all return "none" so rollback leaves them alone.
+ */
+function parseAppliedSymlinkRollback(record: ReceiptInstallRecord, installRoot: string): AppliedSymlinkRollback {
+  const rollback = record.rollback;
+  if (!isRecord(rollback) || rollback.schema !== SYMLINK_ROLLBACK_SCHEMA) {
+    return { kind: "none" };
+  }
+  if (rollback.status !== "available" || rollback.created !== true) {
+    return { kind: "none" };
+  }
+  const targetPathValue = normalizeString(rollback.targetPath) ?? normalizeString(record.targetPath);
+  if (targetPathValue === null) {
+    return { kind: "none" };
+  }
+  const targetPath = resolveReceiptPathUnderRoot(installRoot, targetPathValue);
+  if (targetPath === null) {
+    return { kind: "none" };
+  }
+  const expectedSourcePath = symlinkRecordSourcePath(record);
+  if (expectedSourcePath === null) {
+    return { kind: "none" };
+  }
+  return { kind: "apply-created", targetPath, expectedSourcePath };
+}
+
+function symlinkRecordSourcePath(record: ReceiptInstallRecord): string | null {
+  const direct = normalizeString(record.sourcePath);
+  if (direct !== null) {
+    return direct;
+  }
+  const source = record.source;
+  if (isRecord(source)) {
+    return normalizeString(source.path);
+  }
+  return null;
+}
+
+/**
+ * Remove a Suitcase-created symlink as part of rollback. Only a link that still
+ * points exactly at the recorded source (classification "correct") is removed,
+ * and only the link itself is unlinked — never the source it points at. Any
+ * other on-disk shape (a real directory where the link was, a retargeted or
+ * broken link, a missing target) is refused as drift so rollback can never
+ * delete a real directory it did not capture as rollback state.
+ */
+async function removeAppliedSymlink(rollback: { targetPath: string; expectedSourcePath: string }): Promise<
+  | { kind: "removed" }
+  | { kind: "refused"; message: string }
+  | { kind: "failed"; message: string }
+> {
+  const classification = await classifySymlinkInstall({
+    targetPath: rollback.targetPath,
+    expectedSourcePath: rollback.expectedSourcePath
+  });
+  if (classification.state !== "correct") {
+    return {
+      kind: "refused",
+      message: `Refusing to remove ${rollback.targetPath}: expected a symlink to ${rollback.expectedSourcePath} but found ${classification.state}.`
+    };
+  }
+  try {
+    await unlink(rollback.targetPath);
+    return { kind: "removed" };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return { kind: "removed" };
+    }
+    return {
+      kind: "failed",
+      message: `Failed to remove symlink ${rollback.targetPath}: ${errorMessage(error)}`
+    };
   }
 }
 

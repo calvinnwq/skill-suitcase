@@ -660,7 +660,13 @@ test("rollback never restores copy-style bytes through a symlink-mode install", 
   assert.equal(await readFile(path.join(sourceSkill, "runtime.js"), "utf8"), sourceBytesBefore);
 });
 
-test("rollback treats an apply --mode symlink install as a safe no-op", async (t) => {
+async function createAppliedSymlink(t: { after(fn: () => Promise<void> | void): void }): Promise<{
+  sourceRoot: string;
+  sourceSkill: string;
+  targetRoot: string;
+  targetSkill: string;
+  receiptPath: string;
+}> {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-apply-symlink-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-apply-symlink-target-"));
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));
@@ -689,7 +695,102 @@ test("rollback treats an apply --mode symlink install as a safe no-op", async (t
 
   const targetSkill = path.join(targetRoot, "office-hours");
   assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+
+  return {
+    sourceRoot,
+    sourceSkill,
+    targetRoot,
+    targetSkill,
+    receiptPath: path.join(targetRoot, RECEIPT_FILE)
+  };
+}
+
+test("rollback removes an apply --mode symlink install and leaves the catalog source intact", async (t) => {
+  const { sourceSkill, targetSkill, receiptPath } = await createAppliedSymlink(t);
   const sourceBytesBefore = await readFile(path.join(sourceSkill, "runtime.js"), "utf8");
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.removed, 1);
+  assert.equal(result.summary.noop, 0);
+  assert.equal(result.summary.restored, 0);
+  assert.equal(result.summary.refused, 0);
+  assert.equal(result.rollbacks[0]?.status, "restored");
+  assert.equal(result.rollbacks[0]?.removed, 1);
+
+  // The Suitcase-created link is gone; the catalog source dir and bytes survive
+  // (rollback unlinks the link only, never writes/deletes through it).
+  await assert.rejects(lstat(targetSkill), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+  assert.equal((await stat(sourceSkill)).isDirectory(), true);
+  assert.equal(await readFile(path.join(sourceSkill, "runtime.js"), "utf8"), sourceBytesBefore);
+
+  // The receipt no longer claims the removed install.
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as { installs: Record<string, unknown> };
+  assert.equal(Object.prototype.hasOwnProperty.call(receipt.installs, "office-hours"), false);
+});
+
+test("rollback refuses to delete a real directory where an apply-created symlink was expected", async (t) => {
+  const { sourceSkill, targetSkill, receiptPath } = await createAppliedSymlink(t);
+
+  // Drift: the managed link was replaced by a real directory that Suitcase never
+  // captured as rollback state. ARCHITECTURE.md forbids deleting it.
+  await rm(targetSkill, { force: true });
+  await mkdir(targetSkill, { recursive: true });
+  await writeFile(path.join(targetSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(result.summary.refused, 1);
+  assert.equal(result.rollbacks[0]?.status, "refused");
+  assert.equal(result.errors[0]?.code, "target_drift");
+
+  // The real directory is preserved, not deleted.
+  assert.equal((await lstat(targetSkill)).isDirectory(), true);
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), false);
+  assert.equal((await stat(sourceSkill)).isDirectory(), true);
+});
+
+test("rollback leaves an apply-refreshed symlink (created:false) as a safe no-op", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-refresh-symlink-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-refresh-symlink-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+
+  const targetSkill = path.join(targetRoot, "office-hours");
+  await symlink(sourceSkill, targetSkill, "dir");
+
+  // A receipt whose symlink-rollback state says apply only *refreshed* an
+  // existing correct link (created:false). Apply did not create the link, so
+  // rollback must not remove it.
+  await upsertAndWriteReceipt({
+    installRoot: targetRoot,
+    skillName: "office-hours",
+    installRecord: {
+      skill: "office-hours",
+      agent: "openclaw",
+      target: "openclaw",
+      mode: "symlink",
+      source: { path: sourceSkill },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      sourceHash: "0000000000000000000000000000000000000000000000000000000000000000",
+      rollback: {
+        schema: "calvinnwq.skills.symlink-rollback.v0",
+        status: "available",
+        mode: "symlink",
+        targetPath: targetSkill,
+        created: false,
+        previous: { kind: "symlink" }
+      }
+    }
+  });
 
   const receiptPath = path.join(targetRoot, RECEIPT_FILE);
   const result = await rollback({ receipt: receiptPath });
@@ -697,11 +798,7 @@ test("rollback treats an apply --mode symlink install as a safe no-op", async (t
   assert.equal(result.ok, true);
   assert.equal(result.summary.noop, 1);
   assert.equal(result.summary.removed, 0);
-  assert.equal(result.summary.restored, 0);
   assert.equal(result.rollbacks[0]?.status, "noop");
-
-  // The apply-created link and the catalog source are left untouched.
   assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
   assert.equal(path.resolve(path.dirname(targetSkill), await readlink(targetSkill)), path.resolve(sourceSkill));
-  assert.equal(await readFile(path.join(sourceSkill, "runtime.js"), "utf8"), sourceBytesBefore);
 });
