@@ -17,6 +17,7 @@ export const applyCommand: CommandModule = {
       target: string;
       lock?: string;
       artifact?: string;
+      mode?: string;
       targetOverrides?: ReturnType<typeof targetOverridesFromArgs>;
     } = {
       source: requireStringValue("source", args.source),
@@ -34,6 +35,10 @@ export const applyCommand: CommandModule = {
 
     if (args.artifact !== undefined) {
       input.artifact = args.artifact;
+    }
+
+    if (args.mode !== undefined) {
+      input.mode = args.mode;
     }
 
     return apply(input);

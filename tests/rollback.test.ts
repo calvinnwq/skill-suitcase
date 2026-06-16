@@ -659,3 +659,49 @@ test("rollback never restores copy-style bytes through a symlink-mode install", 
   assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
   assert.equal(await readFile(path.join(sourceSkill, "runtime.js"), "utf8"), sourceBytesBefore);
 });
+
+test("rollback treats an apply --mode symlink install as a safe no-op", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-apply-symlink-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-apply-symlink-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"source\");\n");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-apply-symlink-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const applied = await apply({ source: sourceRoot, target: "openclaw", lock: lockPath, mode: "symlink" });
+  assert.equal(applied.ok, true);
+
+  const targetSkill = path.join(targetRoot, "office-hours");
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+  const sourceBytesBefore = await readFile(path.join(sourceSkill, "runtime.js"), "utf8");
+
+  const receiptPath = path.join(targetRoot, RECEIPT_FILE);
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.noop, 1);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(result.summary.restored, 0);
+  assert.equal(result.rollbacks[0]?.status, "noop");
+
+  // The apply-created link and the catalog source are left untouched.
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+  assert.equal(path.resolve(path.dirname(targetSkill), await readlink(targetSkill)), path.resolve(sourceSkill));
+  assert.equal(await readFile(path.join(sourceSkill, "runtime.js"), "utf8"), sourceBytesBefore);
+});

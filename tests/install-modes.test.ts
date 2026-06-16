@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   classifySymlinkInstall,
+  isPathWithinRoot,
   SYMLINK_MODE
 } from "../src/core/install-modes.js";
 
@@ -99,6 +100,33 @@ test("classifies a missing target path as missing", async (t) => {
 
   assert.equal(result.state, "missing");
   assert.equal(result.linkTarget, null);
+});
+
+test("treats a source nested inside the approved root as within the root", () => {
+  const root = path.join("/catalog", "repo");
+  const sourcePath = path.join(root, "skills", "office-hours");
+
+  assert.equal(isPathWithinRoot({ candidatePath: sourcePath, rootPath: root }), true);
+});
+
+test("treats the approved root itself as within the root", () => {
+  const root = path.join("/catalog", "repo");
+
+  assert.equal(isPathWithinRoot({ candidatePath: root, rootPath: root }), true);
+});
+
+test("rejects a source that escapes the approved root via ..", () => {
+  const root = path.join("/catalog", "repo");
+  const sourcePath = path.join(root, "skills", "..", "..", "..", "etc", "evil");
+
+  assert.equal(isPathWithinRoot({ candidatePath: sourcePath, rootPath: root }), false);
+});
+
+test("rejects a sibling that only shares a name prefix with the approved root", () => {
+  const root = path.join("/catalog", "repo");
+  const sibling = path.join("/catalog", "repo-evil", "skills", "office-hours");
+
+  assert.equal(isPathWithinRoot({ candidatePath: sibling, rootPath: root }), false);
 });
 
 test("classifies a regular file where a symlink is expected as not-symlink", async (t) => {

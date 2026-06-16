@@ -32,6 +32,7 @@ export type ParsedCommandArgs = {
   output?: string;
   lock?: string;
   artifact?: string;
+  mode?: string;
   receipt?: string;
   codexHome?: string;
   codexSkills?: string;
@@ -45,6 +46,7 @@ export type ValueFlagName =
   | "output"
   | "lock"
   | "artifact"
+  | "mode"
   | "receipt"
   | "codexHome"
   | "codexSkills"

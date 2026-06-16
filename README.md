@@ -636,6 +636,16 @@ per skill. Each receipt also captures the pre-apply state of every written file
 (a `rollback` record) so the install can later be reversed with
 `suitcase rollback`.
 
+`--mode` selects how each planned skill is materialized. The default
+`--mode copy` writes the source files into the target root. `--mode symlink`
+instead links each agent skill path at its catalog source path (agent skill
+path -> repo source path) and records `mode: "symlink"` in the receipt rather
+than inferring the mode from filesystem shape. Symlink mode runs the same
+approval and pre-apply safety checks, refuses to point a managed link outside
+the approved source root, and refuses to replace an existing real directory or
+wrong/broken link (converting those requires explicit approval). Unknown values
+return an `invalid_apply_mode` error.
+
 On success (`ok: true`):
 
 ```json

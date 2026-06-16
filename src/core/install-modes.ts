@@ -30,6 +30,29 @@ export type SymlinkClassification = {
 };
 
 /**
+ * Source-root escape guard. Returns true only when `candidatePath` resolves to
+ * the approved `rootPath` or a descendant of it. Used before apply creates a
+ * symlink so a managed link can never point outside the approved catalog source
+ * root (e.g. a variant `source` of `../../etc`). Comparison is lexical on
+ * resolved paths so it is deterministic and does not touch the filesystem.
+ */
+export function isPathWithinRoot({
+  candidatePath,
+  rootPath
+}: {
+  candidatePath: string;
+  rootPath: string;
+}): boolean {
+  const resolvedRoot = path.resolve(rootPath);
+  const resolvedCandidate = path.resolve(candidatePath);
+  if (resolvedCandidate === resolvedRoot) {
+    return true;
+  }
+  const relative = path.relative(resolvedRoot, resolvedCandidate);
+  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+/**
  * Classify the install at `targetPath` against the source path the catalog
  * selected. This is read-only: it never mutates the target and never follows a
  * symlink to mutate anything. Comparison is lexical (matching how the symlink is
