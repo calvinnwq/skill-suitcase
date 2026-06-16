@@ -43,6 +43,7 @@ node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openc
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
+node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --dry-run --json
 ```
 
 `import --json` is a read-only onboarding inspection for existing skills repos.
@@ -855,6 +856,58 @@ and `summary.planned` counts only selected planned skills. Error codes include:
 - `invalid_receipt` — the existing receipt cannot be read or normalized
 - `receipt_write_failed` — the adoption receipt could not be written
 - `diff_*` — a diff-layer error propagated from target resolution
+
+## `promote` Output
+
+`promote` turns a target-created skill (for example a skill an agent wrote into
+`~/.codex/skills/new-skill`) into a repo-owned Skill Suitcase skill. It follows
+the source-of-truth direction: the catalog repo owns the skill files, and the
+agent home links back to that source.
+
+The current iteration ships the read-only dry-run plan only, so `promote`
+requires `--dry-run`. It inspects the `--target-skill` directory and the catalog
+`--source` repo without mutating anything, then reports the intended
+copy → verify → symlink → receipt workflow plus any blocking conflicts. The
+live copy/verify/symlink/receipt mutation is approval-gated follow-up work.
+
+On a clean plan (`ok: true`):
+
+```json
+{
+  "ok": true,
+  "dryRun": true,
+  "readOnly": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "targetSkill": "/Users/ngxcalvin/.codex/skills/new-skill",
+  "skillName": "new-skill",
+  "repoSkillPath": "/Users/ngxcalvin/repos/skills/skills/new-skill",
+  "plan": [
+    { "action": "copy", "description": "Copy the target skill contents into the catalog source path.", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
+    { "action": "verify", "description": "Hash-verify the copied catalog source against the original target contents before swapping.", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
+    { "action": "symlink", "description": "Replace the target directory with a symlink back to the catalog source after verification.", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
+    { "action": "receipt", "description": "Write receipt metadata linking the target to the promoted catalog source.", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" }
+  ],
+  "conflicts": [],
+  "summary": { "conflicts": 0, "steps": 4 }
+}
+```
+
+The dry-run is purely read-only: it never creates the catalog copy, never
+replaces the target directory with a symlink, and never writes a receipt. The
+`plan` array always describes the intended workflow; `ok` and `conflicts` decide
+whether a later live promotion would be allowed to run. All applicable conflicts
+are collected (not short-circuited) so callers see every blocker at once.
+Conflict codes are machine-readable:
+
+- `existing_repo_skill` — the catalog already has a skill at `repoSkillPath`; a
+  conflict decision is required before overwriting it
+- `unsafe_path` — the skill name is not a plain directory segment, the promoted
+  path would escape the catalog `skills/` directory, or the target skill already
+  lives inside the source repo (so it is not a target-created skill)
+- `dirty_target` — the target skill root is itself a symlink, or its tree
+  contains a nested symlink, so it cannot be hash-verified or copied faithfully
+- `unsupported_layout` — the target path is missing, is not a directory, or has
+  no `SKILL.md`
 
 ## Receipt Module
 

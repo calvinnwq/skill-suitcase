@@ -42,6 +42,7 @@
     "src/commands/apply.ts",
     "src/commands/rollback.ts",
     "src/commands/track.ts",
+    "src/commands/promote.ts",
     "tests/commands.test.ts",
     "src/renderers/exit-codes.ts",
     "src/renderers/json.ts",
@@ -67,6 +68,7 @@
     "src/core/apply/index.ts",
     "src/core/rollback/index.ts",
     "src/core/track/index.ts",
+    "src/core/promote/index.ts",
     "src/suitcase-manifest.ts",
     "src/catalog.ts",
     "src/planner.ts",
@@ -80,10 +82,12 @@
     "src/status.ts",
     "src/rollback.ts",
     "src/track.ts",
+    "src/promote.ts",
     "tests/core-boundaries.test.ts",
     "src/adapters/filesystem.ts",
     "tests/architecture-guardrails.test.ts",
     "tests/platform-adapters.test.ts",
-    "tests/install-modes.test.ts"
+    "tests/install-modes.test.ts",
+    "tests/promote.test.ts"
   ]
 }
