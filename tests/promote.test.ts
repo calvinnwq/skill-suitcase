@@ -138,6 +138,31 @@ test("promote dry-run reports unsafe_path when the target skill already lives in
   assert.ok(result.conflicts.some((entry) => entry.code === "unsafe_path"));
 });
 
+test("promote dry-run reports unsupported_layout when the source root is missing", async (t) => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-promote-missing-src-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const sourceRoot = path.join(parent, "typo");
+  const { skillPath } = await makeTargetSkill(t);
+
+  const result = await planPromote({ source: sourceRoot, targetSkill: skillPath });
+
+  assert.equal(result.ok, false);
+  const conflict = result.conflicts.find((entry) => entry.path === sourceRoot);
+  assert.equal(conflict?.code, "unsupported_layout");
+});
+
+test("promote dry-run reports unsafe_path when the repo destination is inside the target skill", async (t) => {
+  const { skillPath } = await makeTargetSkill(t);
+  const sourceRoot = path.join(skillPath, "catalog");
+  await mkdir(path.join(sourceRoot, "skills"), { recursive: true });
+
+  const result = await planPromote({ source: sourceRoot, targetSkill: skillPath });
+
+  assert.equal(result.ok, false);
+  const conflict = result.conflicts.find((entry) => entry.path === path.join(sourceRoot, "skills", "new-skill"));
+  assert.equal(conflict?.code, "unsafe_path");
+});
+
 test("promote dry-run collects multiple machine-readable conflicts at once", async (t) => {
   const sourceRoot = await makeRepo(t);
   const { skillPath } = await makeTargetSkill(t, { withSkillFile: false });
@@ -317,6 +342,22 @@ test("promote --apply refuses without mutating when the catalog already has the 
   // Existing repo skill untouched; the target is still a real directory.
   assert.equal(await readFile(path.join(repoSkillPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# existing\n");
   assert.equal((await lstat(skillPath)).isSymbolicLink(), false);
+});
+
+test("promote --apply refuses a missing source root without mutating target files", async (t) => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-promote-apply-missing-src-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const sourceRoot = path.join(parent, "typo");
+  const { skillPath } = await makeTargetSkill(t);
+
+  const result = await executePromote({ source: sourceRoot, targetSkill: skillPath });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.conflicts.some((entry) => entry.path === sourceRoot && entry.code === "unsupported_layout"));
+  await assert.rejects(stat(sourceRoot));
+  assert.equal((await lstat(skillPath)).isDirectory(), true);
+  assert.equal((await lstat(skillPath)).isSymbolicLink(), false);
+  assert.equal(await readFile(path.join(skillPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
 });
 
 test("promote --apply command dispatch performs a live promote with exit code 0", async (t) => {

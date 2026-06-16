@@ -135,6 +135,21 @@ export async function planPromote({ source, targetSkill }: PlanPromoteInput): Pr
 
   const conflicts: PromoteConflict[] = [];
   const nameIsPlain = isPlainPathSegment(skillName);
+  const sourceInfo = await statSafe(sourceRoot);
+
+  if (sourceInfo === null) {
+    conflicts.push({
+      code: "unsupported_layout",
+      message: `Source root ${sourceRoot} does not exist.`,
+      path: sourceRoot
+    });
+  } else if (!sourceInfo.isDirectory()) {
+    conflicts.push({
+      code: "unsupported_layout",
+      message: `Source root ${sourceRoot} is not a directory.`,
+      path: sourceRoot
+    });
+  }
 
   if (!nameIsPlain) {
     conflicts.push({
@@ -151,6 +166,14 @@ export async function planPromote({ source, targetSkill }: PlanPromoteInput): Pr
         path: repoSkillPath
       });
     }
+  }
+
+  if (isSameOrInsidePath(repoSkillPath, targetSkillPath)) {
+    conflicts.push({
+      code: "unsafe_path",
+      message: `Promoted path ${repoSkillPath} would be inside the target skill ${targetSkillPath}.`,
+      path: repoSkillPath
+    });
   }
 
   if (await isPathWithinRoot({ candidatePath: targetSkillPath, rootPath: sourceRoot })) {
@@ -437,6 +460,9 @@ function uniqueSuffix(): string {
 }
 
 async function copyTree(src: string, dest: string): Promise<void> {
+  if (isSameOrInsidePath(dest, src)) {
+    throw new Error(`Refusing to copy ${src} into nested destination ${dest}.`);
+  }
   await mkdir(dest, { recursive: true });
   const entries = await readdir(src, { withFileTypes: true });
   for (const entry of entries) {
@@ -551,6 +577,14 @@ async function readDirSafe(root: string): Promise<Dirent[]> {
   }
 }
 
+async function statSafe(targetPath: string): Promise<Stats | null> {
+  try {
+    return await stat(targetPath);
+  } catch {
+    return null;
+  }
+}
+
 async function lstatSafe(targetPath: string): Promise<Stats | null> {
   try {
     return await lstat(targetPath);
@@ -585,4 +619,9 @@ function isPlainPathSegment(value: string): boolean {
     !trimmed.includes("/") &&
     !trimmed.includes("\\") &&
     !path.isAbsolute(trimmed);
+}
+
+function isSameOrInsidePath(candidatePath: string, rootPath: string): boolean {
+  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return relative === "" || (relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative));
 }
