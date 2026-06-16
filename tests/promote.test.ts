@@ -163,6 +163,39 @@ test("promote dry-run reports unsafe_path when the repo destination is inside th
   assert.equal(conflict?.code, "unsafe_path");
 });
 
+test("promote dry-run reports unsafe_path when catalog skills symlink escapes the source root", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-promote-src-"));
+  const escapedSkillsRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-promote-escaped-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(escapedSkillsRoot, { recursive: true, force: true }));
+  await symlink(escapedSkillsRoot, path.join(sourceRoot, "skills"), "dir");
+  const { skillPath } = await makeTargetSkill(t);
+
+  const result = await planPromote({ source: sourceRoot, targetSkill: skillPath });
+
+  assert.equal(result.ok, false);
+  const conflict = result.conflicts.find((entry) => entry.path === path.join(sourceRoot, "skills"));
+  assert.equal(conflict?.code, "unsafe_path");
+  await assert.rejects(stat(path.join(escapedSkillsRoot, "new-skill")));
+});
+
+test("promote --apply refuses when catalog skills symlink resolves inside the target skill", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-promote-src-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  const { skillPath } = await makeTargetSkill(t);
+  const linkedSkillsRoot = path.join(skillPath, "linked-catalog-skills");
+  await mkdir(linkedSkillsRoot, { recursive: true });
+  await symlink(linkedSkillsRoot, path.join(sourceRoot, "skills"), "dir");
+
+  const result = await executePromote({ source: sourceRoot, targetSkill: skillPath });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.conflicts.some((entry) => entry.code === "unsafe_path"));
+  assert.equal((await lstat(skillPath)).isDirectory(), true);
+  assert.equal((await lstat(skillPath)).isSymbolicLink(), false);
+  await assert.rejects(stat(path.join(linkedSkillsRoot, "new-skill")));
+});
+
 test("promote dry-run collects multiple machine-readable conflicts at once", async (t) => {
   const sourceRoot = await makeRepo(t);
   const { skillPath } = await makeTargetSkill(t, { withSkillFile: false });

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, rename, rm, stat, symlink, unlink } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, realpath, rename, rm, stat, symlink, unlink } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SKILLS_DIRECTORY } from "../../config/defaults.js";
 import { isPathWithinRoot, SYMLINK_MODE } from "../install-modes.js";
@@ -136,6 +136,7 @@ export async function planPromote({ source, targetSkill }: PlanPromoteInput): Pr
   const conflicts: PromoteConflict[] = [];
   const nameIsPlain = isPlainPathSegment(skillName);
   const sourceInfo = await statSafe(sourceRoot);
+  const sourceRealPath = sourceInfo?.isDirectory() === true ? await realpathSafe(sourceRoot) : null;
 
   if (sourceInfo === null) {
     conflicts.push({
@@ -148,6 +149,29 @@ export async function planPromote({ source, targetSkill }: PlanPromoteInput): Pr
       code: "unsupported_layout",
       message: `Source root ${sourceRoot} is not a directory.`,
       path: sourceRoot
+    });
+  }
+
+  const repoSkillsInfo = await statSafe(repoSkillsRoot);
+  const repoSkillsRealPath = repoSkillsInfo?.isDirectory() === true ? await realpathSafe(repoSkillsRoot) : null;
+
+  if (repoSkillsInfo === null) {
+    conflicts.push({
+      code: "unsupported_layout",
+      message: `Catalog skills directory ${repoSkillsRoot} does not exist.`,
+      path: repoSkillsRoot
+    });
+  } else if (!repoSkillsInfo.isDirectory()) {
+    conflicts.push({
+      code: "unsupported_layout",
+      message: `Catalog skills directory ${repoSkillsRoot} is not a directory.`,
+      path: repoSkillsRoot
+    });
+  } else if (sourceRealPath !== null && repoSkillsRealPath !== null && !isSameOrInsidePath(repoSkillsRealPath, sourceRealPath)) {
+    conflicts.push({
+      code: "unsafe_path",
+      message: `Catalog skills directory ${repoSkillsRoot} resolves outside the source repo ${sourceRoot}.`,
+      path: repoSkillsRoot
     });
   }
 
@@ -174,6 +198,18 @@ export async function planPromote({ source, targetSkill }: PlanPromoteInput): Pr
       message: `Promoted path ${repoSkillPath} would be inside the target skill ${targetSkillPath}.`,
       path: repoSkillPath
     });
+  }
+
+  const targetRealPath = await realpathSafe(targetSkillPath);
+  if (nameIsPlain && repoSkillsRealPath !== null && targetRealPath !== null) {
+    const resolvedRepoSkillPath = path.join(repoSkillsRealPath, skillName);
+    if (isSameOrInsidePath(resolvedRepoSkillPath, targetRealPath)) {
+      conflicts.push({
+        code: "unsafe_path",
+        message: `Promoted path ${repoSkillPath} resolves inside the target skill ${targetSkillPath}.`,
+        path: repoSkillPath
+      });
+    }
   }
 
   if (await isPathWithinRoot({ candidatePath: targetSkillPath, rootPath: sourceRoot })) {
@@ -580,6 +616,14 @@ async function readDirSafe(root: string): Promise<Dirent[]> {
 async function statSafe(targetPath: string): Promise<Stats | null> {
   try {
     return await stat(targetPath);
+  } catch {
+    return null;
+  }
+}
+
+async function realpathSafe(targetPath: string): Promise<string | null> {
+  try {
+    return await realpath(targetPath);
   } catch {
     return null;
   }
