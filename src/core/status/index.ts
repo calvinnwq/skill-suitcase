@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readlink, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
+import { resolveTargetRegistryEntries } from "../catalog/target-registry.js";
 import { plan, type PlanResult } from "../planning/index.js";
 import {
   LEGACY_RECEIPT_FILE,
@@ -176,11 +177,14 @@ export async function status({
       errors
     };
   }
+  const registryEntries = resolveTargetRegistryEntries(manifest, targetOverrides);
   const exactTargetExists = target !== undefined &&
     target.trim().length > 0 &&
-    Object.prototype.hasOwnProperty.call(assignmentPaths, target);
+    registryEntries.some((entry) => entry.id === target);
 
-  for (const [assignmentPathId, assignmentPath] of Object.entries(assignmentPaths)) {
+  for (const registryEntry of registryEntries) {
+    const assignmentPathId = registryEntry.id;
+    const assignmentPath = registryEntry.assignmentPath;
     if (!shouldIncludeAssignmentPath({ target, exactTargetExists, assignmentPathId, assignmentPath })) {
       continue;
     }
@@ -193,20 +197,6 @@ export async function status({
       statuses: [],
       errors: []
     };
-
-    if (!isRecord(assignmentPath)) {
-      const assignmentError = {
-        code: "invalid_assignment_path",
-        message: `Assignment path ${assignmentPathId} is malformed and must be an object.`
-      };
-      assignmentResult.errors.push(assignmentError);
-      errors.push({
-        ...assignmentError,
-        path: `assignmentPaths.${assignmentPathId}`
-      });
-      assignments.push(assignmentResult);
-      continue;
-    }
 
     const assignmentName = normalizeValue((assignmentPath as { assignment?: unknown }).assignment);
     const kind = normalizeValue((assignmentPath as { kind?: unknown }).kind);
@@ -224,6 +214,11 @@ export async function status({
       };
       assignmentResult.errors.push(assignmentError);
       errors.push({ ...assignmentError, path: `assignmentPaths.${assignmentPathId}.assignment` });
+      assignments.push(assignmentResult);
+      continue;
+    }
+
+    if (registryEntry.readOnly && !manifest.assignments[assignmentName]) {
       assignments.push(assignmentResult);
       continue;
     }

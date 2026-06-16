@@ -62,6 +62,7 @@ type DiffForApply = {
   source: string;
   target: string;
   assignment: string | null;
+  readOnly?: boolean;
   planned: Array<{ skill: string; sourcePath: string; variant?: string }>;
   blocked: Array<{ skill: string; reason?: string }>;
   entries: Array<{
@@ -174,6 +175,27 @@ export async function apply({
   }
 
   const diffResult = await diff({ source, target, targetOverrides }) as DiffForApply;
+  if (diffResult.readOnly === true) {
+    return failure({
+      source: diffResult.source,
+      target,
+      mode: context.mode,
+      input: context.input,
+      assignment: diffResult.assignment,
+      planTarget: diffResult.target,
+      installRoot: diffResult.installRoot,
+      summary: asSummary(diffResult),
+      preApplyStatus: {
+        source: diffResult.source,
+        statuses: [],
+        summary: emptyStatusSummary()
+      },
+      errors: [{
+        code: "read_only_target",
+        message: `Target ${target} is modeled read-only and cannot be applied.`
+      }]
+    });
+  }
   if (!diffResult.ok) {
     return failure({
       source: diffResult.source,
