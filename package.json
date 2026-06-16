@@ -1,11 +1,27 @@
 {
   "name": "skill-suitcase",
   "version": "0.4.1",
-  "private": true,
   "description": "Skill install planner and transactional installer for portable agent skill catalogs.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/calvinnwq/skill-suitcase.git"
+  },
+  "homepage": "https://github.com/calvinnwq/skill-suitcase#readme",
+  "bugs": {
+    "url": "https://github.com/calvinnwq/skill-suitcase/issues"
+  },
   "bin": {
     "suitcase": "./dist/src/cli.js"
+  },
+  "files": [
+    "dist/src/**/*.js",
+    "README.md",
+    "CHANGELOG.md",
+    "docs/*.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

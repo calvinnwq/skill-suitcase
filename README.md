@@ -28,6 +28,15 @@ skill. `promote --dry-run` reports the read-only plan and conflicts; `promote
 --apply` copies the target into the catalog, verifies it, replaces the target
 with a repo-pointing symlink, and writes a receipt.
 
+## Install
+
+```bash
+npm install -g skill-suitcase
+suitcase plan --source /path/to/skills-catalog --target openclaw --json
+```
+
+For local development, build and run the compiled CLI directly:
+
 ## Usage
 
 ```bash

@@ -4,12 +4,11 @@ This checklist records the release/public-readiness decisions for Linear
 `NGX-387`.
 
 Skill Suitcase is already release-managed for GitHub tags and release notes.
-Public distribution and npm publishing are still deliberately gated.
+Public distribution remains deliberate, and npm publishing is manual.
 
 ## Current Release State
 
 - GitHub releases are managed by Release Please.
-- The package is currently private in `package.json`.
 - The CLI bin name is `suitcase`.
 - The package name is `skill-suitcase`.
 - `npm view skill-suitcase` returned 404 on 2026-06-16, so the package name
@@ -39,11 +38,11 @@ Recommended package policy:
 
 - Keep the npm package name as `skill-suitcase`.
 - Keep the bin command as `suitcase`.
-- Keep `private: true` until the repo is intentionally public-ready and Calvin
-  approves publishing.
+- Keep an explicit `files` whitelist in `package.json` so npm publishes only the
+  runtime CLI, docs, changelog, and package metadata.
 - Do not add npm publish automation until there is a public support boundary,
   install guide, and rollback story for bad publishes.
-- Before removing `private: true`, reserve/check the package name again and run
+- Before publishing, reserve/check the package name again and run
   `npm pack --dry-run` to inspect the publish payload.
 
 `skill-suitcase` is the right package identity because it matches the repo and
@@ -145,12 +144,14 @@ Before a public announcement or npm publish:
 - CI is green on the public default branch.
 - `npm pack --dry-run` has been inspected.
 - Package name and bin policy are still correct.
-- `private: true` removal is reviewed as its own PR.
+- The package `files` whitelist excludes local workflow artifacts, tests, and
+  private agent state.
 - GitHub visibility/ruleset decision is explicit.
 - Support boundary explains Calvin-local paths versus portable config.
 - No docs imply `skills.sh` runtime delegation is part of the managed installer.
 
 ## Current Decision
 
-Skill Suitcase is ready for private GitHub releases and continued dogfooding.
-It is not yet approved for npm publishing or public repo conversion.
+Skill Suitcase is ready for manual npm publishing after package tarball
+inspection and npm authentication are confirmed. Automated npm publishing is not
+enabled.
