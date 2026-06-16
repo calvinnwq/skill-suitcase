@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { SYMLINK_MODE } from "../install-modes.js";
 import {
   buildInstalledFiles,
   RECEIPT_FILE,
@@ -160,6 +161,30 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
   records.sort((left, right) => left.skill.localeCompare(right.skill));
 
   for (const { skill, record } of records) {
+    if (record.mode === SYMLINK_MODE) {
+      // A symlink install is a live link from the agent home into the catalog
+      // source (agent skill path -> repo source path). Skill Suitcase never
+      // owns copies of the source files for these installs, so rollback must
+      // never restore copy-style file bytes here: doing so would write through
+      // the link and mutate the catalog source. Adopted symlinks also carry no
+      // Suitcase-created rollback state (track only writes a receipt; it does
+      // not create or replace the link), so there is nothing to reverse. Report
+      // a safe no-op and leave the link and its source untouched. When apply
+      // gains symlink-install support it will record explicit symlink rollback
+      // state, which a dedicated branch here can then honor (removing the
+      // Suitcase-created link or restoring the captured prior target state).
+      result.summary.noop += 1;
+      result.rollbacks.push({
+        skill,
+        targetPath: normalizeString(record.targetPath),
+        status: "noop",
+        restored: 0,
+        removed: 0,
+        failed: 0
+      });
+      continue;
+    }
+
     const parsedRollback = hasOwn(record, "rollback")
       ? normalizeRollback(record.rollback, installRoot)
       : { kind: "none" as const };

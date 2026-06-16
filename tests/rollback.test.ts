@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -9,6 +9,7 @@ import { apply } from "../src/apply.js";
 import { rollback } from "../src/rollback.js";
 import { buildInstalledFiles, RECEIPT_FILE, upsertAndWriteReceipt } from "../src/receipt.js";
 import { status } from "../src/status.js";
+import { track } from "../src/track.js";
 
 async function writeCatalog(sourceRoot: string, targetRoot: string): Promise<void> {
   await writeFile(
@@ -561,4 +562,100 @@ test("rollback reports receipt write failures after restoring files", async (t) 
   assert.equal(result.summary.failed, 1);
   assert.equal(result.rollbacks[0]?.status, "partial");
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"old\");\n");
+});
+
+async function createTrackedSymlink(t: { after(fn: () => Promise<void> | void): void }): Promise<{
+  sourceRoot: string;
+  sourceSkill: string;
+  targetRoot: string;
+  targetSkill: string;
+  receiptPath: string;
+}> {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-mode-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-mode-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(
+    path.join(sourceSkill, "SKILL.md"),
+    "---\nname: office-hours\nversion: \"2026.06.14\"\n---\n# office-hours\n"
+  );
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"source\");\n");
+
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\n\nassignments:\n  openclaw:\n    suitcases:\n      - core\n\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\n\ncompatibility:\n  office-hours:\n    agents:\n      - openclaw\n    variant: canonical\n`
+  );
+
+  const targetSkill = path.join(targetRoot, "office-hours");
+  await symlink(sourceSkill, targetSkill, "dir");
+
+  const trackResult = await track({ source: sourceRoot, target: "openclaw" });
+  assert.equal(trackResult.ok, true);
+
+  return {
+    sourceRoot,
+    sourceSkill,
+    targetRoot,
+    targetSkill,
+    receiptPath: path.join(targetRoot, RECEIPT_FILE)
+  };
+}
+
+test("rollback treats an adopted symlink install as a safe no-op", async (t) => {
+  const { sourceSkill, targetSkill, receiptPath } = await createTrackedSymlink(t);
+
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": { mode?: string } };
+  };
+  assert.equal(receipt.installs["office-hours"].mode, "symlink");
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.noop, 1);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(result.summary.restored, 0);
+  assert.equal(result.rollbacks[0]?.status, "noop");
+  // The adopted link and the catalog source must be left untouched.
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+  assert.equal(path.resolve(await readlink(targetSkill)), path.resolve(sourceSkill));
+});
+
+test("rollback never restores copy-style bytes through a symlink-mode install", async (t) => {
+  const { sourceSkill, targetSkill, receiptPath } = await createTrackedSymlink(t);
+  const sourceBytesBefore = await readFile(path.join(sourceSkill, "runtime.js"), "utf8");
+
+  // Inject a spurious copy-style rollback record. Restoring it would write
+  // through the symlink into the catalog source, so rollback must ignore it and
+  // treat the symlink install as a safe no-op instead.
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": Record<string, unknown> };
+  };
+  receipt.installs["office-hours"].rollback = {
+    schema: "calvinnwq.skills.rollback.v0",
+    status: "available",
+    targetPath: targetSkill,
+    appliedFiles: [],
+    files: [
+      {
+        path: "runtime.js",
+        targetPath: path.join(targetSkill, "runtime.js"),
+        previous: { kind: "file", bytes: Buffer.from("HIJACKED\n").toString("base64") }
+      }
+    ]
+  };
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.noop, 1);
+  assert.equal(result.summary.restored, 0);
+  assert.equal(result.rollbacks[0]?.status, "noop");
+  // The symlink is intact and the catalog source was never written through.
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+  assert.equal(await readFile(path.join(sourceSkill, "runtime.js"), "utf8"), sourceBytesBefore);
 });
