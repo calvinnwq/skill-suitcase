@@ -4,6 +4,9 @@
     ".": {
       "release-type": "node",
       "package-name": "skill-suitcase",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "include-v-in-release-name": true,
       "changelog-path": "CHANGELOG.md"
     }
   }
