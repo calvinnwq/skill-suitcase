@@ -695,7 +695,7 @@ async function applySymlinkInstalls({
     const sourcePath = planned.sourcePath;
     const targetPath = path.join(installRoot, planned.skill);
 
-    if (!isPathWithinRoot({ candidatePath: sourcePath, rootPath: sourceRoot })) {
+    if (!(await isPathWithinRoot({ candidatePath: sourcePath, rootPath: sourceRoot }))) {
       errors.push({
         code: "symlink_source_escape",
         message: `Refusing to symlink ${planned.skill}: source ${sourcePath} escapes the approved source root ${sourceRoot}.`

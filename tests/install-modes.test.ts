@@ -102,31 +102,45 @@ test("classifies a missing target path as missing", async (t) => {
   assert.equal(result.linkTarget, null);
 });
 
-test("treats a source nested inside the approved root as within the root", () => {
-  const root = path.join("/catalog", "repo");
+test("treats a source nested inside the approved root as within the root", async (t) => {
+  const sandbox = await makeTempDir("within-root");
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const root = path.join(sandbox, "catalog", "repo");
   const sourcePath = path.join(root, "skills", "office-hours");
+  await mkdir(sourcePath, { recursive: true });
 
-  assert.equal(isPathWithinRoot({ candidatePath: sourcePath, rootPath: root }), true);
+  assert.equal(await isPathWithinRoot({ candidatePath: sourcePath, rootPath: root }), true);
 });
 
-test("treats the approved root itself as within the root", () => {
-  const root = path.join("/catalog", "repo");
+test("treats the approved root itself as within the root", async (t) => {
+  const sandbox = await makeTempDir("root-itself");
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const root = path.join(sandbox, "catalog", "repo");
+  await mkdir(root, { recursive: true });
 
-  assert.equal(isPathWithinRoot({ candidatePath: root, rootPath: root }), true);
+  assert.equal(await isPathWithinRoot({ candidatePath: root, rootPath: root }), true);
 });
 
-test("rejects a source that escapes the approved root via ..", () => {
-  const root = path.join("/catalog", "repo");
+test("rejects a source that escapes the approved root via ..", async (t) => {
+  const sandbox = await makeTempDir("dotdot-escape");
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const root = path.join(sandbox, "catalog", "repo");
   const sourcePath = path.join(root, "skills", "..", "..", "..", "etc", "evil");
+  await mkdir(root, { recursive: true });
+  await mkdir(path.resolve(sourcePath), { recursive: true });
 
-  assert.equal(isPathWithinRoot({ candidatePath: sourcePath, rootPath: root }), false);
+  assert.equal(await isPathWithinRoot({ candidatePath: sourcePath, rootPath: root }), false);
 });
 
-test("rejects a sibling that only shares a name prefix with the approved root", () => {
-  const root = path.join("/catalog", "repo");
-  const sibling = path.join("/catalog", "repo-evil", "skills", "office-hours");
+test("rejects a sibling that only shares a name prefix with the approved root", async (t) => {
+  const sandbox = await makeTempDir("sibling-prefix");
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const root = path.join(sandbox, "catalog", "repo");
+  const sibling = path.join(sandbox, "catalog", "repo-evil", "skills", "office-hours");
+  await mkdir(root, { recursive: true });
+  await mkdir(sibling, { recursive: true });
 
-  assert.equal(isPathWithinRoot({ candidatePath: sibling, rootPath: root }), false);
+  assert.equal(await isPathWithinRoot({ candidatePath: sibling, rootPath: root }), false);
 });
 
 test("classifies a regular file where a symlink is expected as not-symlink", async (t) => {

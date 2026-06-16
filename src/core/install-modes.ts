@@ -1,4 +1,4 @@
-import { lstat, readlink, stat } from "node:fs/promises";
+import { lstat, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -31,20 +31,27 @@ export type SymlinkClassification = {
 
 /**
  * Source-root escape guard. Returns true only when `candidatePath` resolves to
- * the approved `rootPath` or a descendant of it. Used before apply creates a
- * symlink so a managed link can never point outside the approved catalog source
- * root (e.g. a variant `source` of `../../etc`). Comparison is lexical on
- * resolved paths so it is deterministic and does not touch the filesystem.
+ * the approved `rootPath` or a descendant of it after resolving filesystem
+ * symlinks.
  */
-export function isPathWithinRoot({
+export async function isPathWithinRoot({
   candidatePath,
   rootPath
 }: {
   candidatePath: string;
   rootPath: string;
-}): boolean {
-  const resolvedRoot = path.resolve(rootPath);
-  const resolvedCandidate = path.resolve(candidatePath);
+}): Promise<boolean> {
+  let resolvedRoot: string;
+  let resolvedCandidate: string;
+  try {
+    [resolvedRoot, resolvedCandidate] = await Promise.all([
+      realpath(rootPath),
+      realpath(candidatePath)
+    ]);
+  } catch {
+    return false;
+  }
+
   if (resolvedCandidate === resolvedRoot) {
     return true;
   }
