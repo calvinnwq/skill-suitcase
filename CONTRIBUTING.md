@@ -32,9 +32,10 @@ changes that should appear in release notes:
 Merging the Release Please PR updates `package.json`, `.release-please-manifest.json`,
 and `CHANGELOG.md`, then creates the GitHub release and tag.
 
-Publishing to npm is manual. Before publishing, run the normal verification
-commands and inspect `npm pack --dry-run` so local workflow artifacts do not
-enter the package tarball.
+When the Release Please run creates a GitHub release, the same workflow verifies
+the package and publishes it to npm through npm Trusted Publishing. The npm
+package must have a trusted publisher configured for `calvinnwq/skill-suitcase`
+and workflow filename `release-please.yml`; do not add long-lived npm tokens.
 
 See [`docs/release-readiness.md`](docs/release-readiness.md) for the Release
 Please merge checklist, npm package/bin policy, GitHub visibility tradeoffs, and

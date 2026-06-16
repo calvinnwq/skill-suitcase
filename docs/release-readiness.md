@@ -3,17 +3,20 @@
 This checklist records the release/public-readiness decisions for Linear
 `NGX-387`.
 
-Skill Suitcase is already release-managed for GitHub tags and release notes.
-Public distribution remains deliberate, and npm publishing is manual.
+Skill Suitcase is release-managed for GitHub tags, release notes, and npm
+publication. Release Please remains the release authority; npm publication runs
+only after Release Please creates a GitHub release.
 
 ## Current Release State
 
 - GitHub releases are managed by Release Please.
 - The CLI bin name is `suitcase`.
 - The package name is `skill-suitcase`.
-- `npm view skill-suitcase` returned 404 on 2026-06-16, so the package name
-  appears unclaimed at that time.
+- `skill-suitcase@0.4.3` is published on npm, and `latest` points to `0.4.3`
+  as of 2026-06-16.
 - CI runs `pnpm test` on pull requests and pushes to `main`.
+- The Release Please workflow publishes to npm only when
+  `steps.release.outputs.release_created == 'true'`.
 
 ## When To Merge Release Please PRs
 
@@ -24,8 +27,7 @@ Merge a Release Please PR only when all of these are true:
 2. The version matches the intended public story for the repo.
 3. GitHub CI is green, or the equivalent local verification has been run and
    the missing CI signal is understood.
-4. The release notes accurately describe merged behavior and do not imply npm
-   publishing.
+4. The release notes accurately describe merged behavior.
 5. No active implementation PR should land first for the same release train.
 
 For the first public release, prefer a deliberate `0.x` release. Do not infer
@@ -40,14 +42,41 @@ Recommended package policy:
 - Keep the bin command as `suitcase`.
 - Keep an explicit `files` whitelist in `package.json` so npm publishes only the
   runtime CLI, docs, changelog, and package metadata.
-- Do not add npm publish automation until there is a public support boundary,
-  install guide, and rollback story for bad publishes.
-- Before publishing, reserve/check the package name again and run
-  `npm pack --dry-run` to inspect the publish payload.
+- Publish through npm Trusted Publishing from GitHub Actions; do not add
+  long-lived `NPM_TOKEN` secrets.
+- Keep the Release Please workflow's pre-publish dry-run so local workflow
+  artifacts cannot silently enter the package tarball.
 
 `skill-suitcase` is the right package identity because it matches the repo and
 project name. `suitcase` is the right command because it is short enough for
 daily use and avoids the awkward `skill-suitcase ...` command shape.
+
+## npm Trusted Publishing
+
+The npm package settings must include this trusted publisher:
+
+- Publisher: GitHub Actions
+- Organization or user: `calvinnwq`
+- Repository: `skill-suitcase`
+- Workflow filename: `release-please.yml`
+- Allowed action: `npm publish`
+- Environment: blank unless a future GitHub environment approval gate is added
+
+The workflow uses npm's OIDC trusted-publishing path instead of a stored npm
+token. Required workflow properties:
+
+- `permissions.id-token: write`
+- GitHub-hosted `ubuntu-latest` runner
+- Node 24 through `actions/setup-node`
+- npm CLI `>=11.5.1`
+- `registry-url: https://registry.npmjs.org`
+
+Release publication is intentionally coupled to Release Please output. If
+Release Please only opens or updates a release PR, the npm steps are skipped. If
+Release Please creates a GitHub release after a release PR merge, the workflow
+checks out the release commit, installs dependencies, runs the normal gates,
+checks the publish payload with `npm publish --dry-run --access public --json`,
+and publishes with provenance.
 
 ## GitHub Visibility And Rulesets
 
@@ -65,7 +94,8 @@ public OSS project:
 - require the CI `test` job on PRs
 - require branches to be up to date before merge when practical
 - restrict direct pushes to `main`
-- keep Release Please write permissions scoped to the release workflow
+- keep Release Please and npm trusted-publishing permissions scoped to the
+  release workflow
 
 Making the repo public is a separate approval. This checklist does not approve
 that one-way visibility change.
@@ -140,7 +170,7 @@ Portable behavior must not depend on Calvin's machine paths being present.
 Before a public announcement or npm publish:
 
 - README includes safe read-only and staging workflows.
-- CONTRIBUTING explains Release Please and npm publish boundaries.
+- CONTRIBUTING explains Release Please and trusted-publishing boundaries.
 - CI is green on the public default branch.
 - `npm pack --dry-run` has been inspected.
 - Package name and bin policy are still correct.
@@ -152,6 +182,7 @@ Before a public announcement or npm publish:
 
 ## Current Decision
 
-Skill Suitcase is ready for manual npm publishing after package tarball
-inspection and npm authentication are confirmed. Automated npm publishing is not
-enabled.
+Skill Suitcase can publish automatically from the Release Please workflow after
+the npm package-side trusted publisher is configured. Manual local publishing is
+still acceptable as emergency fallback, but routine releases should flow through
+Release Please and GitHub Actions.
