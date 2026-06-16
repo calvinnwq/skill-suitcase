@@ -170,6 +170,12 @@ Provider data must be deterministic in tests. Prefer a vendored/generated
 snapshot over runtime network or package execution. Snapshot refreshes should be
 reviewable like other source changes.
 
+The `NGX-458` delegation spike is recorded in
+[`docs/skills-sh-delegation.md`](docs/skills-sh-delegation.md). Its current
+recommendation is to defer runtime delegation and keep `skills.sh` as
+compatibility/reference data until a pinned adapter can prove post-install
+receipt reconciliation and rollback boundaries.
+
 ## Install Modes
 
 Skill Suitcase supports copy and native symlink installs. Install modes should
