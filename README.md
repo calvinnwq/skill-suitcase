@@ -106,6 +106,40 @@ The `skills.sh` installer delegation spike is documented in
 [`docs/skills-sh-delegation.md`](docs/skills-sh-delegation.md); current guidance
 is to defer runtime delegation and keep Skill Suitcase native installs
 authoritative.
+Release and public-readiness decisions are tracked in
+[`docs/release-readiness.md`](docs/release-readiness.md).
+
+## Safe Read-Only And Staging Workflows
+
+Start with read-only commands. These inspect the catalog and target state
+without creating install roots, runtime homes, receipts, symlinks, or source
+repo files:
+
+```bash
+pnpm build
+
+SRC="$HOME/repos/skills"
+CLI="$PWD/dist/src/cli.js"
+
+node "$CLI" import --source "$SRC" --json
+node "$CLI" validate --source "$SRC" --strict --json
+node "$CLI" targets --source "$SRC" --json
+node "$CLI" plan --source "$SRC" --target codex --json
+node "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+node "$CLI" diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+```
+
+Use staging bundles before live mutation:
+
+```bash
+TMP="$(mktemp -d /tmp/skill-suitcase-pack.XXXXXX)"
+node "$CLI" pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$TMP" --json
+find "$TMP" -maxdepth 3 -type f | sort
+rm -rf "$TMP"
+```
+
+Live `apply`, `track`, `rollback`, or `promote --apply` should target disposable
+fixtures first or require explicit approval for the real agent home.
 
 ## Fresh Codex/Claude Machine
 
