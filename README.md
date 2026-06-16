@@ -864,11 +864,13 @@ and `summary.planned` counts only selected planned skills. Error codes include:
 the source-of-truth direction: the catalog repo owns the skill files, and the
 agent home links back to that source.
 
-The current iteration ships the read-only dry-run plan only, so `promote`
-requires `--dry-run`. It inspects the `--target-skill` directory and the catalog
+`promote` requires an explicit mode. `--dry-run` runs the read-only plan;
+`--apply` runs the approval-gated live promotion. The two are mutually
+exclusive — passing neither or both is a usage error.
+
+The `--dry-run` plan inspects the `--target-skill` directory and the catalog
 `--source` repo without mutating anything, then reports the intended
-copy → verify → symlink → receipt workflow plus any blocking conflicts. The
-live copy/verify/symlink/receipt mutation is approval-gated follow-up work.
+copy → verify → symlink → receipt workflow plus any blocking conflicts.
 
 On a clean plan (`ok: true`):
 
@@ -908,6 +910,52 @@ Conflict codes are machine-readable:
   contains a nested symlink, so it cannot be hash-verified or copied faithfully
 - `unsupported_layout` — the target path is missing, is not a directory, or has
   no `SKILL.md`
+
+### Live promotion (`--apply`)
+
+`--apply` performs the mutation the dry-run plan describes. It first re-runs the
+plan and refuses (without touching anything) if any conflict is present, then:
+
+1. copies the target skill tree into the catalog source path
+2. hash-verifies the catalog copy against the original target content
+3. preserves the original target by moving it aside to a hidden backup
+   (`.<skill>.suitcase-pre-promote-<id>`) — the original is never deleted before
+   the copy is verified
+4. replaces the agent-home directory with a symlink back to the catalog source
+5. writes a receipt recording source provenance, the `symlink` install mode, and
+   rollback state (including the preserved `backupPath`)
+
+The operation is transactional: any failure rolls back so the original target is
+left as the untouched real directory it started as, with no catalog copy,
+symlink, or receipt left behind. On success the result reports `ok: true`, the
+completed `steps`, the written `receiptPath`, and the `backupPath` holding the
+preserved original (kept as trashable rollback state):
+
+```json
+{
+  "ok": true,
+  "dryRun": false,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "targetSkill": "/Users/ngxcalvin/.codex/skills/new-skill",
+  "skillName": "new-skill",
+  "repoSkillPath": "/Users/ngxcalvin/repos/skills/skills/new-skill",
+  "steps": [
+    { "action": "copy", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
+    { "action": "verify", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
+    { "action": "symlink", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
+    { "action": "receipt", "to": "/Users/ngxcalvin/.codex/skills/.skill-suitcase-receipt.json" }
+  ],
+  "conflicts": [],
+  "receiptPath": "/Users/ngxcalvin/.codex/skills/.skill-suitcase-receipt.json",
+  "backupPath": "/Users/ngxcalvin/.codex/skills/.new-skill.suitcase-pre-promote-<id>",
+  "errors": []
+}
+```
+
+The promote receipt uses a distinct `calvinnwq.skills.promote-rollback.v0`
+rollback schema, so the existing `rollback` command treats it as a safe no-op
+rather than removing the link (reversing a promote means restoring the backup,
+not just unlinking).
 
 ## Receipt Module
 

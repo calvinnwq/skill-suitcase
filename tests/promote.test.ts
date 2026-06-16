@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { dispatchCommand } from "../src/commands/index.js";
-import { planPromote } from "../src/promote.js";
+import { dispatchCommand, parseCommandArgs } from "../src/commands/index.js";
+import { executePromote, planPromote } from "../src/promote.js";
 
 type Cleanup = { after(fn: () => Promise<void> | void): void };
 
@@ -214,4 +214,154 @@ test("promote command dispatch surfaces conflicts with exit code 1", async (t) =
   assert.equal(dispatched.exitCode, 1);
   const result = dispatched.result as Awaited<ReturnType<typeof planPromote>>;
   assert.equal(result.ok, false);
+});
+
+test("promote --apply copies the target into the catalog, symlinks the target back, and writes a receipt", async (t) => {
+  const sourceRoot = await makeRepo(t);
+  const { home, skillPath } = await makeTargetSkill(t);
+  const repoSkillPath = path.join(sourceRoot, "skills", "new-skill");
+
+  const result = await executePromote({ source: sourceRoot, targetSkill: skillPath });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.dryRun, false);
+  assert.equal(result.skillName, "new-skill");
+  assert.equal(result.repoSkillPath, repoSkillPath);
+  assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(result.steps.map((step) => step.action), ["copy", "verify", "symlink", "receipt"]);
+
+  // The catalog now owns a real directory copy with identical content.
+  assert.equal((await lstat(repoSkillPath)).isDirectory(), true);
+  assert.equal((await lstat(repoSkillPath)).isSymbolicLink(), false);
+  assert.equal(await readFile(path.join(repoSkillPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
+  assert.equal(await readFile(path.join(repoSkillPath, "runtime.js"), "utf8"), `console.log("new-skill");\n`);
+
+  // The agent-home path is now a symlink back to the catalog source.
+  const targetInfo = await lstat(skillPath);
+  assert.equal(targetInfo.isSymbolicLink(), true);
+  assert.equal(await realpath(skillPath), await realpath(repoSkillPath));
+
+  // A receipt records the promotion as a symlink install with source provenance.
+  const receiptPath = path.join(home, "skills", ".skill-suitcase-receipt.json");
+  assert.equal(result.receiptPath, receiptPath);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: Record<string, { mode: string; sourcePath: string; targetPath: string; sourceHash?: string }>;
+  };
+  const record = receipt.installs["new-skill"]!;
+  assert.equal(record.mode, "symlink");
+  assert.equal(record.sourcePath, repoSkillPath);
+  assert.equal(record.targetPath, skillPath);
+  assert.ok(typeof record.sourceHash === "string" && record.sourceHash.length > 0);
+
+  // The original target state is preserved (trashable) for rollback.
+  assert.ok(typeof result.backupPath === "string");
+  assert.equal(await readFile(path.join(result.backupPath as string, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
+});
+
+test("promote --apply leaves the original target untouched when it fails before the swap", async (t) => {
+  const sourceRoot = await makeRepo(t);
+  const { skillPath } = await makeTargetSkill(t);
+  const repoSkillPath = path.join(sourceRoot, "skills", "new-skill");
+
+  const result = await executePromote({
+    source: sourceRoot,
+    targetSkill: skillPath,
+    __test: { failBeforeSwap: true }
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.length > 0);
+
+  // The target is still the original real directory with its files.
+  const targetInfo = await lstat(skillPath);
+  assert.equal(targetInfo.isDirectory(), true);
+  assert.equal(targetInfo.isSymbolicLink(), false);
+  assert.equal(await readFile(path.join(skillPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
+  assert.equal(await readFile(path.join(skillPath, "runtime.js"), "utf8"), `console.log("new-skill");\n`);
+
+  // The catalog copy was rolled back and no receipt was written.
+  await assert.rejects(stat(repoSkillPath));
+  await assert.rejects(stat(path.join(path.dirname(skillPath), ".skill-suitcase-receipt.json")));
+});
+
+test("promote --apply restores the original target when the swap fails after backup", async (t) => {
+  const sourceRoot = await makeRepo(t);
+  const { skillPath } = await makeTargetSkill(t);
+  const repoSkillPath = path.join(sourceRoot, "skills", "new-skill");
+
+  const result = await executePromote({
+    source: sourceRoot,
+    targetSkill: skillPath,
+    __test: { failAfterBackup: true }
+  });
+
+  assert.equal(result.ok, false);
+  const targetInfo = await lstat(skillPath);
+  assert.equal(targetInfo.isDirectory(), true);
+  assert.equal(targetInfo.isSymbolicLink(), false);
+  assert.equal(await readFile(path.join(skillPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
+  await assert.rejects(stat(repoSkillPath));
+});
+
+test("promote --apply refuses without mutating when the catalog already has the skill", async (t) => {
+  const sourceRoot = await makeRepo(t);
+  const { skillPath } = await makeTargetSkill(t);
+  const repoSkillPath = path.join(sourceRoot, "skills", "new-skill");
+  await mkdir(repoSkillPath, { recursive: true });
+  await writeFile(path.join(repoSkillPath, "SKILL.md"), "---\nname: new-skill\n---\n# existing\n");
+
+  const result = await executePromote({ source: sourceRoot, targetSkill: skillPath });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.conflicts.some((entry) => entry.code === "existing_repo_skill"));
+  // Existing repo skill untouched; the target is still a real directory.
+  assert.equal(await readFile(path.join(repoSkillPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# existing\n");
+  assert.equal((await lstat(skillPath)).isSymbolicLink(), false);
+});
+
+test("promote --apply command dispatch performs a live promote with exit code 0", async (t) => {
+  const sourceRoot = await makeRepo(t);
+  const { skillPath } = await makeTargetSkill(t);
+
+  const dispatched = await dispatchCommand([
+    "promote",
+    "--source",
+    sourceRoot,
+    "--target-skill",
+    skillPath,
+    "--apply",
+    "--json"
+  ]);
+
+  assert.equal(dispatched.type, "result");
+  if (dispatched.type !== "result") {
+    return;
+  }
+  assert.equal(dispatched.exitCode, 0);
+  const result = dispatched.result as Awaited<ReturnType<typeof executePromote>>;
+  assert.equal(result.ok, true);
+  assert.equal(result.dryRun, false);
+  assert.equal((await lstat(skillPath)).isSymbolicLink(), true);
+});
+
+test("promote command does not accept --apply combined with --dry-run", async () => {
+  const dispatched = await dispatchCommand([
+    "promote",
+    "--source",
+    "/tmp/does-not-matter",
+    "--target-skill",
+    "/tmp/also-irrelevant",
+    "--dry-run",
+    "--apply",
+    "--json"
+  ]);
+
+  assert.equal(dispatched.type, "usage");
+});
+
+test("the --apply flag is rejected for commands other than promote", () => {
+  assert.throws(
+    () => parseCommandArgs(["pack", "--source", "/x", "--target", "openclaw", "--apply"]),
+    /Unknown argument: --apply/
+  );
 });

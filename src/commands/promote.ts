@@ -1,24 +1,29 @@
-import { planPromote } from "../core/promote/index.js";
+import { executePromote, planPromote } from "../core/promote/index.js";
 import { hasJson, hasSource, requireStringValue } from "./helpers.js";
 import type { CommandModule, ParsedCommandArgs } from "./types.js";
 
 export const promoteCommand: CommandModule = {
   name: "promote",
   accepts(args) {
-    // Iteration 1 ships the read-only/dry-run plan only. Live promotion (copy,
-    // hash-verify, symlink-back, receipts) is a follow-up, so the command
-    // currently requires --dry-run.
+    // promote needs an explicit mode: --dry-run for the read-only plan, or
+    // --apply for the approval-gated live promotion (copy, hash-verify,
+    // symlink-back, receipt). The two are mutually exclusive — exactly one must
+    // be set, so neither/both falls through to a usage error.
+    const wantsDryRun = args.dryRun === true;
+    const wantsApply = args.apply === true;
     return args.command === "promote" &&
       hasSource(args) &&
       hasTargetSkill(args) &&
       hasJson(args) &&
-      args.dryRun === true;
+      wantsDryRun !== wantsApply;
   },
   async run(args) {
-    return planPromote({
-      source: requireStringValue("source", args.source),
-      targetSkill: requireStringValue("targetSkill", args.targetSkill)
-    });
+    const source = requireStringValue("source", args.source);
+    const targetSkill = requireStringValue("targetSkill", args.targetSkill);
+    if (args.apply === true) {
+      return executePromote({ source, targetSkill });
+    }
+    return planPromote({ source, targetSkill });
   }
 };
 

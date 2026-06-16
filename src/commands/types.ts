@@ -4,7 +4,7 @@ import type { diff } from "../core/diffing/index.js";
 import type { inspectImportSource } from "../core/importing/index.js";
 import type { pack } from "../core/packing/index.js";
 import type { plan } from "../core/planning/index.js";
-import type { planPromote } from "../core/promote/index.js";
+import type { executePromote, planPromote } from "../core/promote/index.js";
 import type { rollback } from "../core/rollback/index.js";
 import type { status } from "../core/status/index.js";
 import type { targets } from "../core/catalog/targets.js";
@@ -29,6 +29,7 @@ export type ParsedCommandArgs = {
   dryRun: boolean;
   json: boolean;
   strict?: boolean;
+  apply?: boolean;
   source?: string;
   target?: string;
   targetSkill?: string;
@@ -67,7 +68,8 @@ export type CommandJsonResult =
   | Awaited<ReturnType<typeof apply>>
   | Awaited<ReturnType<typeof rollback>>
   | Awaited<ReturnType<typeof track>>
-  | Awaited<ReturnType<typeof planPromote>>;
+  | Awaited<ReturnType<typeof planPromote>>
+  | Awaited<ReturnType<typeof executePromote>>;
 
 export type CommandModule = {
   name: CommandName;

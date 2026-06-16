@@ -86,6 +86,14 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       continue;
     }
 
+    if (token === "--apply") {
+      if (!isFlagAllowedForCommand(args.command, token)) {
+        throw new Error(`Unknown argument: ${token}`);
+      }
+      args.apply = true;
+      continue;
+    }
+
     if (token === "--skill") {
       if (args.command !== "track") {
         throw new Error(`Unknown argument: ${token}`);
@@ -208,6 +216,8 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
         || command === "apply" || command === "track";
     case "--dry-run":
       return command === "pack" || command === "promote";
+    case "--apply":
+      return command === "promote";
     case "--strict":
       return command === "validate";
     default:
