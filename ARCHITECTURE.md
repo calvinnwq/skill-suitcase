@@ -23,6 +23,7 @@ src/
     apply.ts
     rollback.ts
     track.ts
+    promote.ts
   core/
     planning/
     diffing/
@@ -31,6 +32,7 @@ src/
     apply/
     rollback/
     track/
+    promote/
     receipts/
     status/
     install-modes.ts
@@ -214,19 +216,20 @@ Keep the command verbs separate:
   Symlink support belongs here as an explicit `--mode symlink` install mode,
   not as an implicit side effect.
 - `rollback` reverses a prior `apply` using receipt rollback state.
-- `promote` or `import-target` is the future workflow for target-created skills
-  that should become repo-owned.
+- `promote` turns a target-created skill (for example a skill an agent wrote
+  into an agent home directory) into a repo-owned catalog skill. `--dry-run`
+  runs a read-only plan; `--apply` runs the approval-gated live promotion.
 
 A target-created skill must not be handled by `track` unless it already exists
 in the catalog and matches the selected source. For a new skill created inside
-an agent home, the future promote/import-target workflow should:
+an agent home, the promote workflow:
 
-1. inspect the target skill directory read-only
+1. inspect the target skill directory read-only (`--dry-run`)
 2. copy the skill into the catalog repo, or an approved variant source path
-3. update catalog manifest metadata only after approval
-4. hash-verify the copied repo source against the original target content
-5. replace the agent-home directory with a symlink back to the repo source
-6. write a receipt that records source provenance, install mode, and rollback
+3. hash-verify the copied repo source against the original target content
+4. preserve the original target by moving it aside, then replace the agent-home
+   directory with a symlink back to the repo source
+5. write a receipt that records source provenance, install mode, and rollback
    state
 
 Promotion must preserve a rollback path. Do not remove the original target
