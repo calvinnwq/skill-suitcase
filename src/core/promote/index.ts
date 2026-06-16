@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, realpath, rename, rm, stat, symlink, unlink } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SKILLS_DIRECTORY } from "../../config/defaults.js";
 import { isPathWithinRoot, SYMLINK_MODE } from "../install-modes.js";
 import {
   buildInstallRecord,
   buildInstalledFiles,
+  RECEIPT_FILE,
   upsertAndWriteReceipt
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
@@ -95,6 +96,7 @@ type ExecutePromoteInput = {
   __test?: {
     failBeforeSwap?: boolean;
     failAfterBackup?: boolean;
+    corruptReceiptBeforeFailure?: boolean;
   };
 };
 
@@ -444,7 +446,13 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
   result.backupPath = backupPath;
 
   // Phase 4: write a receipt linking the target to the promoted catalog source.
+  const receiptPath = path.join(installRoot, RECEIPT_FILE);
+  const previousReceiptText = await readFileSafeText(receiptPath);
   try {
+    if (__test?.corruptReceiptBeforeFailure === true) {
+      await writeFile(receiptPath, "{", "utf8");
+      throw new Error("Injected receipt failure after partial receipt write.");
+    }
     const installRecord = buildInstallRecord({
       skill: skillName,
       agent: installRoot,
@@ -481,6 +489,7 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
     await removeLink(targetSkillPath);
     await restorePath(backupPath, targetSkillPath);
     await removeTree(repoSkillPath);
+    await restoreOriginalReceipt({ receiptPath, previousReceiptText });
     result.backupPath = null;
     result.errors.push({ code: "promote_receipt_failed", message: describeError(error) });
     return result;
@@ -579,6 +588,33 @@ async function restorePath(from: string, to: string): Promise<void> {
     await rename(from, to);
   } catch {
     // best effort restore only
+  }
+}
+
+async function restoreOriginalReceipt({
+  receiptPath,
+  previousReceiptText
+}: {
+  receiptPath: string;
+  previousReceiptText: string | null;
+}): Promise<void> {
+  if (previousReceiptText === null) {
+    await removeLink(receiptPath);
+    return;
+  }
+
+  try {
+    await writeFile(receiptPath, previousReceiptText, "utf8");
+  } catch {
+    // best effort restore only
+  }
+}
+
+async function readFileSafeText(filePath: string): Promise<string | null> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    return null;
   }
 }
 

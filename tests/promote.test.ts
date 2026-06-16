@@ -361,6 +361,37 @@ test("promote --apply restores the original target when the swap fails after bac
   await assert.rejects(stat(repoSkillPath));
 });
 
+test("promote --apply restores the existing receipt when receipt persistence fails", async (t) => {
+  const sourceRoot = await makeRepo(t);
+  const { home, skillPath } = await makeTargetSkill(t);
+  const repoSkillPath = path.join(sourceRoot, "skills", "new-skill");
+  const receiptPath = path.join(home, "skills", ".skill-suitcase-receipt.json");
+  const beforeReceipt = `${JSON.stringify({
+    schema: "calvinnwq.skills.receipt.v0",
+    source: {
+      repo: sourceRoot,
+      ref: null,
+      commit: null
+    },
+    installs: {}
+  }, null, 2)}\n`;
+  await writeFile(receiptPath, beforeReceipt, "utf8");
+
+  const result = await executePromote({
+    source: sourceRoot,
+    targetSkill: skillPath,
+    __test: { corruptReceiptBeforeFailure: true }
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.code === "promote_receipt_failed"));
+  assert.equal(await readFile(receiptPath, "utf8"), beforeReceipt);
+  assert.equal((await lstat(skillPath)).isDirectory(), true);
+  assert.equal((await lstat(skillPath)).isSymbolicLink(), false);
+  assert.equal(await readFile(path.join(skillPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
+  await assert.rejects(stat(repoSkillPath));
+});
+
 test("promote --apply refuses without mutating when the catalog already has the skill", async (t) => {
   const sourceRoot = await makeRepo(t);
   const { skillPath } = await makeTargetSkill(t);
