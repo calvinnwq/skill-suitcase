@@ -23,6 +23,7 @@ src/
     apply.ts
     rollback.ts
     track.ts
+    reconcile.ts
     promote.ts
   core/
     planning/
@@ -32,6 +33,7 @@ src/
     apply/
     rollback/
     track/
+    reconcile/
     promote/
     receipts/
     status/
@@ -221,6 +223,14 @@ Keep the command verbs separate:
 - `apply` installs or updates skills from an approved plan lock or artifact.
   Symlink support belongs here as an explicit `--mode symlink` install mode,
   not as an implicit side effect.
+- `reconcile` repairs selected catalog-planned target skills that are unknown
+  because the live target directory exists without a Suitcase receipt and differs
+  from the catalog source. `--dry-run` is deterministic and read-only; `--apply`
+  is approval-gated, replaces the selected target from catalog source, preserves
+  the prior target as rollback/backup state, writes a receipt, and must leave
+  status current. Reconcile must not adopt exact matches (use `track`), install
+  missing skills or approved plan updates (use `apply`), or promote target-created
+  skills into the catalog (use `promote`).
 - `rollback` reverses a prior `apply` using receipt rollback state.
 - `promote` turns a target-created skill (for example a skill an agent wrote
   into an agent home directory) into a repo-owned catalog skill. `--dry-run`

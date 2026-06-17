@@ -23,6 +23,15 @@ receipts so the existing install comes under Suitcase management without
 rewriting any skill files. Repeat `--skill <name>` to adopt only selected
 matching skills.
 
+The `reconcile` command repairs selected catalog-owned target skills that are
+unknown because the target exists without a Suitcase receipt and differs from the
+catalog. `reconcile --dry-run` reports the live-vs-catalog changes and planned
+backup path without mutation; `reconcile --apply` requires explicit approval,
+replaces the selected target from catalog source, preserves the prior target as
+rollback/backup state, writes a receipt, and verifies status can become current.
+Use `track` for exact matches, `apply` for approved lock/artifact installs, and
+`promote` for target-created skills that need to become catalog source.
+
 The `promote` command converts a target-created skill into a repo-owned catalog
 skill. `promote --dry-run` reports the read-only plan and conflicts; `promote
 --apply` copies the target into the catalog, verifies it, replaces the target
@@ -57,6 +66,8 @@ node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openc
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
+node dist/src/cli.js reconcile --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
+node dist/src/cli.js reconcile --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --dry-run --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --apply --json
 ```
@@ -147,8 +158,9 @@ find "$TMP" -maxdepth 3 -type f | sort
 rm -rf "$TMP"
 ```
 
-Live `apply`, `track`, `rollback`, or `promote --apply` should target disposable
-fixtures first or require explicit approval for the real agent home.
+Live `apply`, `track`, `reconcile --apply`, `rollback`, or `promote --apply`
+should target disposable fixtures first or require explicit approval for the real
+agent home.
 
 ## Fresh Codex/Claude Machine
 

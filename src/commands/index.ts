@@ -4,6 +4,7 @@ import { importCommand } from "./import.js";
 import { packCommand } from "./pack.js";
 import { planCommand } from "./plan.js";
 import { promoteCommand } from "./promote.js";
+import { reconcileCommand } from "./reconcile.js";
 import { rollbackCommand } from "./rollback.js";
 import { statusCommand } from "./status.js";
 import { targetsCommand } from "./targets.js";
@@ -24,6 +25,7 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   applyCommand,
   rollbackCommand,
   trackCommand,
+  reconcileCommand,
   promoteCommand
 ];
 
@@ -95,7 +97,7 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
     }
 
     if (token === "--skill") {
-      if (args.command !== "track") {
+      if (args.command !== "track" && args.command !== "reconcile") {
         throw new Error(`Unknown argument: ${token}`);
       }
       const value = rest[index + 1];
@@ -195,10 +197,10 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--source":
       return command === "plan" || command === "diff" || command === "pack" || command === "import"
         || command === "validate" || command === "targets" || command === "status" || command === "apply"
-        || command === "track" || command === "promote";
+        || command === "track" || command === "reconcile" || command === "promote";
     case "--target":
       return command === "plan" || command === "diff" || command === "pack" || command === "apply"
-        || command === "track" || command === "status";
+        || command === "track" || command === "reconcile" || command === "status";
     case "--target-skill":
       return command === "promote";
     case "--output":
@@ -213,11 +215,11 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--codex-skills":
     case "--claude-skills":
       return command === "diff" || command === "pack" || command === "targets" || command === "status"
-        || command === "apply" || command === "track";
+        || command === "apply" || command === "track" || command === "reconcile";
     case "--dry-run":
-      return command === "pack" || command === "promote";
+      return command === "pack" || command === "promote" || command === "reconcile";
     case "--apply":
-      return command === "promote";
+      return command === "promote" || command === "reconcile";
     case "--strict":
       return command === "validate";
     default:

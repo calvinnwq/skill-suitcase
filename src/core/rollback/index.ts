@@ -383,6 +383,14 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
         continue;
       }
 
+      if (installWasPreviouslyUnmanagedReconcile(record)) {
+        removeReceiptInstallRecord(installs, skill, record);
+        changedReceipt = true;
+        receiptChangedSkills.add(skill);
+        result.rollbacks.push(item);
+        continue;
+      }
+
       const restoredMetadata = await buildRestoredInstallMetadata(targetPath, record);
       record.installedFiles = restoredMetadata.installedFiles;
       if (restoredMetadata.sourceHash === null) {
@@ -813,6 +821,10 @@ function installWasPreviouslyMissing(record: ReceiptInstallRecord): boolean {
   return isRecord(record.priorState) && record.priorState.status === "missing";
 }
 
+function installWasPreviouslyUnmanagedReconcile(record: ReceiptInstallRecord): boolean {
+  return record.mode === "reconcile" && isRecord(record.priorState) && record.priorState.status === "unknown";
+}
+
 async function removeMissingInstallTarget(targetPath: string): Promise<
   | { status: "removed" }
   | { status: "failed"; code: string; message: string }
@@ -947,7 +959,7 @@ async function removeRollbackTarget(file: RollbackFileRecord): Promise<
     if (isNodeError(error) && error.code === "ENOENT") {
       return { status: "removed" };
     }
-    if (isNodeError(error) && error.code === "EISDIR") {
+    if (isNodeError(error) && (error.code === "EISDIR" || error.code === "EPERM") && await isDirectory(file.targetPath)) {
       try {
         await rm(file.targetPath, { recursive: true, force: true });
         return { status: "removed" };
@@ -964,6 +976,14 @@ async function removeRollbackTarget(file: RollbackFileRecord): Promise<
       code: "rollback_remove_failed",
       message: `Failed to remove ${file.path}: ${errorMessage(error)}`
     };
+  }
+}
+
+async function isDirectory(candidatePath: string): Promise<boolean> {
+  try {
+    return (await lstat(candidatePath)).isDirectory();
+  } catch {
+    return false;
   }
 }
 
