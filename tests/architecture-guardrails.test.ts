@@ -8,6 +8,11 @@ test("package exposes architecture guardrail script", async () => {
   assert.equal(packageJson.scripts?.["architecture:check"], "node scripts/check-architecture.mjs");
 });
 
+test("package exposes skill-suitcase as the only CLI bin", async () => {
+  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { bin?: Record<string, string> };
+  assert.deepEqual(packageJson.bin, { "skill-suitcase": "dist/src/cli.js" });
+});
+
 test("architecture guardrails pass on the current source tree", () => {
   const result = spawnSync("node", ["scripts/check-architecture.mjs"], {
     encoding: "utf8"

@@ -41,7 +41,7 @@ with a repo-pointing symlink, and writes a receipt.
 
 ```bash
 npm install -g skill-suitcase
-suitcase plan --source /path/to/skills-catalog --target openclaw --json
+skill-suitcase plan --source /path/to/skills-catalog --target openclaw --json
 ```
 
 For local development, build and run the compiled CLI directly:
@@ -713,7 +713,7 @@ name, `status` returns `ok: false` with an `unknown_target` error.
 (a staging bundle path or directory). It validates the approval input, checks
 pre-apply target status, materializes planned skills, and emits a receipt per
 skill. Copy-mode receipts capture the pre-apply state of every written file (a
-`rollback` record) so the install can later be reversed with `suitcase
+`rollback` record) so the install can later be reversed with `skill-suitcase
 rollback`.
 
 `--mode` selects how each planned skill is materialized. The default

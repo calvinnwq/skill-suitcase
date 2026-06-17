@@ -10,10 +10,10 @@ only after Release Please creates a GitHub release.
 ## Current Release State
 
 - GitHub releases are managed by Release Please.
-- The CLI bin name is `suitcase`.
+- The CLI bin name is `skill-suitcase`.
 - The package name is `skill-suitcase`.
-- `skill-suitcase@0.4.3` is published on npm, and `latest` points to `0.4.3`
-  as of 2026-06-16.
+- `skill-suitcase@0.5.0` is published on npm, and `latest` points to `0.5.0`
+  as of 2026-06-17.
 - CI runs `pnpm test` on pull requests and pushes to `main`.
 - The Release Please workflow publishes to npm only when
   `steps.release.outputs.release_created == 'true'`.
@@ -39,7 +39,7 @@ chooses a stable public API promise.
 Recommended package policy:
 
 - Keep the npm package name as `skill-suitcase`.
-- Keep the bin command as `suitcase`.
+- Keep the bin command as `skill-suitcase`.
 - Keep an explicit `files` whitelist in `package.json` so npm publishes only the
   runtime CLI, docs, changelog, and package metadata.
 - Publish through npm Trusted Publishing from GitHub Actions; do not add
@@ -47,9 +47,9 @@ Recommended package policy:
 - Keep the Release Please workflow's pre-publish dry-run so local workflow
   artifacts cannot silently enter the package tarball.
 
-`skill-suitcase` is the right package identity because it matches the repo and
-project name. `suitcase` is the right command because it is short enough for
-daily use and avoids the awkward `skill-suitcase ...` command shape.
+`skill-suitcase` is the right package and command identity because it matches
+the repo and project name, avoids a generic global binary, and makes installed
+CLI provenance obvious in user terminals and automation logs.
 
 ## npm Trusted Publishing
 
