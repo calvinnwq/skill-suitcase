@@ -12,7 +12,7 @@
     "url": "https://github.com/calvinnwq/skill-suitcase/issues"
   },
   "bin": {
-    "suitcase": "dist/src/cli.js"
+    "skill-suitcase": "dist/src/cli.js"
   },
   "files": [
     "dist/src/**/*.js",

@@ -10,7 +10,7 @@ test("json renderer preserves deterministic pretty JSON with trailing newline", 
 });
 
 test("usage and known CLI error renderers target stderr text", () => {
-  assert.equal(usageText().startsWith("Usage:\n  suitcase plan"), true);
+  assert.equal(usageText().startsWith("Usage:\n  skill-suitcase plan"), true);
   assert.equal(renderCliError({ type: "usage", message: "Unknown argument: --nope" }), `${"Unknown argument: --nope"}\n${usageText()}\n`);
   assert.equal(renderCliError({ type: "usage", message: null }), `${usageText()}\n`);
   assert.equal(renderCliError({ type: "fatal", message: "boom" }), "boom\n");
