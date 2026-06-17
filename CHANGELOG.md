@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.4.3...v0.5.0) (2026-06-17)
+
+
+### Features
+
+* add reconcile flow for unknown target skills ([07795d6](https://github.com/calvinnwq/skill-suitcase/commit/07795d69805e69632d79ee14ae06aba6a965f987))
+* **cli:** add reconcile flow for unknown target skills ([13eb126](https://github.com/calvinnwq/skill-suitcase/commit/13eb1263ec0f0caf42a9cc288c2f2b167a024364))
+* **cli:** add reconcile flow for unknown target skills ([13eb126](https://github.com/calvinnwq/skill-suitcase/commit/13eb1263ec0f0caf42a9cc288c2f2b167a024364))
+
 ## [0.4.3](https://github.com/calvinnwq/skill-suitcase/compare/v0.4.2...v0.4.3) (2026-06-16)
 
 
