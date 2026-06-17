@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { RECEIPT_FILE, type Receipt, type ReceiptInstallRecord } from "../src/receipt.js";
 import { reconcile } from "../src/reconcile.js";
 import { rollback } from "../src/rollback.js";
 import { status } from "../src/status.js";
 import { track } from "../src/track.js";
+
+const execFileAsync = promisify(execFile);
 
 async function createReconcileFixture(t: { after(fn: () => Promise<void> | void): void }): Promise<{
   sourceRoot: string;
@@ -66,6 +70,15 @@ function singleRecord(receipt: Receipt, skill: string): ReceiptInstallRecord {
     return first;
   }
   return value;
+}
+
+async function makeFifo(filePath: string): Promise<boolean> {
+  try {
+    await execFileAsync("mkfifo", [filePath]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 test("reconcile dry-run plans selected unknown target skills without mutating files", async (t) => {
@@ -177,6 +190,71 @@ test("reconcile rollback removes directories created from catalog source", async
   assert.equal(await readFile(path.join(targetSkill, "legacy.js"), "utf8"), "console.log(\"target-only\");\n");
   await assert.rejects(() => stat(path.join(targetSkill, "scripts")), /ENOENT/);
   await assert.rejects(() => stat(path.join(targetSkill, "empty-source-dir")), /ENOENT/);
+});
+
+test("reconcile rollback restores a file replaced by a catalog directory", async (t) => {
+  const { sourceRoot, targetRoot, sourceSkill, targetSkill } = await createReconcileFixture(t);
+  await mkdir(path.join(sourceSkill, "legacy.js"), { recursive: true });
+
+  const result = await reconcile({
+    source: sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal((await stat(path.join(targetSkill, "legacy.js"))).isDirectory(), true);
+
+  const rollbackResult = await rollback({ receipt: path.join(targetRoot, RECEIPT_FILE) });
+
+  assert.equal(rollbackResult.ok, true);
+  assert.equal(await readFile(path.join(targetSkill, "legacy.js"), "utf8"), "console.log(\"target-only\");\n");
+  assert.equal(await readFile(path.join(targetSkill, "SKILL.md"), "utf8"), "---\nname: skill-cleaner\nversion: 2026.06.01\n---\n# Skill Cleaner\n");
+});
+
+test("reconcile refuses unsupported special entries in source and target trees", async (t) => {
+  const sourceFixture = await createReconcileFixture(t);
+  const sourceFifo = path.join(sourceFixture.sourceSkill, "source.fifo");
+  if (!(await makeFifo(sourceFifo))) {
+    t.skip("mkfifo unavailable");
+    return;
+  }
+
+  const sourceResult = await reconcile({
+    source: sourceFixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    dryRun: true
+  });
+
+  assert.equal(sourceResult.ok, false);
+  assert.equal(sourceResult.errors.some((error) =>
+    error.code === "unsupported_source_tree" &&
+    error.skill === "skill-cleaner" &&
+    error.path === sourceFifo
+  ), true);
+
+  const targetFixture = await createReconcileFixture(t);
+  const targetFifo = path.join(targetFixture.targetSkill, "target.fifo");
+  if (!(await makeFifo(targetFifo))) {
+    t.skip("mkfifo unavailable");
+    return;
+  }
+
+  const targetResult = await reconcile({
+    source: targetFixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    dryRun: true
+  });
+
+  assert.equal(targetResult.ok, false);
+  assert.equal(targetResult.errors.some((error) =>
+    error.code === "unsafe_target_tree" &&
+    error.skill === "skill-cleaner" &&
+    error.path === targetFifo
+  ), true);
 });
 
 test("reconcile refuses unsafe target trees and read-only provider targets", async (t) => {

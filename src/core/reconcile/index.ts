@@ -1006,7 +1006,19 @@ async function validateDirectoryEntries(
       if (!nested.ok) {
         return nested;
       }
+      continue;
     }
+    if (entry.isFile()) {
+      continue;
+    }
+    return {
+      ok: false,
+      error: reconcileError({
+        code: codes.symlinkCode,
+        message: `${codes.label} tree ${rootPath} contains an unsupported filesystem entry at ${entryPath} and cannot be reconciled safely.`,
+        path: entryPath
+      })
+    };
   }
   return { ok: true };
 }
@@ -1060,27 +1072,42 @@ async function buildRollbackFiles({
 }): Promise<RollbackFileRecord[]> {
   const previousFiles = await listFiles(previousTargetPath);
   const appliedFiles = await listFiles(appliedTargetPath);
-  const relativePaths = [...new Set([...previousFiles, ...appliedFiles])].sort();
-  const records: RollbackFileRecord[] = [];
-  for (const relativePath of relativePaths) {
-    records.push({
-      path: relativePath,
-      targetPath: path.join(appliedTargetPath, relativePath),
-      previous: await readRollbackFileState(path.join(previousTargetPath, relativePath))
-    });
-  }
   const appliedDirectories = await listDirectories(appliedTargetPath);
-  const createdDirectories = [];
-  for (const relativePath of appliedDirectories) {
+  const replacedDirectories: string[] = [];
+  const createdDirectories: string[] = [];
+  for (const relativePath of appliedDirectories.sort(compareShallowestPathFirst)) {
+    if (hasPathAncestor(replacedDirectories, relativePath)) {
+      continue;
+    }
     const previousDirectoryState = await lstat(path.join(previousTargetPath, relativePath)).catch((error: unknown) => {
-      if (isNodeError(error) && error.code === "ENOENT") {
+      if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
         return null;
       }
       throw error;
     });
     if (previousDirectoryState === null) {
       createdDirectories.push(relativePath);
+      continue;
     }
+    if (!previousDirectoryState.isDirectory()) {
+      replacedDirectories.push(relativePath);
+    }
+  }
+  const relativePaths = [...new Set([...previousFiles, ...appliedFiles])].sort();
+  const records: RollbackFileRecord[] = [];
+  for (const relativePath of replacedDirectories.sort(compareShallowestPathFirst)) {
+    records.push({
+      path: relativePath,
+      targetPath: path.join(appliedTargetPath, relativePath),
+      previous: { kind: "missing" }
+    });
+  }
+  for (const relativePath of relativePaths) {
+    records.push({
+      path: relativePath,
+      targetPath: path.join(appliedTargetPath, relativePath),
+      previous: await readRollbackFileState(path.join(previousTargetPath, relativePath))
+    });
   }
   for (const relativePath of createdDirectories.sort(compareDeepestPathFirst)) {
     records.push({
@@ -1177,6 +1204,18 @@ async function listDirectories(root: string): Promise<string[]> {
 function compareDeepestPathFirst(left: string, right: string): number {
   const depthDifference = right.split(path.sep).length - left.split(path.sep).length;
   return depthDifference === 0 ? left.localeCompare(right) : depthDifference;
+}
+
+function compareShallowestPathFirst(left: string, right: string): number {
+  const depthDifference = left.split(path.sep).length - right.split(path.sep).length;
+  return depthDifference === 0 ? left.localeCompare(right) : depthDifference;
+}
+
+function hasPathAncestor(ancestors: string[], candidate: string): boolean {
+  return ancestors.some((ancestor) => {
+    const relativePath = path.relative(ancestor, candidate);
+    return relativePath !== "" && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+  });
 }
 
 async function readOptionalText(filePath: string): Promise<string | null> {
