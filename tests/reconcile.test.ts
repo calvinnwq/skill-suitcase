@@ -151,7 +151,8 @@ test("approved reconcile replaces target from catalog, records backup rollback m
   assert.equal(typeof record.rollback?.backupPath, "string");
   assert.equal(Array.isArray(record.rollback?.files), true);
   assert.equal(Array.isArray(record.rollback?.appliedFiles), true);
-  assert.equal(await readFile(path.join(record.rollback?.backupPath as string, "legacy.js"), "utf8"), "console.log(\"target-only\");\n");
+  const backupPath = record.rollback?.backupPath as string;
+  assert.equal(await readFile(path.join(backupPath, "legacy.js"), "utf8"), "console.log(\"target-only\");\n");
 
   const postStatus = await status({ source: sourceRoot, target: "openclaw" });
   assert.equal(postStatus.ok, true);
@@ -161,6 +162,7 @@ test("approved reconcile replaces target from catalog, records backup rollback m
   assert.equal(rollbackResult.ok, true);
   assert.equal(await readFile(path.join(targetSkill, "legacy.js"), "utf8"), "console.log(\"target-only\");\n");
   await assert.rejects(readFile(path.join(targetSkill, "runtime.js"), "utf8"), /ENOENT/);
+  await assert.rejects(() => stat(backupPath), /ENOENT/);
   const receiptAfterRollback = JSON.parse(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
   assert.equal(receiptAfterRollback.installs?.["skill-cleaner"], undefined);
   const statusAfterRollback = await status({ source: sourceRoot, target: "openclaw" });
