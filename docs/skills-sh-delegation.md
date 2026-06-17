@@ -3,10 +3,11 @@
 Status: recommendation for Linear `NGX-458` / `SS-11`.
 
 Recommendation: do not add runtime `skills.sh` installer delegation yet. Keep
-Skill Suitcase's native provider, apply, symlink, promote, receipt, status, and
-rollback paths as the managed install path. Treat `skills.sh` as a compatibility
-metadata source for now, and only add installer delegation later behind a narrow
-adapter if the post-install state can be reconciled into Skill Suitcase receipts.
+Skill Suitcase's native provider, apply, reconcile, symlink, promote, receipt,
+status, and rollback paths as the managed install/repair path. Treat `skills.sh`
+as a compatibility metadata source for now, and only add installer delegation
+later behind a narrow adapter if the post-install state can be reconciled into
+Skill Suitcase receipts.
 
 ## Evidence Checked
 
@@ -28,7 +29,7 @@ adapter if the post-install state can be reconciled into Skill Suitcase receipts
 
 ## Comparison
 
-Native Skill Suitcase install path:
+Native Skill Suitcase install/repair path:
 
 - deterministic source and target resolution from manifest paths, local
   overrides, and vendored provider snapshots
@@ -36,6 +37,7 @@ Native Skill Suitcase install path:
 - copy and symlink install modes selected explicitly
 - receipts with source provenance, hashes, install mode, and rollback state
 - status and dirty detection after install
+- targeted reconcile for selected unknown catalog-owned targets
 - rollback boundaries that refuse unmanaged or drifted state
 - no network or package execution in normal tests
 
@@ -86,4 +88,5 @@ If delegation is added later, the adapter should be constrained like this:
 Defer runtime delegation. The next useful follow-up, if needed, is a small
 implementation issue for a pinned `skills.sh` adapter contract or snapshot
 refresh tool. That should still start read-only and should not replace native
-Skill Suitcase install, promote, receipt, status, or rollback semantics.
+Skill Suitcase install, reconcile, promote, receipt, status, or rollback
+semantics.

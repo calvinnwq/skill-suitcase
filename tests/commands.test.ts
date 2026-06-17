@@ -18,6 +18,7 @@ test("command registry exposes every public command explicitly", () => {
     "apply",
     "rollback",
     "track",
+    "reconcile",
     "promote"
   ]);
 });
@@ -62,6 +63,47 @@ test("parseCommandArgs preserves repeated track skill filters", () => {
     source: fixtureSource,
     target: "openclaw",
     skill: ["office-hours", "gnhf-postflight"],
+    dryRun: false,
+    json: true
+  });
+});
+
+test("parseCommandArgs supports explicit reconcile dry-run and apply modes", () => {
+  assert.deepEqual(parseCommandArgs([
+    "reconcile",
+    "--source",
+    fixtureSource,
+    "--target",
+    "openclaw",
+    "--skill",
+    "skill-cleaner",
+    "--dry-run",
+    "--json"
+  ]), {
+    command: "reconcile",
+    source: fixtureSource,
+    target: "openclaw",
+    skill: ["skill-cleaner"],
+    dryRun: true,
+    json: true
+  });
+
+  assert.deepEqual(parseCommandArgs([
+    "reconcile",
+    "--source",
+    fixtureSource,
+    "--target",
+    "openclaw",
+    "--skill",
+    "skill-cleaner",
+    "--apply",
+    "--json"
+  ]), {
+    command: "reconcile",
+    source: fixtureSource,
+    target: "openclaw",
+    skill: ["skill-cleaner"],
+    apply: true,
     dryRun: false,
     json: true
   });

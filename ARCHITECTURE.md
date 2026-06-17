@@ -23,6 +23,7 @@ src/
     apply.ts
     rollback.ts
     track.ts
+    reconcile.ts
     promote.ts
   core/
     planning/
@@ -32,6 +33,7 @@ src/
     apply/
     rollback/
     track/
+    reconcile/
     promote/
     receipts/
     status/
@@ -81,7 +83,7 @@ Command modules should stay thin. They adapt the outside world to core code.
 - packing and artifact construction
 - import/onboarding inspection
 - apply/install workflows
-- rollback and existing-install adoption workflows
+- rollback, reconcile, and existing-install adoption workflows
 - install mode classification and safety checks
 - receipt creation and validation
 - catalog, manifest, target, and validation rules
@@ -162,9 +164,9 @@ coverage, such as OpenCode and Pi, but Skill Suitcase still owns planning,
 receipts, dirty detection, rollback, and approval boundaries.
 
 Do not call `npx skills` from normal target discovery, planning, status, diff,
-apply, or track paths. If a future issue adds optional `skills.sh` installer
-delegation, it must be wrapped behind a narrow adapter and reconciled back into
-Skill Suitcase receipts before the install is considered managed.
+apply, track, or reconcile paths. If a future issue adds optional `skills.sh`
+installer delegation, it must be wrapped behind a narrow adapter and reconciled
+back into Skill Suitcase receipts before the install is considered managed.
 
 Provider data must be deterministic in tests. Prefer a vendored/generated
 snapshot over runtime network or package execution. Snapshot refreshes should be
@@ -221,6 +223,14 @@ Keep the command verbs separate:
 - `apply` installs or updates skills from an approved plan lock or artifact.
   Symlink support belongs here as an explicit `--mode symlink` install mode,
   not as an implicit side effect.
+- `reconcile` repairs selected catalog-planned target skills that are unknown
+  because the live target directory exists without a Suitcase receipt and differs
+  from the catalog source. `--dry-run` is deterministic and read-only; `--apply`
+  is approval-gated, replaces the selected target from catalog source, preserves
+  the prior target as rollback/backup state, writes a receipt, and must leave
+  status current. Reconcile must not adopt exact matches (use `track`), install
+  missing skills or approved plan updates (use `apply`), or promote target-created
+  skills into the catalog (use `promote`).
 - `rollback` reverses a prior `apply` using receipt rollback state.
 - `promote` turns a target-created skill (for example a skill an agent wrote
   into an agent home directory) into a repo-owned catalog skill. `--dry-run`
@@ -258,8 +268,8 @@ Live mutations require explicit approval input or an approved command mode:
 - deleting or trashing prior target state
 
 The default path for new platform coverage is read-only first: `targets`,
-`status`, and `diff` should prove the target model before `track`, `apply`, or
-`promote` touches live paths.
+`status`, and `diff` should prove the target model before `track`, `apply`,
+`reconcile --apply`, or `promote` touches live paths.
 
 ## Import Direction
 

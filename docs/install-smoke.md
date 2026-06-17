@@ -49,21 +49,36 @@ node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --cla
 
 `--codex-home`, `--codex-skills`, and `--claude-skills` are local overrides for
 global target paths. They are intended for `targets`, `status`, `diff`, `pack`,
-`apply`, and `track`; `status --target` accepts either an assignment path id or
-an assignment name. Exact assignment path ids win, so `--target codex` selects
-the global Codex target when that id exists.
+`apply`, `track`, and `reconcile`; `status --target` accepts either an
+assignment path id or an assignment name. Exact assignment path ids win, so
+`--target codex` selects the global Codex target when that id exists.
 
 For Codex or Claude paths that have source variants, `plan`, `diff`, `pack`,
-`apply`, `track`, receipts, and `status` should carry the selected variant name.
-If a slimmer live variant is required but no source variant exists, those same
-boundaries should report blocked canonical entries instead of silently replacing
-the live variant.
+`apply`, `track`, `reconcile`, receipts, and `status` should carry the selected
+variant name. If a slimmer live variant is required but no source variant exists,
+those same boundaries should report blocked canonical entries instead of silently
+replacing the live variant.
 
 When smoke testing native symlink installs, use the same approved lock or
 artifact path as copy installs and add `--mode symlink` to `apply`. The target
 skill root should become a symlink pointing back to the selected catalog source
 path, `status` should report it as `current`, and `rollback` should remove only
 a symlink that `apply --mode symlink` created.
+
+When smoke testing a selected unknown target repair, create a disposable target
+skill directory that differs from the catalog and has no receipt, then run
+reconcile in read-only mode first:
+
+```bash
+node dist/src/cli.js reconcile --source /path/to/skills-catalog --target openclaw --skill existing-skill --dry-run --json
+```
+
+The dry run should report `ok: true`, `readOnly: true`, one candidate, the
+live-vs-catalog changes, and a `.suitcase-pre-reconcile-*` backup template. Only
+run `--apply` against disposable fixtures or an intentionally approved
+catalog-owned target; live reconcile replaces the target from catalog source,
+writes a `mode: "reconcile"` receipt, verifies status is current, and leaves the
+prior target in rollback/backup state.
 
 When smoke testing a target-created skill, create a throwaway skill directory
 outside the catalog with `SKILL.md`, then run promote in read-only mode first:

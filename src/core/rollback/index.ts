@@ -60,6 +60,7 @@ type RollbackState = {
   schema?: unknown;
   status?: unknown;
   targetPath?: unknown;
+  backupPath?: unknown;
   files?: unknown;
   appliedFiles?: unknown;
 };
@@ -101,6 +102,7 @@ type RollbackParseResult = {
     raw: RollbackState;
     status: "available" | "rolled-back";
     targetPath: string;
+    backupPath: string | null;
     files: RollbackFileRecord[];
     appliedFiles: InstalledFile[];
   };
@@ -325,6 +327,33 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
       continue;
     }
 
+    const reconcileBackupValidation = installWasPreviouslyUnmanagedReconcile(record)
+      ? validateReconcileBackupPath({
+        skill,
+        targetPath,
+        backupPath: rollbackState.backupPath
+      })
+      : { ok: true as const };
+    if (!reconcileBackupValidation.ok) {
+      result.ok = false;
+      result.summary.refused += 1;
+      result.errors.push({
+        code: reconcileBackupValidation.code,
+        message: reconcileBackupValidation.message,
+        skill,
+        path: reconcileBackupValidation.path
+      });
+      result.rollbacks.push({
+        skill,
+        targetPath,
+        status: "refused",
+        restored: 0,
+        removed: 0,
+        failed: 0
+      });
+      continue;
+    }
+
     const item: RollbackResultItem = {
       skill,
       targetPath,
@@ -372,6 +401,33 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
             message: removedTarget.message,
             skill,
             path: targetPath
+          });
+          result.rollbacks.push(item);
+          continue;
+        }
+        removeReceiptInstallRecord(installs, skill, record);
+        changedReceipt = true;
+        receiptChangedSkills.add(skill);
+        result.rollbacks.push(item);
+        continue;
+      }
+
+      if (installWasPreviouslyUnmanagedReconcile(record)) {
+        const removedBackup = await removeReconcileBackup({
+          skill,
+          targetPath,
+          backupPath: rollbackState.backupPath
+        });
+        if (removedBackup.status === "failed") {
+          item.failed += 1;
+          result.summary.failed += 1;
+          item.status = item.restored > 0 || item.removed > 0 ? "partial" : "refused";
+          result.ok = false;
+          result.errors.push({
+            code: removedBackup.code,
+            message: removedBackup.message,
+            skill,
+            path: removedBackup.path
           });
           result.rollbacks.push(item);
           continue;
@@ -600,6 +656,17 @@ function normalizeRollback(value: unknown, installRoot: string): RollbackParseRe
   if (!Array.isArray(raw.appliedFiles)) {
     return { kind: "invalid", targetPath, message: "rollback appliedFiles must be an array." };
   }
+  let backupPath: string | null = null;
+  if (raw.backupPath !== undefined) {
+    const backupPathValue = normalizeString(raw.backupPath);
+    if (backupPathValue === null) {
+      return { kind: "invalid", targetPath, message: "rollback backupPath must be a non-empty string." };
+    }
+    backupPath = resolveReceiptPathUnderRoot(installRoot, backupPathValue);
+    if (backupPath === null || path.resolve(backupPath) === path.resolve(installRoot)) {
+      return { kind: "invalid", targetPath, message: "rollback backupPath must stay within the receipt install root." };
+    }
+  }
 
   const files: RollbackFileRecord[] = [];
   for (const file of raw.files) {
@@ -625,6 +692,7 @@ function normalizeRollback(value: unknown, installRoot: string): RollbackParseRe
       raw,
       status: raw.status,
       targetPath,
+      backupPath,
       files,
       appliedFiles
     }
@@ -813,6 +881,10 @@ function installWasPreviouslyMissing(record: ReceiptInstallRecord): boolean {
   return isRecord(record.priorState) && record.priorState.status === "missing";
 }
 
+function installWasPreviouslyUnmanagedReconcile(record: ReceiptInstallRecord): boolean {
+  return record.mode === "reconcile" && isRecord(record.priorState) && record.priorState.status === "unknown";
+}
+
 async function removeMissingInstallTarget(targetPath: string): Promise<
   | { status: "removed" }
   | { status: "failed"; code: string; message: string }
@@ -827,6 +899,66 @@ async function removeMissingInstallTarget(targetPath: string): Promise<
       message: `Failed to remove ${targetPath}: ${errorMessage(error)}`
     };
   }
+}
+
+async function removeReconcileBackup({
+  skill,
+  targetPath,
+  backupPath
+}: {
+  skill: string;
+  targetPath: string;
+  backupPath: string | null;
+}): Promise<
+  | { status: "removed" | "skipped" }
+  | { status: "failed"; code: string; message: string; path: string }
+> {
+  if (backupPath === null) {
+    return { status: "skipped" };
+  }
+  const validation = validateReconcileBackupPath({ skill, targetPath, backupPath });
+  if (!validation.ok) {
+    return {
+      status: "failed",
+      code: validation.code,
+      message: validation.message,
+      path: validation.path
+    };
+  }
+  try {
+    await rm(backupPath, { recursive: true, force: true });
+    return { status: "removed" };
+  } catch (error) {
+    return {
+      status: "failed",
+      code: "rollback_remove_failed",
+      message: `Failed to remove reconcile backup ${backupPath}: ${errorMessage(error)}`,
+      path: backupPath
+    };
+  }
+}
+
+function validateReconcileBackupPath({
+  skill,
+  targetPath,
+  backupPath
+}: {
+  skill: string;
+  targetPath: string;
+  backupPath: string | null;
+}): { ok: true } | { ok: false; code: string; message: string; path: string } {
+  if (backupPath === null) {
+    return { ok: true };
+  }
+  if (path.dirname(backupPath) === path.dirname(targetPath) && path.basename(backupPath).startsWith(`.${skill}.suitcase-pre-reconcile-`)) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    code: "invalid_receipt",
+    message: `Refusing to remove unexpected reconcile backup ${backupPath}.`,
+    path: backupPath
+  };
 }
 
 async function restoredVersion(targetPath: string, record: ReceiptInstallRecord): Promise<string | null> {
@@ -947,7 +1079,7 @@ async function removeRollbackTarget(file: RollbackFileRecord): Promise<
     if (isNodeError(error) && error.code === "ENOENT") {
       return { status: "removed" };
     }
-    if (isNodeError(error) && error.code === "EISDIR") {
+    if (isNodeError(error) && (error.code === "EISDIR" || error.code === "EPERM") && await isDirectory(file.targetPath)) {
       try {
         await rm(file.targetPath, { recursive: true, force: true });
         return { status: "removed" };
@@ -964,6 +1096,14 @@ async function removeRollbackTarget(file: RollbackFileRecord): Promise<
       code: "rollback_remove_failed",
       message: `Failed to remove ${file.path}: ${errorMessage(error)}`
     };
+  }
+}
+
+async function isDirectory(candidatePath: string): Promise<boolean> {
+  try {
+    return (await lstat(candidatePath)).isDirectory();
+  } catch {
+    return false;
   }
 }
 
