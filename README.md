@@ -12,10 +12,10 @@ an explicit approval input (plan-lock or staging artifact), refuses dirty or
 unmanaged targets, writes copy installs transactionally, can create approved
 repo-pointing symlinks with `--mode symlink`, and emits receipts.
 
-The `rollback` command reverses an apply using the rollback state captured in a
-receipt. It restores each written copy file to its pre-apply contents, removes
-files or symlinks the apply created, and refuses when the target has drifted from
-the recorded applied state.
+The `rollback` command reverses receipt-backed apply or reconcile changes. It
+restores recorded previous contents, removes files, directories, or symlinks the
+mutation created, and refuses when the target has drifted from the recorded
+applied state.
 
 The `track` command adopts skills that are already installed in a target. It
 verifies the live files or root symlink match the catalog source, then writes
@@ -114,10 +114,11 @@ node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --cla
 `--codex-home <dir>` overrides the `codex` `codexHome` and defaults its
 `skillsPath` to `<dir>/skills`. `--codex-skills <dir>` can override that skills
 path directly. `--claude-skills <dir>` overrides the `claude` skills root.
-These flags work with `targets`, `status`, `diff`, `pack`, `apply`, and `track`.
-Use `status --target <target>` with an assignment path id or assignment name. If
-an exact assignment path id exists, it wins, so `--target codex` means the global
-Codex target rather than every target assigned to Codex.
+These flags work with `targets`, `status`, `diff`, `pack`, `apply`, `track`, and
+`reconcile`. Use `status --target <target>` with an assignment path id or
+assignment name. If an exact assignment path id exists, it wins, so
+`--target codex` means the global Codex target rather than every target assigned
+to Codex.
 
 See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
@@ -194,6 +195,15 @@ If matching skills already exist, adopt them without rewriting files:
 ```bash
 node "$CLI" track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --skill gnhf-postflight --json
 node "$CLI" track --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --skill office-hours --skill gnhf-postflight --json
+```
+
+If selected existing skills are unknown because they lack receipts and differ
+from the catalog, inspect the repair first and run the live replacement only
+with explicit approval:
+
+```bash
+node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --dry-run --json
+node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --apply --json
 ```
 
 Then apply missing or behind skills from a temporary bundle:
@@ -377,7 +387,7 @@ Each planned item records the resolved `variant` name, which defaults to
 declares a matching source variant for the resolved platform, `variant` is that
 variant's name and an extra `source` field carries its catalog-relative source
 path. These `variant` and `source` fields flow through `diff`, `pack`, `apply`,
-`track`, receipts, and `status`. See
+`track`, `reconcile`, receipts, and `status`. See
 [`docs/portability-matrix.md`](docs/portability-matrix.md) for the variant
 selection rules.
 
@@ -766,12 +776,12 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
 
 ## `rollback` Output
 
-`rollback` reverses an apply from a receipt. It resolves `--receipt` to a receipt
-file (a directory argument resolves to `<dir>/.skill-suitcase-receipt.json`),
-then walks each install record's captured `rollback` state. For each skill it
-first checks that the target still matches the recorded applied state; on a match
-it restores every file to its pre-apply contents and removes files the apply
-created.
+`rollback` reverses a receipt-backed mutation. It resolves `--receipt` to a
+receipt file (a directory argument resolves to
+`<dir>/.skill-suitcase-receipt.json`), then walks each install record's captured
+`rollback` state. For each skill it first checks that the target still matches
+the recorded applied state; on a match it restores every file to its previous
+contents and removes files or directories the mutation created.
 
 On success (`ok: true`):
 
@@ -803,20 +813,20 @@ On success (`ok: true`):
 
 Per-skill `status` values:
 
-- `restored`: the recorded previous file states were restored (and apply-created
-  files removed)
+- `restored`: the recorded previous file states were restored (and
+  mutation-created files removed)
 - `noop`: the record has no rollback state, or it was already rolled back
 - `refused`: the target drifted from the recorded applied state, or every file
   failed to restore
 - `partial`: some files were restored or removed but at least one failed
 
 `summary` holds aggregate counts across the receipt: `restored` and `removed`
-count individual files, `noop` and `refused` count skills, and `failed` counts
-files that could not be restored or removed. After a fully successful rollback
-of a previously installed skill, the receipt's rollback record is marked
-`rolled-back`, so re-running `rollback` is a deterministic no-op. If the apply
-created the whole skill install, rollback removes that install record from the
-receipt.
+count individual files or directories, `noop` and `refused` count skills, and
+`failed` counts entries that could not be restored or removed. After a fully
+successful rollback of a previously installed skill, the receipt's rollback
+record is marked `rolled-back`, so re-running `rollback` is a deterministic
+no-op. If the mutation created the whole managed install, rollback removes that
+install record from the receipt.
 
 For `mode: "symlink"` installs, rollback reverses only links that `apply --mode
 symlink` created (recorded with `created: true`): it removes the
@@ -828,6 +838,12 @@ than delete a real directory, a retargeted link, or a broken link found where
 the created symlink was expected, so it can never delete state it did not
 capture.
 
+For `mode: "reconcile"` installs, rollback restores the pre-reconcile target
+from the recorded file states, removes catalog-created files/directories, removes
+the hidden `.suitcase-pre-reconcile-*` backup after a successful restore, and
+drops the reconcile install record from the receipt. Rollback refuses unexpected
+backup paths so it does not remove unrelated target state.
+
 On failure (`ok: false`), `errors` contains objects with `code` and `message`
 (plus optional `skill` and `path`). Error codes include:
 
@@ -838,7 +854,8 @@ On failure (`ok: false`), `errors` contains objects with `code` and `message`
   original target was not a regular file)
 - `rollback_record_invalid` — stored rollback bytes do not match their recorded digest
 - `restore_write_failed` — restoring a file's previous contents failed
-- `rollback_remove_failed` — removing an apply-created file failed
+- `rollback_remove_failed` — removing a created file, directory, symlink, or
+  reconcile backup failed
 - `receipt_write_failed` — rollback restored files but could not persist the
   updated receipt
 
@@ -921,6 +938,115 @@ and `summary.planned` counts only selected planned skills. Error codes include:
 - `invalid_receipt` — the existing receipt cannot be read or normalized
 - `receipt_write_failed` — the adoption receipt could not be written
 - `diff_*` — a diff-layer error propagated from target resolution
+
+## `reconcile` Output
+
+`reconcile` repairs selected catalog-planned skills whose target directory
+exists, has no Suitcase receipt, and differs from the catalog. It is
+intentionally targeted: pass one or more `--skill <name>` filters, plus exactly
+one of `--dry-run` or `--apply`.
+
+`--dry-run` is read-only. It uses `diff` and `status` to prove the selected skill
+is an unknown, mismatched target, then reports the live-vs-catalog file actions
+and the hidden backup path template that `--apply` would use.
+
+On a clean dry run (`ok: true`):
+
+```json
+{
+  "ok": true,
+  "dryRun": true,
+  "readOnly": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "target": "openclaw",
+  "assignment": "openclaw",
+  "installRoot": "/tmp/openclaw/skills",
+  "selected": { "skills": ["skill-cleaner"] },
+  "candidates": [
+    {
+      "skill": "skill-cleaner",
+      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner",
+      "targetPath": "/tmp/openclaw/skills/skill-cleaner",
+      "variant": "canonical",
+      "status": "unknown",
+      "reason": "target exists but has no Suitcase receipt",
+      "changes": { "create": 1, "update": 1, "extra": 1, "missing": 0, "unchanged": 0 },
+      "entries": [
+        { "action": "update", "skill": "skill-cleaner", "relativePath": "SKILL.md", "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner/SKILL.md", "targetPath": "/tmp/openclaw/skills/skill-cleaner/SKILL.md" }
+      ],
+      "backup": {
+        "strategy": "rename-target-directory",
+        "backupPathTemplate": "/tmp/openclaw/skills/.skill-cleaner.suitcase-pre-reconcile-<timestamp>"
+      }
+    }
+  ],
+  "refused": { "skills": [] },
+  "summary": { "planned": 1, "candidates": 1, "refused": 0, "blocked": 0, "create": 1, "update": 1, "extra": 1, "missing": 0, "unchanged": 0 },
+  "reconciled": { "skills": [], "files": 0, "backups": [] },
+  "receiptPath": null,
+  "postReconcileStatus": null,
+  "errors": []
+}
+```
+
+`--apply` re-runs the same candidate checks, copies the catalog source to a
+temporary path, hash-verifies the copy, renames the existing target aside to a
+hidden `.suitcase-pre-reconcile-*` backup, installs the catalog copy, writes a
+`mode: "reconcile"` receipt with rollback state, and verifies post-reconcile
+`status` reports the skill as `current`.
+
+On success (`ok: true`), `reconciled.skills` lists replaced skills,
+`reconciled.files` counts receipted catalog files, `reconciled.backups` lists the
+preserved prior target paths, `receiptPath` points to the written receipt, and
+`postReconcileStatus` contains the verification result:
+
+```json
+{
+  "ok": true,
+  "dryRun": false,
+  "readOnly": false,
+  "reconciled": {
+    "skills": ["skill-cleaner"],
+    "files": 2,
+    "backups": [
+      {
+        "skill": "skill-cleaner",
+        "targetPath": "/tmp/openclaw/skills/skill-cleaner",
+        "backupPath": "/tmp/openclaw/skills/.skill-cleaner.suitcase-pre-reconcile-<id>"
+      }
+    ]
+  },
+  "receiptPath": "/tmp/openclaw/skills/.skill-suitcase-receipt.json",
+  "postReconcileStatus": { "ok": true, "statuses": [{ "skill": "skill-cleaner", "status": "current" }] },
+  "errors": []
+}
+```
+
+The reconcile receipt records `mode: "reconcile"`, `priorState.status: "unknown"`,
+source provenance, installed file hashes, and rollback schema
+`calvinnwq.skills.rollback.v0` with `targetPath`, `sourcePath`, `backupPath`,
+previous file states, and applied file hashes. A later `rollback` restores the
+pre-reconcile target and removes the reconcile backup after a successful restore.
+
+On failure (`ok: false`), `errors` contains objects with `code` and `message`
+(plus optional `skill` and `path`). Error codes include:
+
+- `invalid_skill_filter` — no non-blank `--skill` filter was provided
+- `invalid_reconcile_mode` — neither or both of `--dry-run` and `--apply` were provided
+- `read_only_target` — the resolved target provider is modeled read-only
+- `missing_install_root` — the target could not be resolved to an install root
+- `diff_*` / `status_*` — target-resolution or status errors propagated from those layers
+- `blocked_skill` — compatibility rules block the selected skill for the target
+- `skill_not_planned` — a selected skill is not planned for the target
+- `unsafe_path` — the skill, source path, or target path would escape the approved roots
+- `unsupported_target_state` — the selected target is not an unknown receiptless directory
+- `missing_source` — the catalog source has missing entries
+- `target_matches_catalog_use_track` — the selected target already matches and should be adopted with `track`
+- `unsupported_source_tree` / `source_unreadable` — the catalog source cannot be copied safely
+- `unsafe_target_tree` / `target_unreadable` — the target contains symlinks, special entries, empty directories, or unreadable state that rollback cannot safely record
+- `invalid_receipt` — the existing receipt could not be read before mutation
+- `reconcile_write_failed` — copying, swapping, verification, or receipt write failed and was rolled back best-effort
+- `post_status_unavailable` / `post_status_not_current` — post-reconcile status verification failed
 
 ## `promote` Output
 

@@ -83,7 +83,7 @@ Command modules should stay thin. They adapt the outside world to core code.
 - packing and artifact construction
 - import/onboarding inspection
 - apply/install workflows
-- rollback and existing-install adoption workflows
+- rollback, reconcile, and existing-install adoption workflows
 - install mode classification and safety checks
 - receipt creation and validation
 - catalog, manifest, target, and validation rules
@@ -164,9 +164,9 @@ coverage, such as OpenCode and Pi, but Skill Suitcase still owns planning,
 receipts, dirty detection, rollback, and approval boundaries.
 
 Do not call `npx skills` from normal target discovery, planning, status, diff,
-apply, or track paths. If a future issue adds optional `skills.sh` installer
-delegation, it must be wrapped behind a narrow adapter and reconciled back into
-Skill Suitcase receipts before the install is considered managed.
+apply, track, or reconcile paths. If a future issue adds optional `skills.sh`
+installer delegation, it must be wrapped behind a narrow adapter and reconciled
+back into Skill Suitcase receipts before the install is considered managed.
 
 Provider data must be deterministic in tests. Prefer a vendored/generated
 snapshot over runtime network or package execution. Snapshot refreshes should be
@@ -268,8 +268,8 @@ Live mutations require explicit approval input or an approved command mode:
 - deleting or trashing prior target state
 
 The default path for new platform coverage is read-only first: `targets`,
-`status`, and `diff` should prove the target model before `track`, `apply`, or
-`promote` touches live paths.
+`status`, and `diff` should prove the target model before `track`, `apply`,
+`reconcile --apply`, or `promote` touches live paths.
 
 ## Import Direction
 

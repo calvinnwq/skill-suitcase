@@ -135,11 +135,14 @@ fixtures or a clearly approved target:
 ```bash
 node "$CLI" apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact /path/to/skill-suitcase-bundle.json --json
 node "$CLI" apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --lock /path/to/plan-lock.json --mode symlink --json
+node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
+node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 node "$CLI" promote --source "$SRC" --target-skill "$HOME/.codex/skills/new-skill" --dry-run --json
 ```
 
-Do not run live `apply`, `track`, `rollback`, or `promote --apply` against
-Calvin's real agent homes without explicit approval for the target and mode.
+Do not run live `apply`, `track`, `reconcile --apply`, `rollback`, or
+`promote --apply` against Calvin's real agent homes without explicit approval
+for the target and mode.
 
 ## Calvin-Local Versus Portable Support
 
@@ -151,6 +154,8 @@ Portable support:
 - read-only planning, diffing, status, target discovery, validation, and import
 - staging bundles and plan locks
 - copy and symlink apply modes when explicitly approved
+- targeted reconcile for selected unknown catalog-owned targets when explicitly
+  approved
 - receipts, status, and rollback for Skill Suitcase-managed installs
 
 Calvin-local examples:

@@ -30,12 +30,12 @@ variants:
 
 Planning picks the first variant whose `agents` match the resolved platform
 adapter aliases. The planned item carries that variant name and source path
-through `diff`, `pack`, `apply`, `track`, receipts, and `status`.
+through `diff`, `pack`, `apply`, `track`, `reconcile`, receipts, and `status`.
 
 Use `compatibility.<skill>.blockedAgents` as the fallback guard when a platform
 needs a slimmer variant but the source catalog does not yet provide one. In that
-case the canonical OpenClaw bundle is blocked so `diff`, `pack`, `apply`, and
-`track` cannot blindly replace the live slimmer copy.
+case the canonical OpenClaw bundle is blocked so `diff`, `pack`, `apply`,
+`track`, and `reconcile` cannot blindly replace the live slimmer copy.
 
 Use `import --source <skills-catalog> --json` when onboarding or changing
 variant metadata. It reports missing compatibility labels, missing variant agent
@@ -62,3 +62,5 @@ it when validating that:
 - Canonical `gnhf-postflight` appears as blocked for Codex or Claude when a
   required slim source variant is absent.
 - `track` refuses to adopt a blocked canonical skill into a slimmer live target.
+- `reconcile` refuses to replace a blocked canonical skill in a slimmer live
+  target.
