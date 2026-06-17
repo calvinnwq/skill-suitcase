@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1](https://github.com/calvinnwq/skill-suitcase/compare/v0.5.0...v0.5.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* **package:** expose skill-suitcase cli bin ([9ab7f51](https://github.com/calvinnwq/skill-suitcase/commit/9ab7f512797ca8f12745cee41775833d8cad3ea4))
+* **package:** expose skill-suitcase cli bin ([afe8d10](https://github.com/calvinnwq/skill-suitcase/commit/afe8d1090a9d29384caf1d4532d408d07bfc6ba4))
+* **package:** expose skill-suitcase CLI bin ([9ab7f51](https://github.com/calvinnwq/skill-suitcase/commit/9ab7f512797ca8f12745cee41775833d8cad3ea4))
+
 ## [0.5.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.4.3...v0.5.0) (2026-06-17)
 
 
