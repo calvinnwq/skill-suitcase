@@ -1,0 +1,178 @@
+# Skill Suitcase Agent Setup
+
+These instructions are for any coding agent setting up Skill Suitcase on a
+machine. If you are human, paste this line into your agent:
+
+> Follow `https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md` to
+> install the Skill Suitcase CLI and operator skill, then audit my local skill
+> targets without mutating them until I approve.
+
+Never paste secrets, tokens, API keys, private prompts, or credential dumps into
+chat, issues, PRs, logs, or release notes.
+
+## 1. Install Or Locate The CLI
+
+Check first:
+
+```bash
+command -v skill-suitcase || true
+if command -v skill-suitcase >/dev/null 2>&1 && test -d "$HOME/repos/skills"; then
+  skill-suitcase targets --source "$HOME/repos/skills" --json
+fi
+```
+
+If missing, install the published CLI:
+
+```bash
+npm install --global skill-suitcase
+test -d "$HOME/repos/skills" && skill-suitcase targets --source "$HOME/repos/skills" --json
+```
+
+For source installs:
+
+```bash
+mkdir -p "$HOME/repos"
+git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase" 2>/dev/null || true
+cd "$HOME/repos/skill-suitcase"
+git pull --ff-only
+corepack enable
+pnpm install
+pnpm build
+```
+
+Use the source CLI as:
+
+```bash
+export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
+node "$CLI" targets --source "$HOME/repos/skills" --json
+```
+
+## 2. Install The Operator Skill
+
+Copy the whole `skills/skill-suitcase` directory, not just `SKILL.md`.
+
+From a global npm install:
+
+```bash
+SKILL_SRC="$(npm root -g)/skill-suitcase/skills/skill-suitcase"
+```
+
+From a source checkout:
+
+```bash
+SKILL_SRC="$HOME/repos/skill-suitcase/skills/skill-suitcase"
+```
+
+Choose the skill root for the agent runtime you are configuring. Examples:
+
+```bash
+# Codex
+AGENT_SKILLS_DIR="$HOME/.codex/skills"
+
+# Claude
+AGENT_SKILLS_DIR="$HOME/.claude/skills"
+```
+
+Install into the selected root:
+
+```bash
+mkdir -p "$AGENT_SKILLS_DIR"
+rm -rf "$AGENT_SKILLS_DIR/skill-suitcase"
+cp -R "$SKILL_SRC" "$AGENT_SKILLS_DIR/"
+```
+
+Restart the agent runtime after installing or replacing a skill.
+
+## 3. Install Or Refresh The Skills Catalog
+
+```bash
+mkdir -p "$HOME/repos"
+git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills" 2>/dev/null || true
+git -C "$HOME/repos/skills" pull --ff-only
+```
+
+Use the catalog as the source of truth:
+
+```bash
+export SRC="$HOME/repos/skills"
+```
+
+## 4. Read-Only Audit First
+
+With a global CLI:
+
+```bash
+skill-suitcase import --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --strict --json
+skill-suitcase targets --source "$SRC" --json
+skill-suitcase status --source "$SRC" --json
+```
+
+With a source CLI:
+
+```bash
+node "$CLI" import --source "$SRC" --json
+node "$CLI" validate --source "$SRC" --strict --json
+node "$CLI" targets --source "$SRC" --json
+node "$CLI" status --source "$SRC" --json
+```
+
+Inspect local Codex and Claude targets with overrides:
+
+```bash
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+
+skill-suitcase status --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
+skill-suitcase diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
+```
+
+Use `node "$CLI"` instead of `skill-suitcase` in those commands when operating
+from a source checkout.
+
+## 5. Mutate Only After Approval
+
+Use `track` for exact matches only:
+
+```bash
+skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --skill improve --skill gnhf-postflight --json
+```
+
+Use `reconcile` only for selected catalog-owned drift:
+
+```bash
+skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --dry-run --json
+# after approval:
+skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --apply --json
+```
+
+Use staged artifacts for missing or behind skills:
+
+```bash
+TMP="$(mktemp -d /tmp/skill-suitcase-codex.XXXXXX)"
+skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$TMP" --json
+find "$TMP" -maxdepth 4 -type f | sort
+ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
+# after approval:
+skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
+```
+
+For Claude, use:
+
+```bash
+skill-suitcase pack --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --output "$TMP" --json
+skill-suitcase apply --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --artifact "$ARTIFACT" --json
+```
+
+## 6. Verify And Report
+
+Finish with:
+
+```bash
+skill-suitcase status --source "$SRC" --json
+```
+
+Report the catalog branch/SHA, target ids inspected, live mutations run, final
+summary counts, receipt or backup paths, and anything skipped. Codex `linear` is
+provider-managed by Codex/plugin/MCP and should not be forced into Suitcase
+ownership.
