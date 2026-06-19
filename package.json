@@ -16,7 +16,9 @@
   },
   "files": [
     "dist/src/**/*.js",
+    "skills/skill-suitcase",
     "README.md",
+    "INSTALL.md",
     "CHANGELOG.md",
     "docs/*.md"
   ],

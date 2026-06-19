@@ -44,6 +44,9 @@ npm install -g skill-suitcase
 skill-suitcase plan --source /path/to/skills-catalog --target openclaw --json
 ```
 
+For agent setup, including installing the packaged `skill-suitcase` operator
+skill into Codex or Claude, follow [`INSTALL.md`](INSTALL.md).
+
 For local development, build and run the compiled CLI directly:
 
 ## Usage
