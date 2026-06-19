@@ -222,6 +222,33 @@ test("repair refuses a behind target and routes it to pack and apply", async (t)
   );
 });
 
+test("repair refuses a dirty target whose receipt is behind catalog", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await dirtyTheTarget(fixture);
+  await writeFile(path.join(fixture.sourceSkill, "runtime.js"), "console.log(\"catalog moved ahead\");\n");
+
+  const before = await status({ source: fixture.sourceRoot, target: "openclaw" });
+  const beforeItem = before.statuses.find((item) => item.skill === "skill-cleaner");
+  assert.equal(beforeItem?.status, "dirty", "precondition: target should be dirty");
+  assert.notEqual(beforeItem?.installedHash, beforeItem?.currentHash, "precondition: receipt should be behind catalog");
+
+  const result = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    dryRun: true
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.candidates.length, 0);
+  assert.equal(
+    result.errors.some((error) => error.code === "route_to_pack_apply" && error.skill === "skill-cleaner"),
+    true
+  );
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), "console.log(\"locally edited\");\n");
+  assert.equal(await readFile(path.join(fixture.targetSkill, "extra.js"), "utf8"), "console.log(\"local extra\");\n");
+});
+
 test("repair refuses read-only provider targets without touching the filesystem", async (t) => {
   const fixture = await createCatalog(t);
   const fakeHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-repair-provider-home-"));
@@ -349,6 +376,27 @@ test("repair apply rollback restores the pre-repair dirty target via receipt met
   const receiptAfter = JSON.parse(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
   const recordAfter = singleRecord(receiptAfter, "skill-cleaner");
   assert.equal(recordAfter.rollback?.status, "rolled-back");
+});
+
+test("repair rollback does not report restored dirty content as current", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await dirtyTheTarget(fixture);
+
+  const applied = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+  assert.equal(applied.ok, true);
+
+  const rollbackResult = await rollback({ receipt: path.join(fixture.targetRoot, RECEIPT_FILE) });
+  assert.equal(rollbackResult.ok, true);
+
+  const postRollbackStatus = await status({ source: fixture.sourceRoot, target: "openclaw" });
+  const skillStatus = postRollbackStatus.statuses.find((entry) => entry.skill === "skill-cleaner");
+  assert.notEqual(skillStatus?.status, "current");
+  assert.equal(postRollbackStatus.summary.current, 0);
 });
 
 test("repair apply restores the dirty target and writes no receipt when a write fails after backup", async (t) => {

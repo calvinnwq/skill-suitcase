@@ -374,6 +374,20 @@ async function planRepair(input: RepairInput, selectedSkills: string[]): Promise
       continue;
     }
 
+    if (
+      statusItem.installedHash !== null
+      && statusItem.currentHash !== null
+      && statusItem.installedHash !== statusItem.currentHash
+    ) {
+      errors.push(repairError({
+        code: "route_to_pack_apply",
+        message: `Skill ${skill} is dirty and behind (${statusItem.reason}); use pack + apply to update it, not repair.`,
+        skill,
+        path: statusItem.targetPath
+      }));
+      continue;
+    }
+
     const skillEntries = entriesBySkill.get(skill) ?? [];
     const changes = summarizeEntries(skillEntries);
     if (changes.missing > 0 || skillEntries.some((entry) => entry.action === "missing")) {
@@ -559,13 +573,12 @@ async function executeRepair(input: RepairInput, plan: RepairBaseResult): Promis
         previousTargetPath: backupPath,
         appliedTargetPath: candidate.targetPath
       });
+      const restoredHash = await hashDirectory(backupPath);
       const priorState: Record<string, unknown> = {
         status: candidate.status,
         reason: candidate.reason
       };
-      if (candidate.receiptHash !== null) {
-        priorState.installedHash = candidate.receiptHash;
-      }
+      priorState.installedHash = restoredHash;
       if (candidate.catalogHash !== null) {
         priorState.currentHash = candidate.catalogHash;
       }
