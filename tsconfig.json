@@ -96,6 +96,7 @@
     "tests/install-modes.test.ts",
     "tests/promote.test.ts",
     "tests/reconcile.test.ts",
-    "tests/repair.test.ts"
+    "tests/repair.test.ts",
+    "tests/docs-guidance.test.ts"
   ]
 }

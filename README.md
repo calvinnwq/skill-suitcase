@@ -32,6 +32,18 @@ rollback/backup state, writes a receipt, and verifies status can become current.
 Use `track` for exact matches, `apply` for approved lock/artifact installs, and
 `promote` for target-created skills that need to become catalog source.
 
+The `repair` command restores selected receipt-owned target skills that became
+`dirty` after external edits. It is the safe recovery path when a managed target
+differs from its Suitcase receipt: `repair --dry-run` reports the target path,
+receipt hash, catalog hash, changed files, and backup/rollback plan without
+mutation; `repair --apply` requires explicit approval, backs up the dirty live
+content, replaces the target from catalog source, writes a receipt, and verifies
+the skill returns to `current`. A later `rollback` restores the pre-repair dirty
+target from the receipt-owned backup. Repair only owns explicitly selected
+`dirty` receipt-owned skills and refuses every other state: `unknown` routes to
+`track`/`reconcile`, `missing`/`behind` route to `pack` + `apply`, and read-only
+providers are rejected.
+
 The `promote` command converts a target-created skill into a repo-owned catalog
 skill. `promote --dry-run` reports the read-only plan and conflicts; `promote
 --apply` copies the target into the catalog, verifies it, replaces the target
@@ -71,6 +83,8 @@ node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openc
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
 node dist/src/cli.js reconcile --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
 node dist/src/cli.js reconcile --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
+node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
+node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --dry-run --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --apply --json
 ```
@@ -207,6 +221,15 @@ with explicit approval:
 ```bash
 node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --dry-run --json
 node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --apply --json
+```
+
+If selected receipt-owned skills are `dirty` because they were edited after
+install, stop and inspect the planned repair first, then replace from catalog
+with `repair --apply` only after explicit approval:
+
+```bash
+node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --dry-run --json
+node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --apply --json
 ```
 
 Then apply missing or behind skills from a temporary bundle:
@@ -684,7 +707,9 @@ It uses `path` for `openclaw-skills-root` and
   (for symlink installs, the target link points at the selected source path)
 - `behind`: source content changed after the recorded install
 - `version`: source `SKILL.md` frontmatter `version` changed
-- `dirty`: target files or symlink differ from the recorded install
+- `dirty`: target files or symlink differ from the recorded install; stop and
+  inspect, then run `repair --dry-run` and, after approval, `repair --apply` for
+  a receipt-owned skill (see [`repair` Output](#repair-output))
 - `missing`: planned target skill directory is absent
 - `unknown`: status could not be proven, such as a missing receipt for an
   existing target or an unreadable source/target
@@ -1050,6 +1075,126 @@ On failure (`ok: false`), `errors` contains objects with `code` and `message`
 - `invalid_receipt` — the existing receipt could not be read before mutation
 - `reconcile_write_failed` — copying, swapping, verification, or receipt write failed and was rolled back best-effort
 - `post_status_unavailable` / `post_status_not_current` — post-reconcile status verification failed
+
+## `repair` Output
+
+`repair` restores selected receipt-owned target skills that became `dirty` after
+external edits. It is intentionally narrow: pass one or more `--skill <name>`
+filters, plus exactly one of `--dry-run` or `--apply`. Unlike `reconcile` (which
+adopts receiptless `unknown` targets), `repair` only owns targets that already
+carry a Suitcase receipt and have drifted from it. Every other state is refused
+and routed to the command that owns it.
+
+`--dry-run` is read-only. It uses `diff` and `status` to prove the selected skill
+is a receipt-owned `dirty` target, then reports the target path, receipt hash,
+catalog hash, changed files, and the hidden backup path template that `--apply`
+would use. The `finalAction` is always `replace-target-from-catalog`.
+
+On a clean dry run (`ok: true`):
+
+```json
+{
+  "ok": true,
+  "dryRun": true,
+  "readOnly": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "target": "openclaw",
+  "assignment": "openclaw",
+  "installRoot": "/tmp/openclaw/skills",
+  "selected": { "skills": ["skill-cleaner"] },
+  "candidates": [
+    {
+      "skill": "skill-cleaner",
+      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner",
+      "targetPath": "/tmp/openclaw/skills/skill-cleaner",
+      "variant": "canonical",
+      "status": "dirty",
+      "reason": "target files differ from receipt",
+      "receiptHash": "e1c..",
+      "catalogHash": "9a4..",
+      "changes": { "create": 0, "update": 1, "extra": 1, "missing": 0, "unchanged": 1 },
+      "entries": [
+        { "action": "update", "skill": "skill-cleaner", "relativePath": "runtime.js", "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner/runtime.js", "targetPath": "/tmp/openclaw/skills/skill-cleaner/runtime.js" },
+        { "action": "extra", "skill": "skill-cleaner", "relativePath": "extra.js", "sourcePath": null, "targetPath": "/tmp/openclaw/skills/skill-cleaner/extra.js" }
+      ],
+      "backup": {
+        "strategy": "rename-target-directory",
+        "backupPathTemplate": "/tmp/openclaw/skills/.skill-cleaner.suitcase-pre-repair-<timestamp>"
+      },
+      "finalAction": "replace-target-from-catalog"
+    }
+  ],
+  "refused": { "skills": [] },
+  "summary": { "planned": 1, "candidates": 1, "refused": 0, "blocked": 0, "dirty": 1, "create": 0, "update": 1, "extra": 1, "missing": 0, "unchanged": 1 },
+  "repaired": { "skills": [], "files": 0, "backups": [] },
+  "receiptPath": null,
+  "postRepairStatus": null,
+  "errors": []
+}
+```
+
+`--apply` re-runs the same candidate checks, copies the catalog source to a
+temporary path, hash-verifies the copy, renames the existing dirty target aside
+to a hidden `.suitcase-pre-repair-*` backup, installs the catalog copy, writes a
+`mode: "repair"` receipt with rollback state, and verifies post-repair `status`
+reports the skill as `current`. No target is mutated before its backup and
+rollback metadata are prepared, and any mid-apply failure unwinds every completed
+swap and restores the original receipt, leaving the dirty target intact.
+
+On success (`ok: true`), `repaired.skills` lists restored skills,
+`repaired.files` counts receipted catalog files, `repaired.backups` lists the
+preserved pre-repair dirty target paths, `receiptPath` points to the written
+receipt, and `postRepairStatus` contains the verification result:
+
+```json
+{
+  "ok": true,
+  "dryRun": false,
+  "readOnly": false,
+  "repaired": {
+    "skills": ["skill-cleaner"],
+    "files": 2,
+    "backups": [
+      {
+        "skill": "skill-cleaner",
+        "targetPath": "/tmp/openclaw/skills/skill-cleaner",
+        "backupPath": "/tmp/openclaw/skills/.skill-cleaner.suitcase-pre-repair-<id>"
+      }
+    ]
+  },
+  "receiptPath": "/tmp/openclaw/skills/.skill-suitcase-receipt.json",
+  "postRepairStatus": { "ok": true, "statuses": [{ "skill": "skill-cleaner", "status": "current" }] },
+  "errors": []
+}
+```
+
+The repair receipt records `mode: "repair"`, `priorState.status: "dirty"`, source
+provenance, installed file hashes, and rollback schema
+`calvinnwq.skills.rollback.v0` carrying the captured pre-repair dirty bytes plus
+the durable `backupPath`. A later `rollback --receipt <path>` restores the
+pre-repair dirty target and keeps the skill receipt-owned (the backup is retained
+because the record is retained).
+
+On failure (`ok: false`), `errors` contains objects with `code` and `message`
+(plus optional `skill` and `path`). Error codes include:
+
+- `invalid_skill_filter` — no non-blank `--skill` filter was provided
+- `invalid_repair_mode` — neither or both of `--dry-run` and `--apply` were provided
+- `read_only_target` — the resolved target provider is modeled read-only
+- `missing_install_root` — the target could not be resolved to an install root
+- `already_current` — a selected skill already matches the catalog; repair is a no-op
+- `route_to_track_or_reconcile` — a selected skill is `unknown`; adopt it with `track` or `reconcile` instead
+- `route_to_pack_apply` — a selected skill is `missing`, `behind`, or `version`; install/update it with `pack` + `apply` instead
+- `blocked_skill` — compatibility rules block the selected skill for the target
+- `skill_not_planned` — a selected skill is not planned for the target
+- `unsafe_path` — the skill, source path, or target path would escape the approved roots
+- `unsupported_target_state` — the selected target has no usable status entry to repair
+- `missing_source` — the catalog source has missing entries
+- `unsupported_source_tree` / `source_unreadable` — the catalog source cannot be copied safely
+- `unsafe_target_tree` / `target_unreadable` — the target contains symlinks, special entries, empty directories, or unreadable state that rollback cannot safely record
+- `invalid_receipt` — the existing receipt could not be read before mutation
+- `repair_write_failed` — copying, swapping, verification, or receipt write failed and was rolled back best-effort
+- `post_status_unavailable` / `post_status_not_current` — post-repair status verification failed
 
 ## `promote` Output
 

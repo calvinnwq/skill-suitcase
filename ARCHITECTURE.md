@@ -24,6 +24,7 @@ src/
     rollback.ts
     track.ts
     reconcile.ts
+    repair.ts
     promote.ts
   core/
     planning/
@@ -34,6 +35,7 @@ src/
     rollback/
     track/
     reconcile/
+    repair/
     promote/
     receipts/
     status/
