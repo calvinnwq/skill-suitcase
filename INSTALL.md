@@ -1,7 +1,7 @@
 # Skill Suitcase Agent Setup
 
-These instructions are for Codex, Claude, or another coding agent setting up
-Skill Suitcase on a machine. If you are human, paste this line into your agent:
+These instructions are for any coding agent setting up Skill Suitcase on a
+machine. If you are human, paste this line into your agent:
 
 > Follow `https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md` to
 > install the Skill Suitcase CLI and operator skill, then audit my local skill
@@ -63,20 +63,22 @@ From a source checkout:
 SKILL_SRC="$HOME/repos/skill-suitcase/skills/skill-suitcase"
 ```
 
-Install for Codex:
+Choose the skill root for the agent runtime you are configuring. Examples:
 
 ```bash
-mkdir -p "$HOME/.codex/skills"
-rm -rf "$HOME/.codex/skills/skill-suitcase"
-cp -R "$SKILL_SRC" "$HOME/.codex/skills/"
+# Codex
+AGENT_SKILLS_DIR="$HOME/.codex/skills"
+
+# Claude
+AGENT_SKILLS_DIR="$HOME/.claude/skills"
 ```
 
-Install for Claude:
+Install into the selected root:
 
 ```bash
-mkdir -p "$HOME/.claude/skills"
-rm -rf "$HOME/.claude/skills/skill-suitcase"
-cp -R "$SKILL_SRC" "$HOME/.claude/skills/"
+mkdir -p "$AGENT_SKILLS_DIR"
+rm -rf "$AGENT_SKILLS_DIR/skill-suitcase"
+cp -R "$SKILL_SRC" "$AGENT_SKILLS_DIR/"
 ```
 
 Restart the agent runtime after installing or replacing a skill.

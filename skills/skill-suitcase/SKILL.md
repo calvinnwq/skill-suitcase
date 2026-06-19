@@ -19,6 +19,8 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
   mixed status report.
 - Use local path overrides instead of editing the shared catalog for another
   machine.
+- Prefer provider/source matrix rows and `targets --json` discovery over
+  hardcoding every current and future runtime variant.
 - Use `track` only for exact existing matches.
 - Use `reconcile --dry-run` before `reconcile --apply`, and only for selected
   catalog-owned skills.
@@ -73,12 +75,27 @@ Run the catalog gates first:
 "$CLI" status --source "$SRC" --json
 ```
 
-Current primary target ids:
+## Source And Target Matrix
 
-- `openclaw`
-- `codex`
-- `openclaw-codex`
-- `claude`
+Use this matrix to choose the command shape. Add new providers as rows in the
+same model; do not rewrite the workflow around provider-specific prose.
+
+| Surface | Target id | Discover with | Local override | Mutation stance |
+| --- | --- | --- | --- | --- |
+| OpenClaw workspace | `openclaw` | `targets --json` | usually none | live only after approval |
+| Global Codex | `codex` | `targets --json` | `--codex-home` or `--codex-skills` | live only after approval |
+| OpenClaw Codex home | `openclaw-codex` | `targets --json` | target-specific Codex home if needed | live only after approval |
+| Claude skills root | `claude` | `targets --json` | `--claude-skills` | live only after approval |
+| Provider-managed skills | provider-specific | provider/plugin docs | none in Suitcase | read-only or skip |
+| Future provider | manifest target id | `targets --json` | provider adapter override if supported | read-only until proven |
+
+For any provider, first inspect the target:
+
+```bash
+"$CLI" targets --source "$SRC" --json
+"$CLI" status --source "$SRC" --target <target-id> <local-overrides> --json
+"$CLI" diff --source "$SRC" --target <target-id> <local-overrides> --json
+```
 
 Use local overrides on machines whose homes differ from the catalog defaults:
 
@@ -90,8 +107,8 @@ Use local overrides on machines whose homes differ from the catalog defaults:
 "$CLI" diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
 ```
 
-For OpenClaw-Codex, inspect `targets` first and use the configured path only if
-that OpenClaw Codex home exists on the machine.
+For nested or provider-specific homes, inspect `targets` first and use only
+install roots that exist on the machine and are intended to be Suitcase-owned.
 
 ## Sync Workflow
 
@@ -121,8 +138,8 @@ ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
 "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 ```
 
-For Claude, replace `--target codex --codex-home "$HOME/.codex"` with
-`--target claude --claude-skills "$HOME/.claude/skills"`.
+For another target, keep the same pattern and replace only the target id and
+override flags from the matrix.
 
 ## Interpretation
 

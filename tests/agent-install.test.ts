@@ -17,6 +17,9 @@ test("operator skill has complete frontmatter and conservative live-mutation rul
   assert.doesNotMatch(skill, /TODO/);
   assert.match(skill, /read-only commands as the default path/);
   assert.match(skill, /Mutate live skill roots only after explicit human approval/);
+  assert.match(skill, /Source And Target Matrix/);
+  assert.match(skill, /Future provider/);
+  assert.match(skill, /provider-specific prose/);
   assert.match(skill, /Never force provider-managed Codex skills such as Codex `linear`/);
   assert.match(skill, /pack --output/);
   assert.match(skill, /apply --artifact/);
@@ -25,8 +28,11 @@ test("operator skill has complete frontmatter and conservative live-mutation rul
 test("agent install guide tells agents how to install and verify the skill", async () => {
   const install = await readFile("INSTALL.md", "utf8");
 
-  assert.match(install, /cp -R "\$SKILL_SRC" "\$HOME\/\.codex\/skills\/"/);
-  assert.match(install, /cp -R "\$SKILL_SRC" "\$HOME\/\.claude\/skills\/"/);
+  assert.match(install, /These instructions are for any coding agent/);
+  assert.doesNotMatch(install, /These instructions are for Codex, Claude/);
+  assert.match(install, /AGENT_SKILLS_DIR="\$HOME\/\.codex\/skills"/);
+  assert.match(install, /AGENT_SKILLS_DIR="\$HOME\/\.claude\/skills"/);
+  assert.match(install, /cp -R "\$SKILL_SRC" "\$AGENT_SKILLS_DIR\/"/);
   assert.match(install, /Restart the agent runtime after installing or replacing a skill/);
   assert.match(install, /Read-Only Audit First/);
   assert.match(install, /Mutate Only After Approval/);
