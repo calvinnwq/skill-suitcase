@@ -23,6 +23,7 @@ test("durable CLI behavior has core entrypoints", async () => {
     "src/core/receipts/index.ts",
     "src/core/status/index.ts",
     "src/core/reconcile/index.ts",
+    "src/core/repair/index.ts",
     "src/core/catalog/index.ts",
     "src/core/catalog/targets.ts",
     "src/core/catalog/suitcase-manifest.ts",
@@ -43,8 +44,11 @@ test("legacy root domain entrypoints remain import-compatible", async () => {
   const coreReceipt = await import("../src/core/receipts/index.js");
   const rootReconcile = await import("../src/reconcile.js");
   const coreReconcile = await import("../src/core/reconcile/index.js");
+  const rootRepair = await import("../src/repair.js");
+  const coreRepair = await import("../src/core/repair/index.js");
 
   assert.equal(rootPlanner.plan, corePlanner.plan);
   assert.equal(rootReceipt.RECEIPT_FILE, coreReceipt.RECEIPT_FILE);
   assert.equal(rootReconcile.reconcile, coreReconcile.reconcile);
+  assert.equal(rootRepair.repair, coreRepair.repair);
 });
