@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.5.1...v0.6.0) (2026-06-19)
+
+
+### Features
+
+* add skill suitcase operator skill ([fc14589](https://github.com/calvinnwq/skill-suitcase/commit/fc1458985d165519c7b39bd96e127a524bb0f18e))
+* add Skill Suitcase operator skill ([2645cb5](https://github.com/calvinnwq/skill-suitcase/commit/2645cb5d96eb4f690c77bae0ec49b6e7adbe2c56))
+
+
+### Bug Fixes
+
+* address operator skill review comments ([cc26852](https://github.com/calvinnwq/skill-suitcase/commit/cc268526528489e37afd3ae4b6f7fe47ee50051b))
+
 ## [0.5.1](https://github.com/calvinnwq/skill-suitcase/compare/v0.5.0...v0.5.1) (2026-06-17)
 
 
