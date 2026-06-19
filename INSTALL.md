@@ -138,12 +138,24 @@ Use `track` for exact matches only:
 skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --skill improve --skill gnhf-postflight --json
 ```
 
-Use `reconcile` only for selected catalog-owned drift:
+Use `reconcile` only for selected catalog-owned receiptless drift:
 
 ```bash
 skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --dry-run --json
 # after approval:
 skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --apply --json
+```
+
+Use `repair` only for selected receipt-owned skills that went `dirty` after
+external edits. Dirty means stop and inspect first: review `repair --dry-run`,
+then replace from catalog with `repair --apply` only after explicit approval. Use
+`rollback` to restore the pre-repair dirty content if the replacement is not
+wanted:
+
+```bash
+skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --dry-run --json
+# after approval:
+skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --apply --json
 ```
 
 Use staged artifacts for missing or behind skills:

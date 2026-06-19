@@ -12,10 +12,10 @@ an explicit approval input (plan-lock or staging artifact), refuses dirty or
 unmanaged targets, writes copy installs transactionally, can create approved
 repo-pointing symlinks with `--mode symlink`, and emits receipts.
 
-The `rollback` command reverses receipt-backed apply or reconcile changes. It
-restores recorded previous contents, removes files, directories, or symlinks the
-mutation created, and refuses when the target has drifted from the recorded
-applied state.
+The `rollback` command reverses receipt-backed apply, reconcile, or repair
+changes. It restores recorded previous contents, removes files, directories, or
+symlinks the mutation created, and refuses when the target has drifted from the
+recorded applied state.
 
 The `track` command adopts skills that are already installed in a target. It
 verifies the live files or root symlink match the catalog source, then writes
@@ -31,6 +31,18 @@ replaces the selected target from catalog source, preserves the prior target as
 rollback/backup state, writes a receipt, and verifies status can become current.
 Use `track` for exact matches, `apply` for approved lock/artifact installs, and
 `promote` for target-created skills that need to become catalog source.
+
+The `repair` command restores selected receipt-owned copy-mode target skills
+that became `dirty` after external edits. It is the safe recovery path when a
+managed target differs from its Suitcase receipt: `repair --dry-run` reports the
+target path, receipt hash, catalog hash, changed files, and backup/rollback plan
+without mutation; `repair --apply` requires explicit approval, backs up the dirty
+live content, replaces the target from catalog source, writes a receipt, and
+verifies the skill returns to `current`. A later `rollback` restores the
+pre-repair dirty target from the receipt-owned backup. Repair only owns
+explicitly selected `dirty` receipt-owned copy installs and refuses every other
+state: `unknown` routes to `track`/`reconcile`, `missing`/`behind` route to
+`pack` + `apply`, and symlink-mode or read-only targets are rejected.
 
 The `promote` command converts a target-created skill into a repo-owned catalog
 skill. `promote --dry-run` reports the read-only plan and conflicts; `promote
@@ -71,6 +83,8 @@ node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openc
 node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
 node dist/src/cli.js reconcile --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
 node dist/src/cli.js reconcile --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
+node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
+node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --dry-run --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --apply --json
 ```
@@ -117,9 +131,9 @@ node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --cla
 `--codex-home <dir>` overrides the `codex` `codexHome` and defaults its
 `skillsPath` to `<dir>/skills`. `--codex-skills <dir>` can override that skills
 path directly. `--claude-skills <dir>` overrides the `claude` skills root.
-These flags work with `targets`, `status`, `diff`, `pack`, `apply`, `track`, and
-`reconcile`. Use `status --target <target>` with an assignment path id or
-assignment name. If an exact assignment path id exists, it wins, so
+These flags work with `targets`, `status`, `diff`, `pack`, `apply`, `track`,
+`reconcile`, and `repair`. Use `status --target <target>` with an assignment
+path id or assignment name. If an exact assignment path id exists, it wins, so
 `--target codex` means the global Codex target rather than every target assigned
 to Codex.
 
@@ -162,9 +176,9 @@ find "$TMP" -maxdepth 3 -type f | sort
 rm -rf "$TMP"
 ```
 
-Live `apply`, `track`, `reconcile --apply`, `rollback`, or `promote --apply`
-should target disposable fixtures first or require explicit approval for the real
-agent home.
+Live `apply`, `track`, `reconcile --apply`, `repair --apply`, `rollback`, or
+`promote --apply` should target disposable fixtures first or require explicit
+approval for the real agent home.
 
 ## Fresh Codex/Claude Machine
 
@@ -201,12 +215,21 @@ node "$CLI" track --source "$SRC" --target claude --claude-skills "$HOME/.claude
 ```
 
 If selected existing skills are unknown because they lack receipts and differ
-from the catalog, inspect the repair first and run the live replacement only
-with explicit approval:
+from the catalog, inspect the reconcile plan first and run the live replacement
+only with explicit approval:
 
 ```bash
 node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --dry-run --json
 node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --apply --json
+```
+
+If selected receipt-owned skills are `dirty` because they were edited after
+install, stop and inspect the planned repair first, then replace from catalog
+with `repair --apply` only after explicit approval:
+
+```bash
+node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --dry-run --json
+node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --apply --json
 ```
 
 Then apply missing or behind skills from a temporary bundle:
@@ -390,7 +413,7 @@ Each planned item records the resolved `variant` name, which defaults to
 declares a matching source variant for the resolved platform, `variant` is that
 variant's name and an extra `source` field carries its catalog-relative source
 path. These `variant` and `source` fields flow through `diff`, `pack`, `apply`,
-`track`, `reconcile`, receipts, and `status`. See
+`track`, `reconcile`, `repair`, receipts, and `status`. See
 [`docs/portability-matrix.md`](docs/portability-matrix.md) for the variant
 selection rules.
 
@@ -684,7 +707,10 @@ It uses `path` for `openclaw-skills-root` and
   (for symlink installs, the target link points at the selected source path)
 - `behind`: source content changed after the recorded install
 - `version`: source `SKILL.md` frontmatter `version` changed
-- `dirty`: target files or symlink differ from the recorded install
+- `dirty`: target files or symlink differ from the recorded install; stop and
+  inspect, then run `repair --dry-run` and, after approval, `repair --apply` for
+  a receipt-owned copy-mode skill (see [`repair` Output](#repair-output));
+  symlink-mode dirty installs are refused rather than converted
 - `missing`: planned target skill directory is absent
 - `unknown`: status could not be proven, such as a missing receipt for an
   existing target or an unreadable source/target
@@ -846,6 +872,12 @@ from the recorded file states, removes catalog-created files/directories, remove
 the hidden `.suitcase-pre-reconcile-*` backup after a successful restore, and
 drops the reconcile install record from the receipt. Rollback refuses unexpected
 backup paths so it does not remove unrelated target state.
+
+For `mode: "repair"` installs, rollback restores the pre-repair dirty target
+from the recorded file states and keeps the skill receipt-owned by marking the
+repair rollback state as rolled back. The hidden `.suitcase-pre-repair-*` backup
+is retained because the install record remains as provenance for the restored
+dirty content.
 
 On failure (`ok: false`), `errors` contains objects with `code` and `message`
 (plus optional `skill` and `path`). Error codes include:
@@ -1050,6 +1082,129 @@ On failure (`ok: false`), `errors` contains objects with `code` and `message`
 - `invalid_receipt` — the existing receipt could not be read before mutation
 - `reconcile_write_failed` — copying, swapping, verification, or receipt write failed and was rolled back best-effort
 - `post_status_unavailable` / `post_status_not_current` — post-reconcile status verification failed
+
+## `repair` Output
+
+`repair` restores selected receipt-owned copy-mode target skills that became
+`dirty` after external edits. It is intentionally narrow: pass one or more
+`--skill <name>` filters, plus exactly one of `--dry-run` or `--apply`. Unlike
+`reconcile` (which adopts receiptless `unknown` targets), `repair` only owns
+targets that already carry a Suitcase receipt and have drifted from it.
+Symlink-mode installs are refused rather than converted to copy-mode installs.
+Every other state is refused and routed to the command that owns it.
+
+`--dry-run` is read-only. It uses `diff` and `status` to prove the selected skill
+is a receipt-owned `dirty` target, then reports the target path, receipt hash,
+catalog hash, changed files, and the hidden backup path template that `--apply`
+would use. The `finalAction` is always `replace-target-from-catalog`.
+
+On a clean dry run (`ok: true`):
+
+```json
+{
+  "ok": true,
+  "dryRun": true,
+  "readOnly": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "target": "openclaw",
+  "assignment": "openclaw",
+  "installRoot": "/tmp/openclaw/skills",
+  "selected": { "skills": ["skill-cleaner"] },
+  "candidates": [
+    {
+      "skill": "skill-cleaner",
+      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner",
+      "targetPath": "/tmp/openclaw/skills/skill-cleaner",
+      "variant": "canonical",
+      "status": "dirty",
+      "reason": "target files differ from receipt",
+      "receiptHash": "e1c..",
+      "catalogHash": "9a4..",
+      "changes": { "create": 0, "update": 1, "extra": 1, "missing": 0, "unchanged": 1 },
+      "entries": [
+        { "action": "update", "skill": "skill-cleaner", "relativePath": "runtime.js", "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner/runtime.js", "targetPath": "/tmp/openclaw/skills/skill-cleaner/runtime.js" },
+        { "action": "extra", "skill": "skill-cleaner", "relativePath": "extra.js", "sourcePath": null, "targetPath": "/tmp/openclaw/skills/skill-cleaner/extra.js" }
+      ],
+      "backup": {
+        "strategy": "rename-target-directory",
+        "backupPathTemplate": "/tmp/openclaw/skills/.skill-cleaner.suitcase-pre-repair-<timestamp>"
+      },
+      "finalAction": "replace-target-from-catalog"
+    }
+  ],
+  "refused": { "skills": [] },
+  "summary": { "planned": 1, "candidates": 1, "refused": 0, "blocked": 0, "dirty": 1, "create": 0, "update": 1, "extra": 1, "missing": 0, "unchanged": 1 },
+  "repaired": { "skills": [], "files": 0, "backups": [] },
+  "receiptPath": null,
+  "postRepairStatus": null,
+  "errors": []
+}
+```
+
+`--apply` re-runs the same candidate checks, copies the catalog source to a
+temporary path, hash-verifies the copy, renames the existing dirty target aside
+to a hidden `.suitcase-pre-repair-*` backup, installs the catalog copy, writes a
+`mode: "repair"` receipt with rollback state, and verifies post-repair `status`
+reports the skill as `current`. No target is mutated before its backup and
+rollback metadata are prepared, and any mid-apply failure unwinds every completed
+swap and restores the original receipt, leaving the dirty target intact.
+
+On success (`ok: true`), `repaired.skills` lists restored skills,
+`repaired.files` counts receipted catalog files, `repaired.backups` lists the
+preserved pre-repair dirty target paths, `receiptPath` points to the written
+receipt, and `postRepairStatus` contains the verification result:
+
+```json
+{
+  "ok": true,
+  "dryRun": false,
+  "readOnly": false,
+  "repaired": {
+    "skills": ["skill-cleaner"],
+    "files": 2,
+    "backups": [
+      {
+        "skill": "skill-cleaner",
+        "targetPath": "/tmp/openclaw/skills/skill-cleaner",
+        "backupPath": "/tmp/openclaw/skills/.skill-cleaner.suitcase-pre-repair-<id>"
+      }
+    ]
+  },
+  "receiptPath": "/tmp/openclaw/skills/.skill-suitcase-receipt.json",
+  "postRepairStatus": { "ok": true, "statuses": [{ "skill": "skill-cleaner", "status": "current" }] },
+  "errors": []
+}
+```
+
+The repair receipt records `mode: "repair"`, `priorState.status: "dirty"`, source
+provenance, installed file hashes, and rollback schema
+`calvinnwq.skills.rollback.v0` carrying the captured pre-repair dirty bytes plus
+the durable `backupPath`. A later `rollback --receipt <path>` restores the
+pre-repair dirty target and keeps the skill receipt-owned (the backup is retained
+because the record is retained).
+
+On failure (`ok: false`), `errors` contains objects with `code` and `message`
+(plus optional `skill` and `path`). Error codes include:
+
+- `invalid_skill_filter` — no non-blank `--skill` filter was provided
+- `invalid_repair_mode` — neither or both of `--dry-run` and `--apply` were provided
+- `read_only_target` — the resolved target provider is modeled read-only
+- `missing_install_root` — the target could not be resolved to an install root
+- `already_current` — a selected skill already matches the catalog; repair is a no-op
+- `route_to_track_or_reconcile` — a selected skill is `unknown`; adopt it with `track` or `reconcile` instead
+- `route_to_pack_apply` — a selected skill is `missing`, `behind`, or `version`; install/update it with `pack` + `apply` instead
+- `blocked_skill` — compatibility rules block the selected skill for the target
+- `skill_not_planned` — a selected skill is not planned for the target
+- `diff_*` / `status_*` — target-resolution or status errors propagated from those layers
+- `unsafe_path` — the skill, source path, or target path would escape the approved roots
+- `unsupported_install_mode` — the selected skill is a symlink-mode install and will not be converted by repair
+- `unsupported_target_state` — the selected target has no usable status entry to repair
+- `missing_source` — the catalog source has missing entries
+- `unsupported_source_tree` / `source_unreadable` — the catalog source cannot be copied safely
+- `unsafe_target_tree` / `target_unreadable` — the target contains symlinks, special entries, empty directories, or unreadable state that rollback cannot safely record
+- `invalid_receipt` — the existing receipt could not be read before mutation
+- `repair_write_failed` — copying, swapping, verification, or receipt write failed and was rolled back best-effort
+- `post_status_unavailable` / `post_status_not_current` — post-repair status verification failed
 
 ## `promote` Output
 

@@ -1,6 +1,6 @@
 ---
 name: skill-suitcase
-description: Use when asked to install, audit, sync, track, reconcile, apply, rollback, or explain Skill Suitcase-managed agent skills across OpenClaw, Codex, OpenClaw-Codex, Claude, or another machine using a skills catalog.
+description: Use when asked to install, audit, sync, track, reconcile, apply, rollback, or explain Skill Suitcase-managed agent skills, including dirty repair, across OpenClaw, Codex, OpenClaw-Codex, Claude, or another machine using a skills catalog.
 ---
 
 # Skill Suitcase
@@ -25,8 +25,12 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
 - Use `reconcile --dry-run` before `reconcile --apply`, and only for selected
   catalog-owned skills.
 - Use `pack --output` then `apply --artifact` for missing or behind skills.
-- Stop and report on `dirty`, broad `unknown`, unexpected target paths, or
-  provider-owned skills.
+- Treat `dirty` as stop and inspect first. For a selected receipt-owned `dirty`
+  skill, review `repair --dry-run`, then run `repair --apply` for that named
+  skill only after explicit approval; use `rollback` to restore the pre-repair
+  content. Refuse broad/all-target dirty repair.
+- Stop and report on broad `unknown`, unexpected target paths, or provider-owned
+  skills.
 - Never force provider-managed Codex skills such as Codex `linear` into Suitcase
   ownership.
 
@@ -118,12 +122,22 @@ For exact installed matches that only need receipts:
 "$CLI" track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --skill improve --skill gnhf-postflight --json
 ```
 
-For selected catalog-owned drift:
+For selected catalog-owned receiptless drift:
 
 ```bash
 "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --dry-run --json
 # after approval:
 "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --apply --json
+```
+
+For a selected receipt-owned skill that went `dirty` after external edits, stop
+and inspect the planned repair first, then replace it from the catalog only after
+approval (`rollback` restores the pre-repair dirty content):
+
+```bash
+"$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --dry-run --json
+# after approval:
+"$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --apply --json
 ```
 
 For missing or behind skills, stage an immutable bundle and apply the artifact:
@@ -148,9 +162,10 @@ Status meanings:
 - `current`: installed content and receipt match the catalog.
 - `missing` or `behind`: stage with `pack --output`, then apply the artifact.
 - `unknown`: existing target lacks a usable Suitcase receipt. Use `track` for
-  exact matches or selected `reconcile` for catalog-owned drift.
+  exact matches or selected `reconcile` for catalog-owned receiptless drift.
 - `dirty`: target differs from the last recorded Suitcase install. Stop and
-  report the exact target path and skill.
+  report the exact target path and skill; for a receipt-owned skill, repair it
+  with `repair --dry-run` then `repair --apply` after approval.
 - `blocked`: catalog compatibility intentionally refuses that target.
 
 Goal state for an intended target is zero `behind`, `dirty`, `missing`,

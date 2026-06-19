@@ -18,6 +18,8 @@ export function usageText(): string {
     "  skill-suitcase track --source <skills-repo> --target <target> [--skill <name> ...] --json",
     "  skill-suitcase reconcile --source <skills-repo> --target <target> --skill <name> [--skill <name> ...] --dry-run --json",
     "  skill-suitcase reconcile --source <skills-repo> --target <target> --skill <name> [--skill <name> ...] --apply --json",
+    "  skill-suitcase repair --source <skills-repo> --target <target> --skill <name> [--skill <name> ...] --dry-run --json",
+    "  skill-suitcase repair --source <skills-repo> --target <target> --skill <name> [--skill <name> ...] --apply --json",
     "  skill-suitcase promote --source <skills-repo> --target-skill <dir> --dry-run --json",
     "  skill-suitcase promote --source <skills-repo> --target-skill <dir> --apply --json",
     "",
