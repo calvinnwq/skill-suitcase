@@ -137,12 +137,14 @@ node "$CLI" apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --a
 node "$CLI" apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --lock /path/to/plan-lock.json --mode symlink --json
 node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
 node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
+node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
+node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 node "$CLI" promote --source "$SRC" --target-skill "$HOME/.codex/skills/new-skill" --dry-run --json
 ```
 
-Do not run live `apply`, `track`, `reconcile --apply`, `rollback`, or
-`promote --apply` against Calvin's real agent homes without explicit approval
-for the target and mode.
+Do not run live `apply`, `track`, `reconcile --apply`, `repair --apply`,
+`rollback`, or `promote --apply` against Calvin's real agent homes without
+explicit approval for the target and mode.
 
 ## Calvin-Local Versus Portable Support
 
@@ -155,6 +157,8 @@ Portable support:
 - staging bundles and plan locks
 - copy and symlink apply modes when explicitly approved
 - targeted reconcile for selected unknown catalog-owned targets when explicitly
+  approved
+- targeted repair for selected receipt-owned dirty targets when explicitly
   approved
 - receipts, status, and rollback for Skill Suitcase-managed installs
 

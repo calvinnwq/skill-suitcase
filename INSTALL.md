@@ -138,7 +138,7 @@ Use `track` for exact matches only:
 skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --skill improve --skill gnhf-postflight --json
 ```
 
-Use `reconcile` only for selected catalog-owned drift:
+Use `reconcile` only for selected catalog-owned receiptless drift:
 
 ```bash
 skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --dry-run --json

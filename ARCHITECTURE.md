@@ -85,7 +85,7 @@ Command modules should stay thin. They adapt the outside world to core code.
 - packing and artifact construction
 - import/onboarding inspection
 - apply/install workflows
-- rollback, reconcile, and existing-install adoption workflows
+- rollback, reconcile, repair, and existing-install adoption workflows
 - install mode classification and safety checks
 - receipt creation and validation
 - catalog, manifest, target, and validation rules
@@ -166,7 +166,7 @@ coverage, such as OpenCode and Pi, but Skill Suitcase still owns planning,
 receipts, dirty detection, rollback, and approval boundaries.
 
 Do not call `npx skills` from normal target discovery, planning, status, diff,
-apply, track, or reconcile paths. If a future issue adds optional `skills.sh`
+apply, track, reconcile, or repair paths. If a future issue adds optional `skills.sh`
 installer delegation, it must be wrapped behind a narrow adapter and reconciled
 back into Skill Suitcase receipts before the install is considered managed.
 
@@ -233,7 +233,15 @@ Keep the command verbs separate:
   status current. Reconcile must not adopt exact matches (use `track`), install
   missing skills or approved plan updates (use `apply`), or promote target-created
   skills into the catalog (use `promote`).
-- `rollback` reverses a prior `apply` using receipt rollback state.
+- `repair` restores selected receipt-owned copy-mode target skills that are
+  dirty because the live target differs from the receipt. `--dry-run` is
+  deterministic and read-only; `--apply` is approval-gated, backs up the dirty
+  target, replaces it from catalog source, writes `mode: "repair"` rollback
+  state, and must leave status current. Repair must not adopt unknown targets
+  (use `track` or `reconcile`), install missing or behind skills (use `apply`),
+  mutate symlink-mode installs, or operate without explicit `--skill` filters.
+- `rollback` reverses prior `apply`, `reconcile`, or `repair` mutations using
+  receipt rollback state.
 - `promote` turns a target-created skill (for example a skill an agent wrote
   into an agent home directory) into a repo-owned catalog skill. `--dry-run`
   runs a read-only plan; `--apply` runs the approval-gated live promotion.
@@ -271,7 +279,7 @@ Live mutations require explicit approval input or an approved command mode:
 
 The default path for new platform coverage is read-only first: `targets`,
 `status`, and `diff` should prove the target model before `track`, `apply`,
-`reconcile --apply`, or `promote` touches live paths.
+`reconcile --apply`, `repair --apply`, or `promote` touches live paths.
 
 ## Import Direction
 

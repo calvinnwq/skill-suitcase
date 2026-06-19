@@ -1,6 +1,6 @@
 ---
 name: skill-suitcase
-description: Use when asked to install, audit, sync, track, reconcile, apply, rollback, or explain Skill Suitcase-managed agent skills across OpenClaw, Codex, OpenClaw-Codex, Claude, or another machine using a skills catalog.
+description: Use when asked to install, audit, sync, track, reconcile, apply, rollback, or explain Skill Suitcase-managed agent skills, including dirty repair, across OpenClaw, Codex, OpenClaw-Codex, Claude, or another machine using a skills catalog.
 ---
 
 # Skill Suitcase
@@ -122,7 +122,7 @@ For exact installed matches that only need receipts:
 "$CLI" track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --skill improve --skill gnhf-postflight --json
 ```
 
-For selected catalog-owned drift:
+For selected catalog-owned receiptless drift:
 
 ```bash
 "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --dry-run --json
@@ -162,7 +162,7 @@ Status meanings:
 - `current`: installed content and receipt match the catalog.
 - `missing` or `behind`: stage with `pack --output`, then apply the artifact.
 - `unknown`: existing target lacks a usable Suitcase receipt. Use `track` for
-  exact matches or selected `reconcile` for catalog-owned drift.
+  exact matches or selected `reconcile` for catalog-owned receiptless drift.
 - `dirty`: target differs from the last recorded Suitcase install. Stop and
   report the exact target path and skill; for a receipt-owned skill, repair it
   with `repair --dry-run` then `repair --apply` after approval.
