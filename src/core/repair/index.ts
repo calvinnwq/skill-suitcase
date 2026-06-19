@@ -40,6 +40,9 @@ type RepairDiffEntry = {
   relativePath: string | null;
   sourcePath: string | null;
   targetPath: string | null;
+  sourceSha256?: string | null;
+  targetSha256?: string | null;
+  bytes?: number | null;
   reason?: string;
 };
 
@@ -390,7 +393,8 @@ async function planRepair(input: RepairInput, selectedSkills: string[]): Promise
 
     const skillEntries = entriesBySkill.get(skill) ?? [];
     const changes = summarizeEntries(skillEntries);
-    if (changes.missing > 0 || skillEntries.some((entry) => entry.action === "missing")) {
+    const unsupportedMissingEntry = await firstUnsupportedMissingEntry(skillEntries, statusItem.targetPath);
+    if (unsupportedMissingEntry !== null) {
       errors.push(repairError({
         code: "missing_source",
         message: `Skill ${skill} has missing catalog source entries and cannot be repaired.`,
@@ -920,6 +924,15 @@ function normalizeEntry(entry: RepairDiffEntry): RepairDiffEntry {
     sourcePath: entry.sourcePath,
     targetPath: entry.targetPath
   };
+  if (entry.sourceSha256 !== undefined) {
+    result.sourceSha256 = entry.sourceSha256;
+  }
+  if (entry.targetSha256 !== undefined) {
+    result.targetSha256 = entry.targetSha256;
+  }
+  if (entry.bytes !== undefined) {
+    result.bytes = entry.bytes;
+  }
   if (entry.reason !== undefined) {
     result.reason = entry.reason;
   }
@@ -946,6 +959,60 @@ function emptyChanges(): RepairChanges {
     missing: 0,
     unchanged: 0
   };
+}
+
+async function firstUnsupportedMissingEntry(
+  entries: RepairDiffEntry[],
+  targetRoot: string
+): Promise<RepairDiffEntry | null> {
+  for (const entry of entries) {
+    if (entry.action !== "missing") {
+      continue;
+    }
+    if (entry.sourceSha256 === null || !(await missingEntryIsPathTypeConflict(entry, targetRoot))) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+async function missingEntryIsPathTypeConflict(entry: RepairDiffEntry, targetRoot: string): Promise<boolean> {
+  if (entry.targetPath === null) {
+    return false;
+  }
+  const targetPath = entry.targetPath;
+  const exactState = await lstat(targetPath).catch((error: unknown) => {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+      return null;
+    }
+    throw error;
+  });
+  if (exactState !== null) {
+    return exactState.isDirectory();
+  }
+
+  const relativePath = path.relative(path.resolve(targetRoot), path.resolve(targetPath));
+  if (relativePath === "" || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return false;
+  }
+  const parts = relativePath.split(path.sep).filter((part) => part.length > 0);
+  let currentPath = path.resolve(targetRoot);
+  for (const part of parts.slice(0, -1)) {
+    currentPath = path.join(currentPath, part);
+    const state = await lstat(currentPath).catch((error: unknown) => {
+      if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+        return null;
+      }
+      throw error;
+    });
+    if (state === null) {
+      return false;
+    }
+    if (!state.isDirectory()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function countSelectedPlanned(
@@ -1148,6 +1215,7 @@ async function buildRollbackFiles({
   const appliedFiles = await listFiles(appliedTargetPath);
   const appliedDirectories = await listDirectories(appliedTargetPath);
   const replacedDirectories: string[] = [];
+  const replacedFiles: string[] = [];
   const createdDirectories: string[] = [];
   for (const relativePath of appliedDirectories.sort(compareShallowestPathFirst)) {
     if (hasPathAncestor(replacedDirectories, relativePath)) {
@@ -1167,9 +1235,23 @@ async function buildRollbackFiles({
       replacedDirectories.push(relativePath);
     }
   }
+  for (const relativePath of appliedFiles.sort(compareShallowestPathFirst)) {
+    if (hasPathAncestor(replacedDirectories, relativePath)) {
+      continue;
+    }
+    const previousFileState = await lstat(path.join(previousTargetPath, relativePath)).catch((error: unknown) => {
+      if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+        return null;
+      }
+      throw error;
+    });
+    if (previousFileState?.isDirectory() === true) {
+      replacedFiles.push(relativePath);
+    }
+  }
   const relativePaths = [...new Set([...previousFiles, ...appliedFiles])].sort();
   const records: RollbackFileRecord[] = [];
-  for (const relativePath of replacedDirectories.sort(compareShallowestPathFirst)) {
+  for (const relativePath of [...replacedDirectories, ...replacedFiles].sort(compareShallowestPathFirst)) {
     records.push({
       path: relativePath,
       targetPath: path.join(appliedTargetPath, relativePath),
@@ -1177,6 +1259,9 @@ async function buildRollbackFiles({
     });
   }
   for (const relativePath of relativePaths) {
+    if (hasPathAncestor(replacedDirectories, relativePath) || replacedFiles.includes(relativePath)) {
+      continue;
+    }
     records.push({
       path: relativePath,
       targetPath: path.join(appliedTargetPath, relativePath),

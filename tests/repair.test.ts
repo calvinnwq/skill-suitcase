@@ -399,6 +399,60 @@ test("repair rollback does not report restored dirty content as current", async 
   assert.equal(postRollbackStatus.summary.current, 0);
 });
 
+test("repair rollback restores a dirty file replaced by a catalog directory", async (t) => {
+  const fixture = await createCatalog(t);
+  await mkdir(path.join(fixture.sourceSkill, "config"), { recursive: true });
+  await writeFile(path.join(fixture.sourceSkill, "config", "settings.json"), "{\"catalog\":true}\n");
+  await mkdir(path.join(fixture.targetSkill, "config"), { recursive: true });
+  await writeFile(path.join(fixture.targetSkill, "SKILL.md"), SKILL_MD);
+  await writeFile(path.join(fixture.targetSkill, "runtime.js"), CATALOG_RUNTIME);
+  await writeFile(path.join(fixture.targetSkill, "config", "settings.json"), "{\"catalog\":true}\n");
+
+  const tracked = await track({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"]
+  });
+  assert.equal(tracked.ok, true, "fixture setup: track should adopt the matching target");
+
+  await rm(path.join(fixture.targetSkill, "config"), { recursive: true, force: true });
+  await writeFile(path.join(fixture.targetSkill, "config"), "locally flattened\n");
+
+  const applied = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+  assert.equal(applied.ok, true);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "config", "settings.json"), "utf8"), "{\"catalog\":true}\n");
+
+  const rollbackResult = await rollback({ receipt: path.join(fixture.targetRoot, RECEIPT_FILE) });
+  assert.equal(rollbackResult.ok, true);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "config"), "utf8"), "locally flattened\n");
+  await assert.rejects(readFile(path.join(fixture.targetSkill, "config", "settings.json"), "utf8"), /ENOTDIR|ENOENT/);
+});
+
+test("repair rollback restores a dirty directory replaced by a catalog file", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await rm(path.join(fixture.targetSkill, "runtime.js"), { force: true });
+  await mkdir(path.join(fixture.targetSkill, "runtime.js"), { recursive: true });
+  await writeFile(path.join(fixture.targetSkill, "runtime.js", "local.js"), "console.log(\"local nested\");\n");
+
+  const applied = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+  assert.equal(applied.ok, true);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), CATALOG_RUNTIME);
+
+  const rollbackResult = await rollback({ receipt: path.join(fixture.targetRoot, RECEIPT_FILE) });
+  assert.equal(rollbackResult.ok, true);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js", "local.js"), "utf8"), "console.log(\"local nested\");\n");
+});
+
 test("repair apply restores the dirty target and writes no receipt when a write fails after backup", async (t) => {
   const fixture = await createTrackedFixture(t);
   await dirtyTheTarget(fixture);
