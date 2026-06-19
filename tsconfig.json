@@ -43,6 +43,7 @@
     "src/commands/rollback.ts",
     "src/commands/track.ts",
     "src/commands/reconcile.ts",
+    "src/commands/repair.ts",
     "src/commands/promote.ts",
     "tests/commands.test.ts",
     "src/renderers/exit-codes.ts",
@@ -70,6 +71,7 @@
     "src/core/rollback/index.ts",
     "src/core/track/index.ts",
     "src/core/reconcile/index.ts",
+    "src/core/repair/index.ts",
     "src/core/promote/index.ts",
     "src/suitcase-manifest.ts",
     "src/catalog.ts",
@@ -85,6 +87,7 @@
     "src/rollback.ts",
     "src/track.ts",
     "src/reconcile.ts",
+    "src/repair.ts",
     "src/promote.ts",
     "tests/core-boundaries.test.ts",
     "src/adapters/filesystem.ts",
@@ -92,6 +95,7 @@
     "tests/platform-adapters.test.ts",
     "tests/install-modes.test.ts",
     "tests/promote.test.ts",
-    "tests/reconcile.test.ts"
+    "tests/reconcile.test.ts",
+    "tests/repair.test.ts"
   ]
 }

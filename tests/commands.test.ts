@@ -19,6 +19,7 @@ test("command registry exposes every public command explicitly", () => {
     "rollback",
     "track",
     "reconcile",
+    "repair",
     "promote"
   ]);
 });
@@ -105,6 +106,27 @@ test("parseCommandArgs supports explicit reconcile dry-run and apply modes", () 
     skill: ["skill-cleaner"],
     apply: true,
     dryRun: false,
+    json: true
+  });
+});
+
+test("parseCommandArgs supports the repair dry-run mode", () => {
+  assert.deepEqual(parseCommandArgs([
+    "repair",
+    "--source",
+    fixtureSource,
+    "--target",
+    "openclaw",
+    "--skill",
+    "skill-cleaner",
+    "--dry-run",
+    "--json"
+  ]), {
+    command: "repair",
+    source: fixtureSource,
+    target: "openclaw",
+    skill: ["skill-cleaner"],
+    dryRun: true,
     json: true
   });
 });
