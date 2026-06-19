@@ -8,8 +8,12 @@ import {
   RECEIPT_FILE,
   buildInstallRecord,
   buildInstalledFiles,
+  readReceipt,
+  type Receipt,
+  type ReceiptInstallRecord,
   upsertAndWriteReceipt
 } from "../receipts/index.js";
+import { SYMLINK_MODE } from "../install-modes.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import { status } from "../status/index.js";
 
@@ -293,6 +297,7 @@ async function planRepair(input: RepairInput, selectedSkills: string[]): Promise
       errors
     });
   }
+  const installRoot = diffResult.installRoot;
 
   const statusInput: Parameters<typeof status>[0] = {
     source: diffResult.source,
@@ -311,6 +316,15 @@ async function planRepair(input: RepairInput, selectedSkills: string[]): Promise
       message: statusError.message,
       ...(statusError.skill !== undefined ? { skill: statusError.skill } : {}),
       ...(statusError.path !== undefined ? { path: statusError.path } : {})
+    }));
+  }
+  let receipt: Receipt | null = null;
+  try {
+    receipt = await readReceipt({ installRoot });
+  } catch (error) {
+    errors.push(repairError({
+      code: "invalid_receipt",
+      message: `Could not read receipt before repair planning: ${errorMessage(error)}`
     }));
   }
 
@@ -374,6 +388,21 @@ async function planRepair(input: RepairInput, selectedSkills: string[]): Promise
     const routingError = routeNonDirtyStatus(skill, statusItem);
     if (routingError !== null) {
       errors.push(routingError);
+      continue;
+    }
+
+    if (receiptInstallMode({
+      receipt,
+      skill,
+      installRoot,
+      targetPath: statusItem.targetPath
+    }) === SYMLINK_MODE) {
+      errors.push(repairError({
+        code: "unsupported_install_mode",
+        message: `Skill ${skill} is a symlink-mode install; repair will not convert it to a copy-style install.`,
+        skill,
+        path: statusItem.targetPath
+      }));
       continue;
     }
 
@@ -462,6 +491,63 @@ async function planRepair(input: RepairInput, selectedSkills: string[]): Promise
     dirty: dirtyCount,
     errors
   });
+}
+
+function receiptInstallMode({
+  receipt,
+  skill,
+  installRoot,
+  targetPath
+}: {
+  receipt: Receipt | null;
+  skill: string;
+  installRoot: string;
+  targetPath: string;
+}): string | null {
+  const records = receiptRecordsForSkill(receipt, skill);
+  if (records.length === 0) {
+    return null;
+  }
+  const normalizedTargetPath = normalizeReceiptTargetPath({ installRoot, targetPath });
+  const matched = records.find((record) => {
+    return normalizeReceiptTargetPath({ installRoot, targetPath: record.targetPath }) === normalizedTargetPath;
+  });
+  const record = matched ?? records[0];
+  if (record === undefined) {
+    return null;
+  }
+  return typeof record.mode === "string" ? record.mode : null;
+}
+
+function receiptRecordsForSkill(receipt: Receipt | null, skill: string): ReceiptInstallRecord[] {
+  const installs = receipt?.installs;
+  if (installs === undefined) {
+    return [];
+  }
+  const entry = installs[skill];
+  if (entry === undefined) {
+    return [];
+  }
+  return (Array.isArray(entry) ? entry : [entry]).filter(isReceiptInstallRecord);
+}
+
+function normalizeReceiptTargetPath({
+  installRoot,
+  targetPath
+}: {
+  installRoot: string;
+  targetPath: unknown;
+}): string | null {
+  if (typeof targetPath !== "string" || targetPath.trim().length === 0) {
+    return null;
+  }
+  return path.isAbsolute(targetPath)
+    ? path.resolve(targetPath)
+    : path.resolve(installRoot, targetPath);
+}
+
+function isReceiptInstallRecord(value: unknown): value is ReceiptInstallRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -247,6 +247,60 @@ test("repair refuses a dirty target whose receipt is behind catalog", async (t) 
   );
   assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), "console.log(\"locally edited\");\n");
   assert.equal(await readFile(path.join(fixture.targetSkill, "extra.js"), "utf8"), "console.log(\"local extra\");\n");
+});
+
+test("repair refuses to convert a dirty symlink-mode install into a copy repair", async (t) => {
+  const fixture = await createCatalog(t);
+  await symlink(fixture.sourceSkill, fixture.targetSkill, "dir");
+
+  const tracked = await track({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"]
+  });
+  assert.equal(tracked.ok, true, "fixture setup: track should adopt the symlink target");
+
+  await unlink(fixture.targetSkill);
+  await mkdir(fixture.targetSkill, { recursive: true });
+  await writeFile(path.join(fixture.targetSkill, "SKILL.md"), SKILL_MD);
+  await writeFile(path.join(fixture.targetSkill, "runtime.js"), "console.log(\"locally materialized\");\n");
+
+  const before = await status({ source: fixture.sourceRoot, target: "openclaw" });
+  const beforeItem = before.statuses.find((item) => item.skill === "skill-cleaner");
+  assert.equal(beforeItem?.status, "dirty", "precondition: symlink-mode install should be dirty");
+  assert.match(beforeItem?.reason ?? "", /real directory/i);
+
+  const result = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    dryRun: true
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.candidates.length, 0);
+  assert.equal(
+    result.errors.some((error) => error.code === "unsupported_install_mode" && error.skill === "skill-cleaner"),
+    true
+  );
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), "console.log(\"locally materialized\");\n");
+
+  const applied = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+
+  assert.equal(applied.ok, false);
+  assert.equal(applied.candidates.length, 0);
+  assert.equal(
+    applied.errors.some((error) => error.code === "unsupported_install_mode" && error.skill === "skill-cleaner"),
+    true
+  );
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), "console.log(\"locally materialized\");\n");
+  const receipt = JSON.parse(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  assert.equal(singleRecord(receipt, "skill-cleaner").mode, "symlink");
 });
 
 test("repair refuses read-only provider targets without touching the filesystem", async (t) => {
