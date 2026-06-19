@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.6.0...v0.7.0) (2026-06-19)
+
+
+### Features
+
+* **repair:** add dirty receipt repair flow ([d5de9f2](https://github.com/calvinnwq/skill-suitcase/commit/d5de9f2ffab4b12c0d70db7625c39f21d2d6707c))
+* **repair:** Implemented NGX-487's repair --apply execution and rollback wiring for receipt-owned dirty skills (atomic backup-and-replace from catalog, rollback-metadata receipt, post-apply status verification, full failure unwinding), with focused apply/rollback/atomicity tests; all verification gates pass. ([0cf593f](https://github.com/calvinnwq/skill-suitcase/commit/0cf593fea13f2e2bd11dd33dcf94a3aad651451e))
+* **repair:** Implemented the first slice of NGX-487: a read-only `repair --dry-run` command that plans dirty-repair for receipt-owned skills and deterministically routes/refuses all other target states, fully tested with all verification gates passing. ([44f1fc8](https://github.com/calvinnwq/skill-suitcase/commit/44f1fc8f45540dfff1bd44f98fe37c67d2b6c939))
+
+
+### Bug Fixes
+
+* **test:** add repair core entrypoint and legacy import to boundaries test ([e3ac66e](https://github.com/calvinnwq/skill-suitcase/commit/e3ac66e9f85b050c5a22c0508d84f522677f46d9))
+
 ## [0.6.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.5.1...v0.6.0) (2026-06-19)
 
 
