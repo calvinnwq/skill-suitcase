@@ -131,6 +131,28 @@ test("parseCommandArgs supports the repair dry-run mode", () => {
   });
 });
 
+test("parseCommandArgs supports the repair apply mode", () => {
+  assert.deepEqual(parseCommandArgs([
+    "repair",
+    "--source",
+    fixtureSource,
+    "--target",
+    "openclaw",
+    "--skill",
+    "skill-cleaner",
+    "--apply",
+    "--json"
+  ]), {
+    command: "repair",
+    source: fixtureSource,
+    target: "openclaw",
+    skill: ["skill-cleaner"],
+    apply: true,
+    dryRun: false,
+    json: true
+  });
+});
+
 test("parseCommandArgs supports local target override flags", () => {
   assert.deepEqual(parseCommandArgs([
     "status",

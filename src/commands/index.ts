@@ -221,7 +221,7 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--dry-run":
       return command === "pack" || command === "promote" || command === "reconcile" || command === "repair";
     case "--apply":
-      return command === "promote" || command === "reconcile";
+      return command === "promote" || command === "reconcile" || command === "repair";
     case "--strict":
       return command === "validate";
     default:

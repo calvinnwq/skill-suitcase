@@ -1,8 +1,16 @@
+import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { lstat, readdir } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
+import {
+  RECEIPT_FILE,
+  buildInstallRecord,
+  buildInstalledFiles,
+  upsertAndWriteReceipt
+} from "../receipts/index.js";
+import { readSkillVersion } from "../skill-metadata.js";
 import { status } from "../status/index.js";
 
 type RepairInput = {
@@ -10,7 +18,13 @@ type RepairInput = {
   target: string;
   skills?: string[];
   dryRun?: boolean;
+  apply?: boolean;
   targetOverrides?: TargetOverrides | undefined;
+  __test?: {
+    failAfterBackup?: boolean;
+    failAfterBackupForSkill?: string;
+    failBeforeReceipt?: boolean;
+  };
 };
 
 type RepairError = {
@@ -55,10 +69,33 @@ type RepairCandidate = {
   finalAction: "replace-target-from-catalog";
 };
 
+type RepairedBackup = {
+  skill: string;
+  targetPath: string;
+  backupPath: string;
+};
+
+type RollbackFileState = {
+  kind: "file";
+  sha256: string;
+  bytes: string;
+} | {
+  kind: "missing";
+} | {
+  kind: "restore-impossible";
+  reason: string;
+};
+
+type RollbackFileRecord = {
+  path: string;
+  targetPath: string;
+  previous: RollbackFileState;
+};
+
 type RepairBaseResult = {
   ok: boolean;
-  dryRun: true;
-  readOnly: true;
+  dryRun: boolean;
+  readOnly: boolean;
   source: string;
   target: string;
   assignment: string | null;
@@ -85,14 +122,31 @@ type RepairBaseResult = {
   errors: RepairError[];
 };
 
-export type RepairResult = RepairBaseResult & {
+export type RepairPlanResult = RepairBaseResult & {
+  dryRun: true;
+  readOnly: true;
+  repaired: {
+    skills: [];
+    files: 0;
+    backups: [];
+  };
+  receiptPath: null;
+  postRepairStatus: null;
+};
+
+export type RepairApplyResult = RepairBaseResult & {
+  dryRun: false;
+  readOnly: false;
   repaired: {
     skills: string[];
     files: number;
-    backups: never[];
+    backups: RepairedBackup[];
   };
-  receiptPath: null;
+  receiptPath: string | null;
+  postRepairStatus: Awaited<ReturnType<typeof status>> | null;
 };
+
+export type RepairResult = RepairPlanResult | RepairApplyResult;
 
 type DiffForRepair = {
   ok: boolean;
@@ -109,6 +163,8 @@ type DiffForRepair = {
 
 type StatusResult = Awaited<ReturnType<typeof status>>;
 type StatusItem = StatusResult["statuses"][number];
+
+const ROLLBACK_SCHEMA = "calvinnwq.skills.rollback.v0";
 
 export async function repair(input: RepairInput): Promise<RepairResult> {
   if (!input.source) {
@@ -133,7 +189,9 @@ export async function repair(input: RepairInput): Promise<RepairResult> {
     });
   }
 
-  if (input.dryRun !== true) {
+  const wantsDryRun = input.dryRun === true;
+  const wantsApply = input.apply === true;
+  if (wantsDryRun === wantsApply) {
     return planFailure({
       source: input.source,
       target: input.target,
@@ -141,14 +199,18 @@ export async function repair(input: RepairInput): Promise<RepairResult> {
       installRoot: null,
       selected: selectedSkills,
       errors: [repairError({
-        code: "unsupported_repair_mode",
-        message: "repair currently supports --dry-run only; apply lands in a follow-up slice."
+        code: "invalid_repair_mode",
+        message: "repair requires exactly one of dryRun or apply."
       })]
     });
   }
 
   const plan = await planRepair(input, selectedSkills);
-  return finalizePlan(plan);
+  if (wantsDryRun || !plan.ok) {
+    return finalizePlan(plan);
+  }
+
+  return executeRepair(input, plan);
 }
 
 async function planRepair(input: RepairInput, selectedSkills: string[]): Promise<RepairBaseResult> {
@@ -438,15 +500,275 @@ function routeNonDirtyStatus(skill: string, statusItem: StatusItem): RepairError
   }
 }
 
-function finalizePlan(plan: RepairBaseResult): RepairResult {
+/**
+ * Replace each planned dirty target with its catalog source. The live dirty
+ * content is preserved two ways before the target is mutated: it is renamed to a
+ * sibling backup directory (the atomic-swap safety net) and, after the swap, its
+ * bytes are captured into receipt-owned rollback metadata so `rollback --receipt`
+ * can restore the pre-repair dirty target. A failure on any skill unwinds every
+ * completed swap and restores the original receipt, so a refusal never leaves a
+ * half-repaired target root.
+ */
+async function executeRepair(input: RepairInput, plan: RepairBaseResult): Promise<RepairApplyResult> {
+  const installRoot = plan.installRoot;
+  if (installRoot === null) {
+    return applyFailure(plan, "missing_install_root", "could not resolve install root for repair");
+  }
+
+  const receiptPath = path.join(installRoot, RECEIPT_FILE);
+  let previousReceiptText: string | null;
+  try {
+    previousReceiptText = await readOptionalText(receiptPath);
+  } catch (error) {
+    return applyFailure(plan, "invalid_receipt", `Could not read receipt before repair: ${errorMessage(error)}`);
+  }
+
+  const repairedSkills: string[] = [];
+  const backups: RepairedBackup[] = [];
+  let repairedFiles = 0;
+  let receiptPathWritten: string | null = null;
+
+  for (const candidate of plan.candidates) {
+    const backupPath = path.join(path.dirname(candidate.targetPath), `.${candidate.skill}.suitcase-pre-repair-${uniqueSuffix()}`);
+    const tmpPath = path.join(path.dirname(candidate.targetPath), `.${candidate.skill}.suitcase-repair-next-${uniqueSuffix()}`);
+    let copied = false;
+    let backedUp = false;
+    let installed = false;
+
+    try {
+      await copyTree(candidate.sourcePath, tmpPath);
+      copied = true;
+      if (!(await treesMatch(candidate.sourcePath, tmpPath))) {
+        throw new Error(`Temporary repair copy for ${candidate.skill} does not match catalog source.`);
+      }
+      await rename(candidate.targetPath, backupPath);
+      backedUp = true;
+      if (input.__test?.failAfterBackup === true || input.__test?.failAfterBackupForSkill === candidate.skill) {
+        throw new Error("Injected failure after backup.");
+      }
+      await rename(tmpPath, candidate.targetPath);
+      installed = true;
+      copied = false;
+
+      if (input.__test?.failBeforeReceipt === true) {
+        throw new Error("Injected failure before receipt.");
+      }
+
+      const installedFiles = await buildInstalledFiles(candidate.targetPath);
+      const rollbackFiles = await buildRollbackFiles({
+        previousTargetPath: backupPath,
+        appliedTargetPath: candidate.targetPath
+      });
+      const priorState: Record<string, unknown> = {
+        status: candidate.status,
+        reason: candidate.reason
+      };
+      if (candidate.receiptHash !== null) {
+        priorState.installedHash = candidate.receiptHash;
+      }
+      if (candidate.catalogHash !== null) {
+        priorState.currentHash = candidate.catalogHash;
+      }
+      const installRecord: Record<string, unknown> = {
+        skill: candidate.skill,
+        agent: plan.assignment ?? input.target,
+        target: plan.assignment ?? input.target,
+        mode: "repair",
+        source: {
+          path: candidate.sourcePath
+        },
+        sourcePath: candidate.sourcePath,
+        targetPath: candidate.targetPath,
+        sourceHash: await hashDirectory(candidate.sourcePath),
+        installedFiles,
+        priorState,
+        rollback: {
+          schema: ROLLBACK_SCHEMA,
+          status: "available",
+          mode: "repair",
+          targetPath: candidate.targetPath,
+          sourcePath: candidate.sourcePath,
+          backupPath,
+          files: rollbackFiles,
+          appliedFiles: installedFiles
+        }
+      };
+      const version = await readSkillVersion(candidate.sourcePath).catch(() => null);
+      if (version !== null) {
+        installRecord.version = version;
+      }
+      if (candidate.variant !== undefined) {
+        installRecord.variant = candidate.variant;
+      }
+
+      receiptPathWritten = await upsertAndWriteReceipt({
+        installRoot,
+        skillName: candidate.skill,
+        installRecord: buildInstallRecord(installRecord)
+      });
+      repairedSkills.push(candidate.skill);
+      repairedFiles += installedFiles.length;
+      backups.push({
+        skill: candidate.skill,
+        targetPath: candidate.targetPath,
+        backupPath
+      });
+    } catch (error) {
+      if (installed) {
+        await removePath(candidate.targetPath);
+      }
+      if (backedUp) {
+        await restorePath(backupPath, candidate.targetPath);
+      }
+      if (copied) {
+        await removePath(tmpPath);
+      }
+      await restoreOriginalReceipt({ receiptPath, previousReceiptText });
+      for (const completed of backups.reverse()) {
+        await removePath(completed.targetPath);
+        await restorePath(completed.backupPath, completed.targetPath);
+      }
+      repairedSkills.length = 0;
+      repairedFiles = 0;
+      backups.length = 0;
+      receiptPathWritten = null;
+      return {
+        ...plan,
+        ok: false,
+        dryRun: false,
+        readOnly: false,
+        refused: {
+          skills: [...new Set([...plan.refused.skills, candidate.skill])].sort()
+        },
+        summary: {
+          ...plan.summary,
+          refused: plan.summary.refused + 1
+        },
+        errors: [
+          ...plan.errors,
+          repairError({
+            code: "repair_write_failed",
+            message: errorMessage(error),
+            skill: candidate.skill,
+            path: candidate.targetPath
+          })
+        ],
+        repaired: {
+          skills: repairedSkills.sort(),
+          files: repairedFiles,
+          backups: backups.sort(compareBackups)
+        },
+        receiptPath: receiptPathWritten,
+        postRepairStatus: null
+      };
+    }
+  }
+
+  const statusInput: Parameters<typeof status>[0] = {
+    source: plan.source,
+    target: input.target
+  };
+  if (input.targetOverrides !== undefined) {
+    statusInput.targetOverrides = input.targetOverrides;
+  }
+  const postRepairStatus = await status(statusInput).catch(() => null);
+  const postStatusErrors = postStatusCurrentErrors({
+    postRepairStatus,
+    plan,
+    inputTarget: input.target
+  });
+
   return {
     ...plan,
+    ok: postStatusErrors.length === 0,
+    dryRun: false,
+    readOnly: false,
+    errors: [
+      ...plan.errors,
+      ...postStatusErrors
+    ],
+    repaired: {
+      skills: repairedSkills.sort(),
+      files: repairedFiles,
+      backups: backups.sort(compareBackups)
+    },
+    receiptPath: receiptPathWritten,
+    postRepairStatus
+  };
+}
+
+function postStatusCurrentErrors({
+  postRepairStatus,
+  plan,
+  inputTarget
+}: {
+  postRepairStatus: StatusResult | null;
+  plan: RepairBaseResult;
+  inputTarget: string;
+}): RepairError[] {
+  if (postRepairStatus === null) {
+    return [repairError({
+      code: "post_status_unavailable",
+      message: "Could not verify post-repair status."
+    })];
+  }
+
+  const errors: RepairError[] = [];
+  const targetAssignment = plan.assignment ?? inputTarget;
+  const statusBySkill = new Map(
+    postRepairStatus.statuses
+      .filter((item) => item.assignment === targetAssignment)
+      .map((item) => [item.skill, item])
+  );
+  for (const candidate of plan.candidates) {
+    const statusItem = statusBySkill.get(candidate.skill);
+    if (statusItem?.status === "current") {
+      continue;
+    }
+    errors.push(repairError({
+      code: "post_status_not_current",
+      message: statusItem === undefined
+        ? `Could not verify post-repair status for ${candidate.skill}.`
+        : `Skill ${candidate.skill} is ${statusItem.status} after repair: ${statusItem.reason}`,
+      skill: candidate.skill,
+      path: candidate.targetPath
+    }));
+  }
+  return errors;
+}
+
+function applyFailure(plan: RepairBaseResult, code: string, message: string): RepairApplyResult {
+  return {
+    ...plan,
+    ok: false,
+    dryRun: false,
+    readOnly: false,
+    errors: [
+      ...plan.errors,
+      repairError({ code, message })
+    ],
     repaired: {
       skills: [],
       files: 0,
       backups: []
     },
-    receiptPath: null
+    receiptPath: null,
+    postRepairStatus: null
+  };
+}
+
+function finalizePlan(plan: RepairBaseResult): RepairPlanResult {
+  return {
+    ...plan,
+    dryRun: true,
+    readOnly: true,
+    repaired: {
+      skills: [],
+      files: 0,
+      backups: []
+    },
+    receiptPath: null,
+    postRepairStatus: null
   };
 }
 
@@ -760,6 +1082,254 @@ async function validateDirectoryEntries(
     };
   }
   return { ok: true };
+}
+
+async function copyTree(sourcePath: string, targetPath: string): Promise<void> {
+  if (isSameOrInsidePath(targetPath, sourcePath)) {
+    throw new Error(`Refusing to copy ${sourcePath} into nested destination ${targetPath}.`);
+  }
+  await mkdir(targetPath, { recursive: true });
+  const entries = await readdir(sourcePath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
+      continue;
+    }
+    const from = path.join(sourcePath, entry.name);
+    const to = path.join(targetPath, entry.name);
+    if (entry.isDirectory()) {
+      await copyTree(from, to);
+      continue;
+    }
+    if (entry.isFile()) {
+      await copyFile(from, to);
+    }
+  }
+}
+
+async function treesMatch(left: string, right: string): Promise<boolean> {
+  const [leftFiles, rightFiles] = await Promise.all([
+    buildInstalledFiles(left),
+    buildInstalledFiles(right)
+  ]);
+  if (leftFiles.length !== rightFiles.length) {
+    return false;
+  }
+  for (let index = 0; index < leftFiles.length; index += 1) {
+    const leftFile = leftFiles[index];
+    const rightFile = rightFiles[index];
+    if (leftFile === undefined || rightFile === undefined || leftFile.path !== rightFile.path || leftFile.hash !== rightFile.hash) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function buildRollbackFiles({
+  previousTargetPath,
+  appliedTargetPath
+}: {
+  previousTargetPath: string;
+  appliedTargetPath: string;
+}): Promise<RollbackFileRecord[]> {
+  const previousFiles = await listFiles(previousTargetPath);
+  const appliedFiles = await listFiles(appliedTargetPath);
+  const appliedDirectories = await listDirectories(appliedTargetPath);
+  const replacedDirectories: string[] = [];
+  const createdDirectories: string[] = [];
+  for (const relativePath of appliedDirectories.sort(compareShallowestPathFirst)) {
+    if (hasPathAncestor(replacedDirectories, relativePath)) {
+      continue;
+    }
+    const previousDirectoryState = await lstat(path.join(previousTargetPath, relativePath)).catch((error: unknown) => {
+      if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+        return null;
+      }
+      throw error;
+    });
+    if (previousDirectoryState === null) {
+      createdDirectories.push(relativePath);
+      continue;
+    }
+    if (!previousDirectoryState.isDirectory()) {
+      replacedDirectories.push(relativePath);
+    }
+  }
+  const relativePaths = [...new Set([...previousFiles, ...appliedFiles])].sort();
+  const records: RollbackFileRecord[] = [];
+  for (const relativePath of replacedDirectories.sort(compareShallowestPathFirst)) {
+    records.push({
+      path: relativePath,
+      targetPath: path.join(appliedTargetPath, relativePath),
+      previous: { kind: "missing" }
+    });
+  }
+  for (const relativePath of relativePaths) {
+    records.push({
+      path: relativePath,
+      targetPath: path.join(appliedTargetPath, relativePath),
+      previous: await readRollbackFileState(path.join(previousTargetPath, relativePath))
+    });
+  }
+  for (const relativePath of createdDirectories.sort(compareDeepestPathFirst)) {
+    records.push({
+      path: relativePath,
+      targetPath: path.join(appliedTargetPath, relativePath),
+      previous: { kind: "missing" }
+    });
+  }
+  return records;
+}
+
+async function readRollbackFileState(filePath: string): Promise<RollbackFileState> {
+  try {
+    const info = await lstat(filePath);
+    if (info.isSymbolicLink()) {
+      return {
+        kind: "restore-impossible",
+        reason: "target was a symbolic link"
+      };
+    }
+    if (!info.isFile()) {
+      return {
+        kind: "restore-impossible",
+        reason: "target was not a regular file"
+      };
+    }
+    const bytes = await readFile(filePath);
+    return {
+      kind: "file",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      bytes: bytes.toString("base64")
+    };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return { kind: "missing" };
+    }
+    return {
+      kind: "restore-impossible",
+      reason: errorMessage(error)
+    };
+  }
+}
+
+async function hashDirectory(root: string): Promise<string> {
+  const files = await listFiles(root);
+  const digest = createHash("sha256");
+  for (const relativePath of files) {
+    const bytes = await readFile(path.join(root, relativePath));
+    digest.update(relativePath);
+    digest.update("\0");
+    digest.update(bytes);
+    digest.update("\0");
+  }
+  return digest.digest("hex");
+}
+
+async function listFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
+      continue;
+    }
+
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listFiles(entryPath)).map((item) => path.join(entry.name, item)));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(entry.name);
+    }
+  }
+
+  return files.sort();
+}
+
+async function listDirectories(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const directories: string[] = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      directories.push(entry.name);
+      directories.push(...(await listDirectories(entryPath)).map((item) => path.join(entry.name, item)));
+    }
+  }
+
+  return directories.sort();
+}
+
+function compareDeepestPathFirst(left: string, right: string): number {
+  const depthDifference = right.split(path.sep).length - left.split(path.sep).length;
+  return depthDifference === 0 ? left.localeCompare(right) : depthDifference;
+}
+
+function compareShallowestPathFirst(left: string, right: string): number {
+  const depthDifference = left.split(path.sep).length - right.split(path.sep).length;
+  return depthDifference === 0 ? left.localeCompare(right) : depthDifference;
+}
+
+function hasPathAncestor(ancestors: string[], candidate: string): boolean {
+  return ancestors.some((ancestor) => {
+    const relativePath = path.relative(ancestor, candidate);
+    return relativePath !== "" && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+  });
+}
+
+async function readOptionalText(filePath: string): Promise<string | null> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function restoreOriginalReceipt({
+  receiptPath,
+  previousReceiptText
+}: {
+  receiptPath: string;
+  previousReceiptText: string | null;
+}): Promise<void> {
+  try {
+    if (previousReceiptText === null) {
+      await unlink(receiptPath);
+      return;
+    }
+    await writeFile(receiptPath, previousReceiptText, "utf8");
+  } catch {
+    // best effort restore only
+  }
+}
+
+async function removePath(targetPath: string): Promise<void> {
+  try {
+    await rm(targetPath, { recursive: true, force: true });
+  } catch {
+    // best effort cleanup only
+  }
+}
+
+async function restorePath(from: string, to: string): Promise<void> {
+  try {
+    await rename(from, to);
+  } catch {
+    // best effort restore only
+  }
+}
+
+function compareBackups(left: RepairedBackup, right: RepairedBackup): number {
+  return left.skill.localeCompare(right.skill);
+}
+
+function uniqueSuffix(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function repairError({

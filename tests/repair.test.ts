@@ -3,10 +3,25 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { RECEIPT_FILE } from "../src/receipt.js";
+import { RECEIPT_FILE, type Receipt, type ReceiptInstallRecord } from "../src/receipt.js";
 import { repair } from "../src/repair.js";
+import { rollback } from "../src/rollback.js";
 import { status } from "../src/status.js";
 import { track } from "../src/track.js";
+
+function singleRecord(receipt: Receipt, skill: string): ReceiptInstallRecord {
+  const value = receipt.installs?.[skill];
+  if (value === undefined) {
+    throw new Error(`Missing receipt for ${skill}.`);
+  }
+  if (Array.isArray(value)) {
+    assert.equal(value.length, 1);
+    const [first] = value;
+    assert.ok(first !== undefined);
+    return first;
+  }
+  return value;
+}
 
 const CATALOG_RUNTIME = "console.log(\"catalog\");\n";
 const SKILL_MD = "---\nname: skill-cleaner\nversion: 2026.06.17\n---\n# Skill Cleaner\n";
@@ -238,17 +253,127 @@ test("repair requires at least one explicitly selected skill", async (t) => {
   assert.equal(result.errors.some((error) => error.code === "invalid_skill_filter"), true);
 });
 
-test("repair refuses non-dry-run modes until apply is implemented", async (t) => {
+test("repair requires exactly one of dry-run or apply", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await dirtyTheTarget(fixture);
+
+  const neither = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"]
+  });
+  assert.equal(neither.ok, false);
+  assert.equal(neither.errors.some((error) => error.code === "invalid_repair_mode"), true);
+
+  const both = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    dryRun: true,
+    apply: true
+  });
+  assert.equal(both.ok, false);
+  assert.equal(both.errors.some((error) => error.code === "invalid_repair_mode"), true);
+
+  // Neither invalid mode mutated the dirty target.
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), "console.log(\"locally edited\");\n");
+});
+
+test("repair apply replaces a dirty target from catalog, records rollback metadata, and verifies status current", async (t) => {
   const fixture = await createTrackedFixture(t);
   await dirtyTheTarget(fixture);
 
   const result = await repair({
     source: fixture.sourceRoot,
     target: "openclaw",
-    skills: ["skill-cleaner"]
+    skills: ["skill-cleaner"],
+    apply: true
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.errors.some((error) => error.code === "unsupported_repair_mode"), true);
+  assert.equal(result.ok, true);
+  assert.equal(result.dryRun, false);
+  assert.equal(result.readOnly, false);
+  assert.deepEqual(result.repaired.skills, ["skill-cleaner"]);
+  assert.equal(result.repaired.files, 2);
+
+  // Live target now matches the catalog: edited file reset, extra file removed.
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), CATALOG_RUNTIME);
+  await assert.rejects(readFile(path.join(fixture.targetSkill, "extra.js"), "utf8"), /ENOENT/);
+
+  const receipt = JSON.parse(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  const record = singleRecord(receipt, "skill-cleaner");
+  assert.equal(record.mode, "repair");
+  assert.equal(record.sourcePath, fixture.sourceSkill);
+  assert.equal(record.targetPath, fixture.targetSkill);
+  assert.equal(typeof record.sourceHash, "string");
+  assert.equal(record.priorState?.status, "dirty");
+  assert.equal(record.rollback?.schema, "calvinnwq.skills.rollback.v0");
+  assert.equal(record.rollback?.status, "available");
+  assert.equal(record.rollback?.targetPath, fixture.targetSkill);
+  assert.equal(typeof record.rollback?.backupPath, "string");
+  assert.equal(Array.isArray(record.rollback?.files), true);
+  assert.equal(Array.isArray(record.rollback?.appliedFiles), true);
+
+  // The pre-repair dirty content is preserved in the backup directory.
+  const backupPath = record.rollback?.backupPath as string;
+  assert.equal(result.repaired.backups.length, 1);
+  assert.equal(result.repaired.backups[0]?.backupPath, backupPath);
+  assert.equal(await readFile(path.join(backupPath, "runtime.js"), "utf8"), "console.log(\"locally edited\");\n");
+  assert.equal(await readFile(path.join(backupPath, "extra.js"), "utf8"), "console.log(\"local extra\");\n");
+
+  const postStatus = await status({ source: fixture.sourceRoot, target: "openclaw" });
+  assert.equal(postStatus.summary.current, 1);
+  assert.equal(postStatus.summary.dirty, 0);
+});
+
+test("repair apply rollback restores the pre-repair dirty target via receipt metadata", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await dirtyTheTarget(fixture);
+
+  const applied = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+  assert.equal(applied.ok, true);
+
+  const rollbackResult = await rollback({ receipt: path.join(fixture.targetRoot, RECEIPT_FILE) });
+  assert.equal(rollbackResult.ok, true);
+
+  // The dirty edits are restored exactly.
   assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), "console.log(\"locally edited\");\n");
+  assert.equal(await readFile(path.join(fixture.targetSkill, "extra.js"), "utf8"), "console.log(\"local extra\");\n");
+
+  // The skill remains receipt-owned (repair does not orphan the install) and is marked rolled-back.
+  const receiptAfter = JSON.parse(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  const recordAfter = singleRecord(receiptAfter, "skill-cleaner");
+  assert.equal(recordAfter.rollback?.status, "rolled-back");
+});
+
+test("repair apply restores the dirty target and writes no receipt when a write fails after backup", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await dirtyTheTarget(fixture);
+  const receiptBefore = await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8");
+
+  const result = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true,
+    __test: { failAfterBackup: true }
+  } as Parameters<typeof repair>[0] & { __test: { failAfterBackup: boolean } });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.repaired.skills, []);
+  assert.equal(result.repaired.files, 0);
+  assert.deepEqual(result.repaired.backups, []);
+  assert.equal(result.errors.some((error) => error.code === "repair_write_failed" && error.skill === "skill-cleaner"), true);
+
+  // The dirty target is left exactly as it was; the receipt is untouched.
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), "console.log(\"locally edited\");\n");
+  assert.equal(await readFile(path.join(fixture.targetSkill, "extra.js"), "utf8"), "console.log(\"local extra\");\n");
+  assert.equal(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8"), receiptBefore);
+  const record = singleRecord(JSON.parse(receiptBefore) as Receipt, "skill-cleaner");
+  assert.notEqual(record.mode, "repair");
 });
