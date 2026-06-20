@@ -3,10 +3,24 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, unlink, writeFile } from "
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { RECEIPT_FILE } from "../src/receipt.js";
+import { RECEIPT_FILE, type Receipt, type ReceiptInstallRecord } from "../src/receipt.js";
 import { importTarget } from "../src/import-target.js";
 import { status } from "../src/status.js";
 import { track } from "../src/track.js";
+
+function singleRecord(receipt: Receipt, skill: string): ReceiptInstallRecord {
+  const value = receipt.installs?.[skill];
+  if (value === undefined) {
+    throw new Error(`Missing receipt for ${skill}.`);
+  }
+  if (Array.isArray(value)) {
+    assert.equal(value.length, 1);
+    const [first] = value;
+    assert.ok(first !== undefined);
+    return first;
+  }
+  return value;
+}
 
 const CATALOG_RUNTIME = "console.log(\"catalog\");\n";
 const SKILL_MD = "---\nname: skill-cleaner\nversion: 2026.06.17\n---\n# Skill Cleaner\n";
@@ -404,7 +418,7 @@ test("import-target requires exactly one of dry-run or apply", async (t) => {
   assert.equal(both.errors.some((error) => error.code === "invalid_import_mode"), true);
 });
 
-test("import-target apply is not yet implemented and mutates nothing", async (t) => {
+test("import-target apply replaces the catalog from a dirty target, hash-verifies, refreshes the receipt, and reports status current", async (t) => {
   const fixture = await createTrackedFixture(t);
   await editTheTarget(fixture);
 
@@ -415,9 +429,106 @@ test("import-target apply is not yet implemented and mutates nothing", async (t)
     apply: true
   });
 
+  assert.equal(result.ok, true);
+  assert.equal(result.dryRun, false);
+  assert.equal(result.readOnly, false);
+  assert.deepEqual(result.imported.skills, ["skill-cleaner"]);
+  // SKILL.md, runtime.js, extra.js all land in the catalog.
+  assert.equal(result.imported.files, 3);
+  assert.equal(typeof result.receiptPath, "string");
+
+  // The catalog now matches the live target: edited file updated, new file created.
+  assert.equal(await readFile(path.join(fixture.sourceSkill, "runtime.js"), "utf8"), LOCAL_RUNTIME);
+  assert.equal(await readFile(path.join(fixture.sourceSkill, "extra.js"), "utf8"), LOCAL_EXTRA);
+  assert.equal(await readFile(path.join(fixture.sourceSkill, "SKILL.md"), "utf8"), SKILL_MD);
+
+  // The live target is never mutated by an import: it is the read-only source.
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), LOCAL_RUNTIME);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "extra.js"), "utf8"), LOCAL_EXTRA);
+
+  // The receipt is refreshed so the target reads current against the new catalog.
+  const receipt = JSON.parse(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  const record = singleRecord(receipt, "skill-cleaner");
+  assert.equal(record.mode, "import");
+  assert.equal(record.sourcePath, fixture.sourceSkill);
+  assert.equal(record.targetPath, fixture.targetSkill);
+  assert.equal(typeof record.sourceHash, "string");
+
+  const postStatus = await status({ source: fixture.sourceRoot, target: "openclaw" });
+  assert.equal(postStatus.summary.current, 1);
+  assert.equal(postStatus.summary.dirty, 0);
+
+  // No pre-import backup directory is left littering the catalog repo.
+  const leftovers = (await import("node:fs/promises")).readdir(path.dirname(fixture.sourceSkill));
+  assert.equal((await leftovers).some((name) => name.includes("suitcase-pre-import")), false);
+});
+
+test("import-target apply deletes a catalog file the target dropped", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await writeFile(path.join(fixture.sourceSkill, "helper.js"), "console.log(\"helper\");\n");
+  await writeFile(path.join(fixture.targetSkill, "helper.js"), "console.log(\"helper\");\n");
+  const retracked = await track({ source: fixture.sourceRoot, target: "openclaw", skills: ["skill-cleaner"] });
+  assert.equal(retracked.ok, true);
+  await rm(path.join(fixture.targetSkill, "helper.js"), { force: true });
+
+  const result = await importTarget({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+
+  assert.equal(result.ok, true);
+  // The catalog drops the file the target removed and keeps the rest.
+  await assert.rejects(readFile(path.join(fixture.sourceSkill, "helper.js"), "utf8"), /ENOENT/);
+  assert.equal(await readFile(path.join(fixture.sourceSkill, "runtime.js"), "utf8"), CATALOG_RUNTIME);
+
+  const postStatus = await status({ source: fixture.sourceRoot, target: "openclaw" });
+  assert.equal(postStatus.summary.current, 1);
+});
+
+test("import-target apply refuses a current skill and writes nothing to the catalog", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  const receiptBefore = await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8");
+
+  const result = await importTarget({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+
   assert.equal(result.ok, false);
-  assert.equal(result.errors.some((error) => error.code === "unsupported_import_mode"), true);
-  // Read-only: the catalog is untouched and no extra.js leaked into the repo.
+  assert.equal(result.imported.skills.length, 0);
+  assert.equal(result.errors.some((error) => error.code === "already_current"), true);
+  // Refused apply mutates nothing: catalog and receipt are untouched.
+  assert.equal(await readFile(path.join(fixture.sourceSkill, "runtime.js"), "utf8"), CATALOG_RUNTIME);
+  assert.equal(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8"), receiptBefore);
+});
+
+test("import-target apply restores the catalog and receipt when a write fails after backup", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await editTheTarget(fixture);
+  const receiptBefore = await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8");
+
+  const result = await importTarget({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true,
+    __test: { failAfterBackup: true }
+  } as Parameters<typeof importTarget>[0] & { __test: { failAfterBackup: boolean } });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.imported.skills, []);
+  assert.equal(result.imported.files, 0);
+  assert.equal(result.errors.some((error) => error.code === "import_write_failed" && error.skill === "skill-cleaner"), true);
+
+  // The catalog is left exactly as it was; no partial edit leaked in.
   assert.equal(await readFile(path.join(fixture.sourceSkill, "runtime.js"), "utf8"), CATALOG_RUNTIME);
   await assert.rejects(readFile(path.join(fixture.sourceSkill, "extra.js"), "utf8"), /ENOENT/);
+  // The receipt is untouched and the live target is preserved.
+  assert.equal(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8"), receiptBefore);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), LOCAL_RUNTIME);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "extra.js"), "utf8"), LOCAL_EXTRA);
 });

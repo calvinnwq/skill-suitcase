@@ -1,15 +1,20 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
 import {
+  RECEIPT_FILE,
+  buildInstallRecord,
+  buildInstalledFiles,
   readReceipt,
+  upsertAndWriteReceipt,
   type Receipt,
   type ReceiptInstallRecord
 } from "../receipts/index.js";
 import { SYMLINK_MODE } from "../install-modes.js";
+import { readSkillVersion } from "../skill-metadata.js";
 import { status } from "../status/index.js";
 
 export type ImportTargetInput = {
@@ -19,6 +24,9 @@ export type ImportTargetInput = {
   dryRun?: boolean;
   apply?: boolean;
   targetOverrides?: TargetOverrides | undefined;
+  __test?: {
+    failAfterBackup?: boolean;
+  };
 };
 
 export type ImportTargetError = {
@@ -103,9 +111,21 @@ export type ImportTargetPlanResult = ImportTargetBaseResult & {
     files: 0;
   };
   receiptPath: null;
+  postImportStatus: null;
 };
 
-export type ImportTargetResult = ImportTargetPlanResult;
+export type ImportTargetApplyResult = ImportTargetBaseResult & {
+  dryRun: false;
+  readOnly: false;
+  imported: {
+    skills: string[];
+    files: number;
+  };
+  receiptPath: string | null;
+  postImportStatus: Awaited<ReturnType<typeof status>> | null;
+};
+
+export type ImportTargetResult = ImportTargetPlanResult | ImportTargetApplyResult;
 
 type DiffEntry = {
   action: "create" | "update" | "unchanged" | "extra" | "missing" | "blocked";
@@ -144,8 +164,10 @@ type StatusItem = StatusResult["statuses"][number];
  * the command that owns it (`promote`, `pack`/`apply`, or a no-op) so the
  * source-of-truth loop stays deterministic.
  *
- * The first slice ships the read-only `--dry-run` plan; `--apply` lands in a
- * follow-up slice.
+ * `--dry-run` produces the read-only plan; `--apply` executes it, copying the
+ * live target tree into the catalog source path (atomic backup-and-swap +
+ * hash-verify), refreshing the receipt so the target reads `current`, and
+ * leaving the catalog as ordinary git changes for review/PR.
  */
 export async function importTarget(input: ImportTargetInput): Promise<ImportTargetResult> {
   if (!input.source) {
@@ -182,20 +204,263 @@ export async function importTarget(input: ImportTargetInput): Promise<ImportTarg
     });
   }
 
-  if (!wantsDryRun) {
-    return planFailure({
-      source: input.source,
-      target: input.target,
-      selected: selectedSkills,
-      errors: [importError({
-        code: "unsupported_import_mode",
-        message: "import-target currently supports --dry-run only; apply lands in a follow-up slice."
-      })]
-    });
+  const plan = await planImport(input, selectedSkills);
+  if (wantsDryRun || !plan.ok) {
+    return finalizePlan(plan);
   }
 
-  const plan = await planImport(input, selectedSkills);
-  return finalizePlan(plan);
+  return executeImport(input, plan);
+}
+
+/**
+ * Promote each planned dirty target into the catalog source path. The target is
+ * the read-only source of the import and is never mutated; only the catalog tree
+ * (and the target's receipt metadata) change. Each catalog skill is replaced via
+ * an atomic backup-and-swap: the target is copied into a catalog-sibling staging
+ * dir, the staged copy is hash-verified against the target, the old catalog dir
+ * is renamed aside, and the staged copy is renamed into place. After the swap the
+ * receipt is refreshed so the target reads `current` against the now-updated
+ * catalog. A failure on any skill unwinds every completed swap and restores the
+ * original receipt, so a refusal never leaves a half-imported catalog. On success
+ * the catalog-side backups are removed: git is the catalog's rollback, so the
+ * repo is left with only the ordinary file changes an operator reviews and PRs.
+ */
+async function executeImport(input: ImportTargetInput, plan: ImportTargetBaseResult): Promise<ImportTargetApplyResult> {
+  const installRoot = plan.installRoot;
+  if (installRoot === null) {
+    return applyFailure(plan, "missing_install_root", "could not resolve install root for import-target");
+  }
+
+  const receiptPath = path.join(installRoot, RECEIPT_FILE);
+  let previousReceiptText: string | null;
+  try {
+    previousReceiptText = await readOptionalText(receiptPath);
+  } catch (error) {
+    return applyFailure(plan, "invalid_receipt", `Could not read receipt before import-target: ${errorMessage(error)}`);
+  }
+
+  const importedSkills: string[] = [];
+  const completed: Array<{ catalogPath: string; backupPath: string }> = [];
+  let importedFiles = 0;
+  let receiptPathWritten: string | null = null;
+
+  for (const candidate of plan.candidates) {
+    const catalogPath = candidate.catalogSkillPath;
+    const targetPath = candidate.targetSkillPath;
+    const backupPath = path.join(path.dirname(catalogPath), `.${candidate.skill}.suitcase-pre-import-${uniqueSuffix()}`);
+    const tmpPath = path.join(path.dirname(catalogPath), `.${candidate.skill}.suitcase-import-next-${uniqueSuffix()}`);
+    let copied = false;
+    let backedUp = false;
+    let installed = false;
+
+    try {
+      await copyTree(targetPath, tmpPath);
+      copied = true;
+      if (!(await treesMatch(targetPath, tmpPath))) {
+        throw new Error(`Staged catalog copy for ${candidate.skill} does not match the live target.`);
+      }
+      await rename(catalogPath, backupPath);
+      backedUp = true;
+      if (input.__test?.failAfterBackup === true) {
+        throw new Error("Injected failure after backup.");
+      }
+      await rename(tmpPath, catalogPath);
+      installed = true;
+      copied = false;
+      if (!(await treesMatch(catalogPath, targetPath))) {
+        throw new Error(`Imported catalog tree for ${candidate.skill} does not match the live target.`);
+      }
+
+      const installedFiles = await buildInstalledFiles(targetPath);
+      const sourceHash = await hashDirectory(catalogPath);
+      const priorState: Record<string, unknown> = {
+        status: candidate.status,
+        reason: candidate.reason
+      };
+      if (candidate.receiptHash !== null) {
+        priorState.installedHash = candidate.receiptHash;
+      }
+      const installRecord: Record<string, unknown> = {
+        skill: candidate.skill,
+        agent: plan.assignment ?? input.target,
+        target: plan.assignment ?? input.target,
+        mode: "import",
+        source: {
+          path: catalogPath
+        },
+        sourcePath: catalogPath,
+        targetPath,
+        sourceHash,
+        installedFiles,
+        priorState
+      };
+      const version = await readSkillVersion(catalogPath).catch(() => null);
+      if (version !== null) {
+        installRecord.version = version;
+      }
+      if (candidate.variant !== undefined) {
+        installRecord.variant = candidate.variant;
+      }
+
+      receiptPathWritten = await upsertAndWriteReceipt({
+        installRoot,
+        skillName: candidate.skill,
+        installRecord: buildInstallRecord(installRecord)
+      });
+      importedSkills.push(candidate.skill);
+      importedFiles += installedFiles.length;
+      completed.push({ catalogPath, backupPath });
+    } catch (error) {
+      if (installed) {
+        await removePath(catalogPath);
+      }
+      if (backedUp) {
+        await restorePath(backupPath, catalogPath);
+      }
+      if (copied) {
+        await removePath(tmpPath);
+      }
+      await restoreOriginalReceipt({ receiptPath, previousReceiptText });
+      for (const done of completed.reverse()) {
+        await removePath(done.catalogPath);
+        await restorePath(done.backupPath, done.catalogPath);
+      }
+      importedSkills.length = 0;
+      importedFiles = 0;
+      completed.length = 0;
+      receiptPathWritten = null;
+      return {
+        ...plan,
+        ok: false,
+        dryRun: false,
+        readOnly: false,
+        refused: {
+          skills: [...new Set([...plan.refused.skills, candidate.skill])].sort()
+        },
+        summary: {
+          ...plan.summary,
+          refused: plan.summary.refused + 1
+        },
+        errors: [
+          ...plan.errors,
+          importError({
+            code: "import_write_failed",
+            message: errorMessage(error),
+            skill: candidate.skill,
+            path: catalogPath
+          })
+        ],
+        imported: {
+          skills: [],
+          files: 0
+        },
+        receiptPath: receiptPathWritten,
+        postImportStatus: null
+      };
+    }
+  }
+
+  // Every swap succeeded: drop the catalog-side backups so the repo is left with
+  // only the ordinary git changes an operator reviews.
+  for (const done of completed) {
+    await removePath(done.backupPath);
+  }
+
+  const statusInput: Parameters<typeof status>[0] = {
+    source: plan.source,
+    target: input.target
+  };
+  if (input.targetOverrides !== undefined) {
+    statusInput.targetOverrides = input.targetOverrides;
+  }
+  const postImportStatus = await status(statusInput).catch(() => null);
+  const postStatusErrors = postStatusCurrentErrors({
+    postImportStatus,
+    plan,
+    inputTarget: input.target
+  });
+
+  return {
+    ...plan,
+    ok: postStatusErrors.length === 0,
+    dryRun: false,
+    readOnly: false,
+    errors: [
+      ...plan.errors,
+      ...postStatusErrors
+    ],
+    imported: {
+      skills: importedSkills.sort(),
+      files: importedFiles
+    },
+    receiptPath: receiptPathWritten,
+    postImportStatus
+  };
+}
+
+/**
+ * After an import the live target must read `current` against the now-updated
+ * catalog. Any other status means the catalog write or receipt refresh did not
+ * converge, so it is surfaced as a verification failure rather than reported as a
+ * clean import.
+ */
+function postStatusCurrentErrors({
+  postImportStatus,
+  plan,
+  inputTarget
+}: {
+  postImportStatus: StatusResult | null;
+  plan: ImportTargetBaseResult;
+  inputTarget: string;
+}): ImportTargetError[] {
+  if (postImportStatus === null) {
+    return [importError({
+      code: "post_status_unavailable",
+      message: "Could not verify post-import status."
+    })];
+  }
+
+  const errors: ImportTargetError[] = [];
+  const targetAssignment = plan.assignment ?? inputTarget;
+  const statusBySkill = new Map(
+    postImportStatus.statuses
+      .filter((item) => item.assignment === targetAssignment)
+      .map((item) => [item.skill, item])
+  );
+  for (const candidate of plan.candidates) {
+    const statusItem = statusBySkill.get(candidate.skill);
+    if (statusItem?.status === "current") {
+      continue;
+    }
+    errors.push(importError({
+      code: "post_status_not_current",
+      message: statusItem === undefined
+        ? `Could not verify post-import status for ${candidate.skill}.`
+        : `Skill ${candidate.skill} is ${statusItem.status} after import: ${statusItem.reason}`,
+      skill: candidate.skill,
+      path: candidate.targetSkillPath
+    }));
+  }
+  return errors;
+}
+
+function applyFailure(plan: ImportTargetBaseResult, code: string, message: string): ImportTargetApplyResult {
+  return {
+    ...plan,
+    ok: false,
+    dryRun: false,
+    readOnly: false,
+    errors: [
+      ...plan.errors,
+      importError({ code, message })
+    ],
+    imported: {
+      skills: [],
+      files: 0
+    },
+    receiptPath: null,
+    postImportStatus: null
+  };
 }
 
 async function planImport(input: ImportTargetInput, selectedSkills: string[]): Promise<ImportTargetBaseResult> {
@@ -663,7 +928,8 @@ function finalizePlan(plan: ImportTargetBaseResult): ImportTargetPlanResult {
       skills: [],
       files: 0
     },
-    receiptPath: null
+    receiptPath: null,
+    postImportStatus: null
   };
 }
 
@@ -942,6 +1208,95 @@ async function listFiles(root: string): Promise<string[]> {
   }
 
   return files.sort();
+}
+
+async function copyTree(sourcePath: string, targetPath: string): Promise<void> {
+  if (isSameOrInsidePath(targetPath, sourcePath)) {
+    throw new Error(`Refusing to copy ${sourcePath} into nested destination ${targetPath}.`);
+  }
+  await mkdir(targetPath, { recursive: true });
+  const entries = await readdir(sourcePath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
+      continue;
+    }
+    const from = path.join(sourcePath, entry.name);
+    const to = path.join(targetPath, entry.name);
+    if (entry.isDirectory()) {
+      await copyTree(from, to);
+      continue;
+    }
+    if (entry.isFile()) {
+      await copyFile(from, to);
+    }
+  }
+}
+
+async function treesMatch(left: string, right: string): Promise<boolean> {
+  const [leftFiles, rightFiles] = await Promise.all([
+    buildInstalledFiles(left),
+    buildInstalledFiles(right)
+  ]);
+  if (leftFiles.length !== rightFiles.length) {
+    return false;
+  }
+  for (let index = 0; index < leftFiles.length; index += 1) {
+    const leftFile = leftFiles[index];
+    const rightFile = rightFiles[index];
+    if (leftFile === undefined || rightFile === undefined || leftFile.path !== rightFile.path || leftFile.hash !== rightFile.hash) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function readOptionalText(filePath: string): Promise<string | null> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function restoreOriginalReceipt({
+  receiptPath,
+  previousReceiptText
+}: {
+  receiptPath: string;
+  previousReceiptText: string | null;
+}): Promise<void> {
+  try {
+    if (previousReceiptText === null) {
+      await unlink(receiptPath);
+      return;
+    }
+    await writeFile(receiptPath, previousReceiptText, "utf8");
+  } catch {
+    // best effort restore only
+  }
+}
+
+async function removePath(targetPath: string): Promise<void> {
+  try {
+    await rm(targetPath, { recursive: true, force: true });
+  } catch {
+    // best effort cleanup only
+  }
+}
+
+async function restorePath(from: string, to: string): Promise<void> {
+  try {
+    await rename(from, to);
+  } catch {
+    // best effort restore only
+  }
+}
+
+function uniqueSuffix(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function compareWrites(left: ImportRepoWrite, right: ImportRepoWrite): number {
