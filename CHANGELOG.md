@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.7.0...v0.8.0) (2026-06-20)
+
+
+### Features
+
+* add import-target flow for catalog skill edits ([b4e2156](https://github.com/calvinnwq/skill-suitcase/commit/b4e21560f4f6337dfb8dc418f8b3fb69044cf04f))
+* **import-target:** Implemented the `import-target --apply` execution slice for NGX-493: an atomic, hash-verified import of a dirty receipt-owned target skill into the catalog source path that refreshes the receipt so the target reads `current` and leaves the repo as ordinary git changes, with focused TDD tests and all verification gates green. ([77e4d45](https://github.com/calvinnwq/skill-suitcase/commit/77e4d453f7a5fc94f98cf7563302c4459e8d4ddb))
+* **import-target:** Implemented the first slice of NGX-493: a read-only `import-target --dry-run` CLI command that plans importing intentional local edits from a modeled writable target back into the catalog for dirty receipt-owned skills, deterministically routing/refusing every other target state, fully tested with all verification gates green. ([fb1d1cf](https://github.com/calvinnwq/skill-suitcase/commit/fb1d1cfa1845447a30df1ab098a96abc02223f4c))
+
 ## [0.7.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.6.0...v0.7.0) (2026-06-19)
 
 
