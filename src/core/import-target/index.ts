@@ -690,13 +690,13 @@ async function planImport(input: ImportTargetInput, selectedSkills: string[]): P
     }
 
     if (
-      statusItem.installedHash !== null
-      && statusItem.currentHash !== null
-      && statusItem.installedHash !== statusItem.currentHash
+      statusItem.installedHash === null
+      || statusItem.currentHash === null
+      || statusItem.installedHash !== statusItem.currentHash
     ) {
       errors.push(importError({
         code: "catalog_diverged",
-        message: `Skill ${skill} is dirty but the catalog has also moved since it was tracked (${statusItem.reason}); reconcile the catalog (pack + apply, then repair) before importing local edits.`,
+        message: `Skill ${skill} is dirty but import-target cannot prove the catalog still matches the tracked receipt (${statusItem.reason}); reconcile the catalog (pack + apply, then repair) before importing local edits.`,
         skill,
         path: statusItem.targetPath
       }));

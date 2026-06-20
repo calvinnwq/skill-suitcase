@@ -292,6 +292,37 @@ test("import-target refuses a dirty target whose catalog has also diverged", asy
   assert.equal(await readFile(path.join(fixture.sourceSkill, "runtime.js"), "utf8"), "console.log(\"catalog moved ahead\");\n");
 });
 
+test("import-target refuses a dirty target whose receipt has no source hash", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  const receiptPath = path.join(fixture.targetRoot, RECEIPT_FILE);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as Receipt;
+  const record = singleRecord(receipt, "skill-cleaner");
+  delete record.sourceHash;
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+  await editTheTarget(fixture);
+
+  const before = await status({ source: fixture.sourceRoot, target: "openclaw" });
+  const beforeItem = before.statuses.find((item) => item.skill === "skill-cleaner");
+  assert.equal(beforeItem?.status, "dirty", "precondition: target should be dirty");
+  assert.equal(beforeItem?.installedHash, null, "precondition: receipt should have no installed hash");
+
+  const result = await importTarget({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    dryRun: true
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.candidates.length, 0);
+  assert.equal(
+    result.errors.some((error) => error.code === "catalog_diverged" && error.skill === "skill-cleaner"),
+    true
+  );
+  assert.equal(await readFile(path.join(fixture.sourceSkill, "runtime.js"), "utf8"), CATALOG_RUNTIME);
+  await assert.rejects(readFile(path.join(fixture.sourceSkill, "extra.js"), "utf8"), /ENOENT/);
+});
+
 test("import-target refuses to import a dirty symlink-mode install", async (t) => {
   const fixture = await createCatalog(t);
   await symlink(fixture.sourceSkill, fixture.targetSkill, "dir");
