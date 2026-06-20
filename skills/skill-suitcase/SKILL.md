@@ -29,6 +29,11 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
   skill, review `repair --dry-run`, then run `repair --apply` for that named
   skill only after explicit approval; use `rollback` to restore the pre-repair
   content. Refuse broad/all-target dirty repair.
+- Use `import-target` only for the inverse of `repair`: a selected
+  receipt-owned, catalog-owned skill that went `dirty` from an **intentional**
+  local edit you want as the repo version. Review `import-target --dry-run`, then
+  run `import-target --apply` for that named skill only after explicit approval;
+  it moves target → catalog. Refuse broad/all-skills imports.
 - Stop and report on broad `unknown`, unexpected target paths, or provider-owned
   skills.
 - Never force provider-managed Codex skills such as Codex `linear` into Suitcase
@@ -140,6 +145,17 @@ approval (`rollback` restores the pre-repair dirty content):
 "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --apply --json
 ```
 
+For a selected receipt-owned, catalog-owned skill that went `dirty` from an
+intentional local edit you want in the repo, import it the other direction
+(target → catalog) after approval, then verify status:
+
+```bash
+"$CLI" import-target --source "$SRC" --target openclaw --skill <skill-name> --dry-run --json
+# after approval:
+"$CLI" import-target --source "$SRC" --target openclaw --skill <skill-name> --apply --json
+"$CLI" status --source "$SRC" --target openclaw --json
+```
+
 For missing or behind skills, stage an immutable bundle and apply the artifact:
 
 ```bash
@@ -155,6 +171,23 @@ ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
 For another target, keep the same pattern and replace only the target id and
 override flags from the matrix.
 
+## Decision Tree And Drift Audit
+
+Pick the command for a single skill by its `status` and who owns the drift:
+`track` for an exact match that only needs a receipt, `reconcile` for a
+catalog-owned receiptless `unknown`, `promote` for a brand-new target-created
+skill, `repair` to discard an accidental `dirty` edit (catalog → target), and
+`import-target` to keep an intentional `dirty` edit (target → catalog). `repair`
+and `import-target` see the same receipt-owned `dirty` target; only the operator
+knows whether the drift was a mistake or intentional, so neither runs implicitly.
+
+Run a lightweight drift audit/heartbeat: re-run `status` and `diff` periodically
+to report when a catalog-owned skill has drifted `dirty` in a writable target.
+Reporting drift is automatic; importing it is not. Review the
+`import-target --dry-run` plan, then run `import-target --apply` only after
+explicit approval that the drift is intentional and should become the repo
+version. A drift report must never trigger an implicit import.
+
 ## Interpretation
 
 Status meanings:
@@ -164,8 +197,9 @@ Status meanings:
 - `unknown`: existing target lacks a usable Suitcase receipt. Use `track` for
   exact matches or selected `reconcile` for catalog-owned receiptless drift.
 - `dirty`: target differs from the last recorded Suitcase install. Stop and
-  report the exact target path and skill; for a receipt-owned skill, repair it
-  with `repair --dry-run` then `repair --apply` after approval.
+  report the exact target path and skill. For a receipt-owned skill, `repair`
+  discards the edit (catalog → target) and `import-target` keeps an intentional
+  edit (target → catalog); both run `--dry-run` then `--apply` after approval.
 - `blocked`: catalog compatibility intentionally refuses that target.
 
 Goal state for an intended target is zero `behind`, `dirty`, `missing`,
