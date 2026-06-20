@@ -12,8 +12,15 @@ only after Release Please creates a GitHub release.
 - GitHub releases are managed by Release Please.
 - The CLI bin name is `skill-suitcase`.
 - The package name is `skill-suitcase`.
-- `skill-suitcase@0.5.0` is published on npm, and `latest` points to `0.5.0`
-  as of 2026-06-17.
+- `skill-suitcase@0.8.0` is published on npm, and `latest` points to `0.8.0`
+  as of 2026-06-20.
+- The `v0.8.0` release includes the receipt-owned `repair` flow, the
+  catalog-owned `import-target` flow for intentional local skill edits, and the
+  installable Skill Suitcase operator skill.
+- Local dogfood after `v0.8.0` verified the installed CLI exposes
+  `import-target`, the skills catalog imports/validates cleanly, all modeled
+  targets report current, and the packaged operator skill copy is installed in
+  local Codex, Claude, and OpenClaw-Codex skill roots.
 - CI runs `pnpm test` on pull requests and pushes to `main`.
 - The Release Please workflow publishes to npm only when
   `steps.release.outputs.release_created == 'true'`.
@@ -195,7 +202,7 @@ Before a public announcement or npm publish:
 
 ## Current Decision
 
-Skill Suitcase can publish automatically from the Release Please workflow after
-the npm package-side trusted publisher is configured. Manual local publishing is
-still acceptable as emergency fallback, but routine releases should flow through
-Release Please and GitHub Actions.
+Skill Suitcase publishes automatically from the Release Please workflow through
+npm Trusted Publishing. Manual local publishing is still acceptable as emergency
+fallback, but routine releases should flow through Release Please and GitHub
+Actions.
