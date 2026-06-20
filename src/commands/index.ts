@@ -1,6 +1,7 @@
 import { applyCommand } from "./apply.js";
 import { diffCommand } from "./diff.js";
 import { importCommand } from "./import.js";
+import { importTargetCommand } from "./import-target.js";
 import { packCommand } from "./pack.js";
 import { planCommand } from "./plan.js";
 import { promoteCommand } from "./promote.js";
@@ -28,7 +29,8 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   trackCommand,
   reconcileCommand,
   repairCommand,
-  promoteCommand
+  promoteCommand,
+  importTargetCommand
 ];
 
 const KNOWN_COMMAND_NAMES: ReadonlySet<string> = new Set(
@@ -99,7 +101,12 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
     }
 
     if (token === "--skill") {
-      if (args.command !== "track" && args.command !== "reconcile" && args.command !== "repair") {
+      if (
+        args.command !== "track" &&
+        args.command !== "reconcile" &&
+        args.command !== "repair" &&
+        args.command !== "import-target"
+      ) {
         throw new Error(`Unknown argument: ${token}`);
       }
       const value = rest[index + 1];
@@ -199,10 +206,12 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--source":
       return command === "plan" || command === "diff" || command === "pack" || command === "import"
         || command === "validate" || command === "targets" || command === "status" || command === "apply"
-        || command === "track" || command === "reconcile" || command === "repair" || command === "promote";
+        || command === "track" || command === "reconcile" || command === "repair" || command === "promote"
+        || command === "import-target";
     case "--target":
       return command === "plan" || command === "diff" || command === "pack" || command === "apply"
-        || command === "track" || command === "reconcile" || command === "repair" || command === "status";
+        || command === "track" || command === "reconcile" || command === "repair" || command === "status"
+        || command === "import-target";
     case "--target-skill":
       return command === "promote";
     case "--output":
@@ -217,11 +226,14 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--codex-skills":
     case "--claude-skills":
       return command === "diff" || command === "pack" || command === "targets" || command === "status"
-        || command === "apply" || command === "track" || command === "reconcile" || command === "repair";
+        || command === "apply" || command === "track" || command === "reconcile" || command === "repair"
+        || command === "import-target";
     case "--dry-run":
-      return command === "pack" || command === "promote" || command === "reconcile" || command === "repair";
+      return command === "pack" || command === "promote" || command === "reconcile" || command === "repair"
+        || command === "import-target";
     case "--apply":
-      return command === "promote" || command === "reconcile" || command === "repair";
+      return command === "promote" || command === "reconcile" || command === "repair"
+        || command === "import-target";
     case "--strict":
       return command === "validate";
     default:

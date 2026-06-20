@@ -26,6 +26,7 @@ src/
     reconcile.ts
     repair.ts
     promote.ts
+    import-target.ts
   core/
     planning/
     diffing/
@@ -37,6 +38,7 @@ src/
     reconcile/
     repair/
     promote/
+    import-target/
     receipts/
     status/
     install-modes.ts
@@ -85,7 +87,8 @@ Command modules should stay thin. They adapt the outside world to core code.
 - packing and artifact construction
 - import/onboarding inspection
 - apply/install workflows
-- rollback, reconcile, repair, and existing-install adoption workflows
+- rollback, reconcile, repair, import-target, and existing-install adoption
+  workflows
 - install mode classification and safety checks
 - receipt creation and validation
 - catalog, manifest, target, and validation rules
@@ -166,9 +169,10 @@ coverage, such as OpenCode and Pi, but Skill Suitcase still owns planning,
 receipts, dirty detection, rollback, and approval boundaries.
 
 Do not call `npx skills` from normal target discovery, planning, status, diff,
-apply, track, reconcile, or repair paths. If a future issue adds optional `skills.sh`
-installer delegation, it must be wrapped behind a narrow adapter and reconciled
-back into Skill Suitcase receipts before the install is considered managed.
+apply, track, reconcile, repair, promote, or import-target paths. If a future
+issue adds optional `skills.sh` installer delegation, it must be wrapped behind a
+narrow adapter and reconciled back into Skill Suitcase receipts before the
+install is considered managed.
 
 Provider data must be deterministic in tests. Prefer a vendored/generated
 snapshot over runtime network or package execution. Snapshot refreshes should be
@@ -240,6 +244,19 @@ Keep the command verbs separate:
   state, and must leave status current. Repair must not adopt unknown targets
   (use `track` or `reconcile`), install missing or behind skills (use `apply`),
   mutate symlink-mode installs, or operate without explicit `--skill` filters.
+- `import-target` imports an intentionally-edited receipt-owned copy-mode target
+  skill back into the catalog as the source-of-truth inverse of `repair`:
+  `repair` discards the local edit (catalog -> target), while `import-target`
+  keeps it (target -> catalog) so it can land in the skills repo through
+  review. `--dry-run` is deterministic and read-only; `--apply` is
+  approval-gated, copies the live target tree into the catalog source path
+  (atomic backup-and-swap + hash verify), refreshes the receipt
+  (`mode: "import"`) so the target reads `current`, and leaves the catalog as
+  ordinary git changes for review. Import-target must not adopt unknown targets
+  (use `track` or `reconcile`), install missing or behind skills (use `apply`),
+  promote a target-created skill (use `promote`), mutate symlink-mode installs,
+  operate without explicit `--skill` filters, or run implicitly from a drift
+  report.
 - `rollback` reverses prior `apply`, `reconcile`, or `repair` mutations using
   receipt rollback state.
 - `promote` turns a target-created skill (for example a skill an agent wrote
@@ -279,7 +296,8 @@ Live mutations require explicit approval input or an approved command mode:
 
 The default path for new platform coverage is read-only first: `targets`,
 `status`, and `diff` should prove the target model before `track`, `apply`,
-`reconcile --apply`, `repair --apply`, or `promote` touches live paths.
+`reconcile --apply`, `repair --apply`, `promote`, or `import-target --apply`
+touches live paths.
 
 ## Import Direction
 

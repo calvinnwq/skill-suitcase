@@ -20,7 +20,8 @@ test("command registry exposes every public command explicitly", () => {
     "track",
     "reconcile",
     "repair",
-    "promote"
+    "promote",
+    "import-target"
   ]);
 });
 
@@ -144,6 +145,49 @@ test("parseCommandArgs supports the repair apply mode", () => {
     "--json"
   ]), {
     command: "repair",
+    source: fixtureSource,
+    target: "openclaw",
+    skill: ["skill-cleaner"],
+    apply: true,
+    dryRun: false,
+    json: true
+  });
+});
+
+test("parseCommandArgs supports the import-target dry-run mode", () => {
+  assert.deepEqual(parseCommandArgs([
+    "import-target",
+    "--source",
+    fixtureSource,
+    "--target",
+    "openclaw",
+    "--skill",
+    "skill-cleaner",
+    "--dry-run",
+    "--json"
+  ]), {
+    command: "import-target",
+    source: fixtureSource,
+    target: "openclaw",
+    skill: ["skill-cleaner"],
+    dryRun: true,
+    json: true
+  });
+});
+
+test("parseCommandArgs supports the import-target apply mode", () => {
+  assert.deepEqual(parseCommandArgs([
+    "import-target",
+    "--source",
+    fixtureSource,
+    "--target",
+    "openclaw",
+    "--skill",
+    "skill-cleaner",
+    "--apply",
+    "--json"
+  ]), {
+    command: "import-target",
     source: fixtureSource,
     target: "openclaw",
     skill: ["skill-cleaner"],

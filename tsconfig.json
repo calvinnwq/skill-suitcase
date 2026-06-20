@@ -45,6 +45,7 @@
     "src/commands/reconcile.ts",
     "src/commands/repair.ts",
     "src/commands/promote.ts",
+    "src/commands/import-target.ts",
     "tests/commands.test.ts",
     "src/renderers/exit-codes.ts",
     "src/renderers/json.ts",
@@ -73,6 +74,7 @@
     "src/core/reconcile/index.ts",
     "src/core/repair/index.ts",
     "src/core/promote/index.ts",
+    "src/core/import-target/index.ts",
     "src/suitcase-manifest.ts",
     "src/catalog.ts",
     "src/planner.ts",
@@ -89,6 +91,7 @@
     "src/reconcile.ts",
     "src/repair.ts",
     "src/promote.ts",
+    "src/import-target.ts",
     "tests/core-boundaries.test.ts",
     "src/adapters/filesystem.ts",
     "tests/architecture-guardrails.test.ts",
@@ -97,6 +100,8 @@
     "tests/promote.test.ts",
     "tests/reconcile.test.ts",
     "tests/repair.test.ts",
+    "tests/import-target.test.ts",
+    "tests/import-target-dogfood.test.ts",
     "tests/docs-guidance.test.ts"
   ]
 }

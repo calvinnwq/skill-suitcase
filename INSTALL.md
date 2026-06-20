@@ -158,6 +158,29 @@ skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex"
 skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --apply --json
 ```
 
+Use `import-target` for the opposite of `repair`: a selected receipt-owned,
+catalog-owned skill that went `dirty` because you edited it **intentionally** in
+a writable target and want that local version to become the repo version through
+review (it moves target → catalog, the inverse of `repair`). The five-way
+decision tree for a single skill is: `track` for an exact match that only needs a
+receipt, `reconcile` for catalog-owned receiptless drift, `promote` for a
+brand-new target-created skill, `repair` to discard an accidental dirty edit, and
+`import-target` to keep an intentional one. Dry-run first, then apply only after
+explicit approval:
+
+```bash
+skill-suitcase import-target --source "$SRC" --target openclaw --skill <skill-name> --dry-run --json
+# after approval:
+skill-suitcase import-target --source "$SRC" --target openclaw --skill <skill-name> --apply --json
+```
+
+Drift audit / heartbeat: re-run `status` and `diff` periodically to report when a
+catalog-owned skill has drifted `dirty` in a writable target. Reporting drift is
+automatic; importing it is not. Stop and inspect the `import-target --dry-run`
+plan, and run `import-target --apply` only after **explicit approval** that the
+drift is intentional and should become the repo version. A drift report must
+never trigger an implicit import.
+
 Use staged artifacts for missing or behind skills:
 
 ```bash

@@ -4,6 +4,7 @@ import type { diff } from "../core/diffing/index.js";
 import type { inspectImportSource } from "../core/importing/index.js";
 import type { pack } from "../core/packing/index.js";
 import type { plan } from "../core/planning/index.js";
+import type { importTarget } from "../core/import-target/index.js";
 import type { executePromote, planPromote } from "../core/promote/index.js";
 import type { reconcile } from "../core/reconcile/index.js";
 import type { repair } from "../core/repair/index.js";
@@ -26,7 +27,8 @@ export type CommandName =
   | "track"
   | "reconcile"
   | "repair"
-  | "promote";
+  | "promote"
+  | "import-target";
 
 export type ParsedCommandArgs = {
   command: CommandName | "help";
@@ -75,7 +77,8 @@ export type CommandJsonResult =
   | Awaited<ReturnType<typeof reconcile>>
   | Awaited<ReturnType<typeof repair>>
   | Awaited<ReturnType<typeof planPromote>>
-  | Awaited<ReturnType<typeof executePromote>>;
+  | Awaited<ReturnType<typeof executePromote>>
+  | Awaited<ReturnType<typeof importTarget>>;
 
 export type CommandModule = {
   name: CommandName;

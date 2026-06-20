@@ -49,6 +49,13 @@ skill. `promote --dry-run` reports the read-only plan and conflicts; `promote
 --apply` copies the target into the catalog, verifies it, replaces the target
 with a repo-pointing symlink, and writes a receipt.
 
+The `import-target` command preserves intentional edits made to an existing
+receipt-owned target skill. `import-target --dry-run` reports the target and
+catalog hashes plus planned repo writes without mutation; `import-target
+--apply` requires explicit approval, copies the target skill back into the
+catalog source, refreshes the target receipt, and leaves ordinary git changes
+for review.
+
 ## Install
 
 ```bash
@@ -87,6 +94,8 @@ node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target open
 node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --dry-run --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --apply --json
+node dist/src/cli.js import-target --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
+node dist/src/cli.js import-target --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
 ```
 
 `import --json` is a read-only onboarding inspection for existing skills repos.
@@ -132,10 +141,10 @@ node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --cla
 `skillsPath` to `<dir>/skills`. `--codex-skills <dir>` can override that skills
 path directly. `--claude-skills <dir>` overrides the `claude` skills root.
 These flags work with `targets`, `status`, `diff`, `pack`, `apply`, `track`,
-`reconcile`, and `repair`. Use `status --target <target>` with an assignment
-path id or assignment name. If an exact assignment path id exists, it wins, so
-`--target codex` means the global Codex target rather than every target assigned
-to Codex.
+`reconcile`, `repair`, and `import-target`. Use `status --target <target>` with
+an assignment path id or assignment name. If an exact assignment path id exists,
+it wins, so `--target codex` means the global Codex target rather than every
+target assigned to Codex.
 
 See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
@@ -176,9 +185,9 @@ find "$TMP" -maxdepth 3 -type f | sort
 rm -rf "$TMP"
 ```
 
-Live `apply`, `track`, `reconcile --apply`, `repair --apply`, `rollback`, or
-`promote --apply` should target disposable fixtures first or require explicit
-approval for the real agent home.
+Live `apply`, `track`, `reconcile --apply`, `repair --apply`, `rollback`,
+`promote --apply`, or `import-target --apply` should target disposable fixtures
+first or require explicit approval for the real agent home and catalog repo.
 
 ## Fresh Codex/Claude Machine
 
@@ -230,6 +239,16 @@ with `repair --apply` only after explicit approval:
 ```bash
 node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --dry-run --json
 node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --apply --json
+```
+
+If a selected receipt-owned skill is `dirty` because you intentionally edited it
+in the target and want that version in the catalog, stop and inspect the
+import-target plan first, then import back into the repo only after explicit
+approval:
+
+```bash
+node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --dry-run --json
+node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --apply --json
 ```
 
 Then apply missing or behind skills from a temporary bundle:
@@ -413,7 +432,7 @@ Each planned item records the resolved `variant` name, which defaults to
 declares a matching source variant for the resolved platform, `variant` is that
 variant's name and an extra `source` field carries its catalog-relative source
 path. These `variant` and `source` fields flow through `diff`, `pack`, `apply`,
-`track`, `reconcile`, `repair`, receipts, and `status`. See
+`track`, `reconcile`, `repair`, `import-target`, receipts, and `status`. See
 [`docs/portability-matrix.md`](docs/portability-matrix.md) for the variant
 selection rules.
 
@@ -1319,6 +1338,160 @@ Live promotion failures are reported with stable `errors[].code` values:
 - `promote_verify_mismatch` — the copied catalog tree did not match the target
 - `promote_swap_failed` — moving the original aside or creating the symlink
   failed, after which the original target is restored best-effort
+
+## `import-target` Output
+
+`import-target` is the source-of-truth inverse of `repair`. Both own a
+receipt-owned copy-mode target skill that went `dirty`, but they move bytes in
+opposite directions: `repair` discards the local edit by replacing the target
+from the catalog, while `import-target` keeps the **intentional** local edit by
+replacing the **catalog-owned** source from the target so the change can land in
+the skills repo through review/PR. Pass an explicit `--skill <name>` (there is no
+all-skills import) plus exactly one of `--dry-run` or `--apply`. Every
+non-`dirty` or non-receipt-owned state is refused and routed to the command that
+owns it.
+
+### Decision tree: `track` vs `reconcile` vs `repair` vs `promote` vs `import-target`
+
+All five commands adopt or move a single target skill; the target's `status` and
+who owns the drift decide which one is correct:
+
+| Situation | Status | Drift owner | Command | Direction |
+| --- | --- | --- | --- | --- |
+| Target already matches the catalog, only a receipt is missing | `unknown` (exact match) | catalog | `track` | none (writes a receipt) |
+| Catalog-owned skill, **no receipt**, target drifted from the catalog | `unknown` | catalog | `reconcile` | catalog → target |
+| Brand-new skill created in the target, not in the catalog | `unknown` | target | `promote` | target → catalog (new skill) |
+| Receipt-owned skill went `dirty` from **accidental/unwanted** edits | `dirty` | catalog | `repair` | catalog → target (discard edit) |
+| Receipt-owned skill went `dirty` from **intentional** edits you want in the repo | `dirty` | target | `import-target` | target → catalog (keep edit) |
+
+`repair` and `import-target` see the same `dirty` receipt-owned target; only the
+operator knows whether the drift was a mistake (`repair`) or a deliberate local
+edit worth importing (`import-target`). That product decision is why
+`import-target` is approval-gated (see the drift audit below) and never runs
+implicitly.
+
+`--dry-run` is read-only. It uses `diff` and `status` to prove the selected skill
+is a receipt-owned `dirty` target whose catalog has **not** moved since it was
+tracked, then reports the target id, install root, target skill path, catalog
+skill path, receipt state, the receipt hash, the current catalog hash, the live
+target hash, the changed files, and the planned repo writes the import would
+make. The `finalAction` is always `replace-catalog-from-target`.
+
+On a clean dry run (`ok: true`):
+
+```json
+{
+  "ok": true,
+  "dryRun": true,
+  "readOnly": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "target": "openclaw",
+  "assignment": "openclaw",
+  "installRoot": "/tmp/openclaw/skills",
+  "selected": { "skills": ["foo"] },
+  "candidates": [
+    {
+      "skill": "foo",
+      "targetId": "openclaw",
+      "installRoot": "/tmp/openclaw/skills",
+      "targetSkillPath": "/tmp/openclaw/skills/foo",
+      "catalogSkillPath": "/Users/ngxcalvin/repos/skills/skills/foo",
+      "status": "dirty",
+      "reason": "target files differ from receipt",
+      "receiptState": "receipt-owned",
+      "receiptHash": "e1c..",
+      "catalogHash": "e1c..",
+      "targetHash": "9a4..",
+      "variant": "canonical",
+      "changes": { "create": 1, "update": 1, "delete": 0, "unchanged": 2 },
+      "repoWrites": [
+        { "action": "update", "skill": "foo", "relativePath": "SKILL.md", "catalogPath": "/Users/ngxcalvin/repos/skills/skills/foo/SKILL.md", "targetPath": "/tmp/openclaw/skills/foo/SKILL.md" },
+        { "action": "create", "skill": "foo", "relativePath": "helper.js", "catalogPath": "/Users/ngxcalvin/repos/skills/skills/foo/helper.js", "targetPath": "/tmp/openclaw/skills/foo/helper.js" }
+      ],
+      "finalAction": "replace-catalog-from-target"
+    }
+  ],
+  "refused": { "skills": [] },
+  "summary": { "planned": 1, "candidates": 1, "refused": 0, "blocked": 0, "dirty": 1, "create": 1, "update": 1, "delete": 0, "unchanged": 2 },
+  "imported": { "skills": [], "files": 0 },
+  "receiptPath": null,
+  "postImportStatus": null,
+  "errors": []
+}
+```
+
+The `repoWrites` invert the catalog-vs-target diff for the import direction: an
+`update` rewrites the catalog file with the target version, a `create` adds a
+catalog file for a target-only file, and a `delete` removes a catalog file the
+target dropped. A valid candidate always has `receiptHash === catalogHash` (the
+catalog has not changed since the target was tracked) and a differing
+`targetHash` (the intentional local edit).
+
+`--apply` re-runs the same candidate checks, then for each candidate copies the
+live target tree into a catalog-sibling staging dir, hash-verifies the staged
+copy against the target, renames the old catalog skill aside, renames the staged
+copy into place, and re-verifies the installed catalog tree matches the target.
+It then refreshes the target receipt (`mode: "import"`, `sourceHash` = the new
+catalog hash) so `status` reports the freshly-imported target as `current`
+instead of `dirty`, and verifies post-import status. The live target root is
+never mutated beyond that receipt refresh. Because the catalog is a git repo, git
+is the rollback: on success the catalog-side backups are removed, leaving the
+skills repo with only normal git changes for review/PR. Any mid-apply failure
+unwinds every completed swap, restores the catalog from backup, and restores the
+original receipt.
+
+On success (`ok: true`), `imported.skills` lists the imported skills,
+`imported.files` counts the imported target files, `receiptPath` points to the
+refreshed target receipt, and `postImportStatus` contains the verification:
+
+```json
+{
+  "ok": true,
+  "dryRun": false,
+  "readOnly": false,
+  "imported": {
+    "skills": ["foo"],
+    "files": 4
+  },
+  "receiptPath": "/tmp/openclaw/skills/.skill-suitcase-receipt.json",
+  "postImportStatus": { "ok": true, "statuses": [{ "skill": "foo", "status": "current" }] },
+  "errors": []
+}
+```
+
+### Drift audit / heartbeat
+
+`import-target` is the approval-gated tail of a lightweight drift audit. Run a
+periodic `status` / `diff` heartbeat across modeled writable targets to report
+when a catalog-owned skill has drifted `dirty` in a live target. Reporting drift
+is automatic; importing it is not. Treat a `dirty` catalog-owned target as stop
+and inspect: surface the target id, skill, receipt/catalog/target hashes, and the
+changed files, then run `import-target --dry-run` to preview the planned repo
+writes, and only run `import-target --apply` for that named skill after
+**explicit approval** that the drift is intentional and should become the repo
+version. A drift report must never trigger an implicit import.
+
+On failure (`ok: false`), `errors` contains objects with `code` and `message`
+(plus optional `skill` and `path`). Error codes include:
+
+- `invalid_skill_filter` — no non-blank `--skill` filter was provided
+- `invalid_import_mode` — neither or both of `--dry-run` and `--apply` were provided
+- `read_only_target` — the resolved target provider is modeled read-only
+- `missing_install_root` — the target could not be resolved to an install root
+- `already_current` — a selected skill already matches the catalog; import is a no-op
+- `route_to_promote` — a selected skill is `unknown`; add a target-created skill with `promote`, not `import-target`
+- `route_to_pack_apply` — a selected skill is `missing`, `behind`, or `version`; the catalog is ahead, so install/update with `pack` + `apply`
+- `blocked_skill` — compatibility rules block the selected skill for the target
+- `skill_not_planned` — a selected skill is not planned for the target
+- `unsafe_path` — the skill, source path, or target path would escape the approved roots
+- `unsupported_install_mode` — the selected skill is a symlink-mode install; the target already resolves to the catalog, so there is nothing to import
+- `unsupported_target_state` — the selected target has no usable `dirty` status entry to import
+- `catalog_diverged` — the target is `dirty` but the catalog also moved since the skill was tracked; reconcile the catalog (`pack` + `apply`, then `repair`) before importing, so a stale local copy never clobbers newer catalog work
+- `catalog_unreadable` / `unsafe_catalog_tree` / `missing_catalog` — the catalog source cannot be compared or copied safely
+- `target_unreadable` / `unsafe_target_tree` — the target contains symlinks, special entries, or unreadable state that cannot be imported safely
+- `invalid_receipt` — the existing receipt could not be read before mutation
+- `import_write_failed` — copying, swapping, verification, or receipt write failed and was rolled back best-effort
+- `post_status_unavailable` / `post_status_not_current` — post-import status verification failed
 
 ## Receipt Module
 
