@@ -140,11 +140,13 @@ node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex"
 node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
 node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 node "$CLI" promote --source "$SRC" --target-skill "$HOME/.codex/skills/new-skill" --dry-run --json
+node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
+node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 ```
 
 Do not run live `apply`, `track`, `reconcile --apply`, `repair --apply`,
-`rollback`, or `promote --apply` against Calvin's real agent homes without
-explicit approval for the target and mode.
+`rollback`, `promote --apply`, or `import-target --apply` against Calvin's real
+agent homes or catalog repo without explicit approval for the target and mode.
 
 ## Calvin-Local Versus Portable Support
 
@@ -160,6 +162,8 @@ Portable support:
   approved
 - targeted repair for selected receipt-owned dirty targets when explicitly
   approved
+- targeted import-target for selected receipt-owned dirty targets when the local
+  edit is intentional and explicitly approved
 - receipts, status, and rollback for Skill Suitcase-managed installs
 
 Calvin-local examples:

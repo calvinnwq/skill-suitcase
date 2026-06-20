@@ -49,6 +49,13 @@ skill. `promote --dry-run` reports the read-only plan and conflicts; `promote
 --apply` copies the target into the catalog, verifies it, replaces the target
 with a repo-pointing symlink, and writes a receipt.
 
+The `import-target` command preserves intentional edits made to an existing
+receipt-owned target skill. `import-target --dry-run` reports the target and
+catalog hashes plus planned repo writes without mutation; `import-target
+--apply` requires explicit approval, copies the target skill back into the
+catalog source, refreshes the target receipt, and leaves ordinary git changes
+for review.
+
 ## Install
 
 ```bash
@@ -87,6 +94,8 @@ node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target open
 node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --dry-run --json
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --apply --json
+node dist/src/cli.js import-target --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
+node dist/src/cli.js import-target --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
 ```
 
 `import --json` is a read-only onboarding inspection for existing skills repos.
@@ -132,10 +141,10 @@ node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --cla
 `skillsPath` to `<dir>/skills`. `--codex-skills <dir>` can override that skills
 path directly. `--claude-skills <dir>` overrides the `claude` skills root.
 These flags work with `targets`, `status`, `diff`, `pack`, `apply`, `track`,
-`reconcile`, and `repair`. Use `status --target <target>` with an assignment
-path id or assignment name. If an exact assignment path id exists, it wins, so
-`--target codex` means the global Codex target rather than every target assigned
-to Codex.
+`reconcile`, `repair`, and `import-target`. Use `status --target <target>` with
+an assignment path id or assignment name. If an exact assignment path id exists,
+it wins, so `--target codex` means the global Codex target rather than every
+target assigned to Codex.
 
 See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
@@ -176,9 +185,9 @@ find "$TMP" -maxdepth 3 -type f | sort
 rm -rf "$TMP"
 ```
 
-Live `apply`, `track`, `reconcile --apply`, `repair --apply`, `rollback`, or
-`promote --apply` should target disposable fixtures first or require explicit
-approval for the real agent home.
+Live `apply`, `track`, `reconcile --apply`, `repair --apply`, `rollback`,
+`promote --apply`, or `import-target --apply` should target disposable fixtures
+first or require explicit approval for the real agent home and catalog repo.
 
 ## Fresh Codex/Claude Machine
 
@@ -230,6 +239,16 @@ with `repair --apply` only after explicit approval:
 ```bash
 node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --dry-run --json
 node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --apply --json
+```
+
+If a selected receipt-owned skill is `dirty` because you intentionally edited it
+in the target and want that version in the catalog, stop and inspect the
+import-target plan first, then import back into the repo only after explicit
+approval:
+
+```bash
+node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --dry-run --json
+node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --apply --json
 ```
 
 Then apply missing or behind skills from a temporary bundle:
@@ -413,7 +432,7 @@ Each planned item records the resolved `variant` name, which defaults to
 declares a matching source variant for the resolved platform, `variant` is that
 variant's name and an extra `source` field carries its catalog-relative source
 path. These `variant` and `source` fields flow through `diff`, `pack`, `apply`,
-`track`, `reconcile`, `repair`, receipts, and `status`. See
+`track`, `reconcile`, `repair`, `import-target`, receipts, and `status`. See
 [`docs/portability-matrix.md`](docs/portability-matrix.md) for the variant
 selection rules.
 

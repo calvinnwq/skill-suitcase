@@ -30,13 +30,14 @@ variants:
 
 Planning picks the first variant whose `agents` match the resolved platform
 adapter aliases. The planned item carries that variant name and source path
-through `diff`, `pack`, `apply`, `track`, `reconcile`, `repair`, receipts, and
-`status`.
+through `diff`, `pack`, `apply`, `track`, `reconcile`, `repair`,
+`import-target`, receipts, and `status`.
 
 Use `compatibility.<skill>.blockedAgents` as the fallback guard when a platform
 needs a slimmer variant but the source catalog does not yet provide one. In that
 case the canonical OpenClaw bundle is blocked so `diff`, `pack`, `apply`,
-`track`, `reconcile`, and `repair` cannot blindly replace the live slimmer copy.
+`track`, `reconcile`, `repair`, and `import-target` cannot blindly replace the
+live slimmer copy.
 
 Use `import --source <skills-catalog> --json` when onboarding or changing
 variant metadata. It reports missing compatibility labels, missing variant agent
@@ -67,3 +68,5 @@ it when validating that:
   target.
 - `repair` refuses blocked or receipt-owned dirty targets whose planned source
   is not the correct slim variant.
+- `import-target` refuses blocked or receipt-owned dirty targets whose planned
+  catalog source is not the correct slim variant.
