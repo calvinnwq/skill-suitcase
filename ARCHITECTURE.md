@@ -26,6 +26,7 @@ src/
     reconcile.ts
     repair.ts
     promote.ts
+    import-target.ts
   core/
     planning/
     diffing/
@@ -37,6 +38,7 @@ src/
     reconcile/
     repair/
     promote/
+    import-target/
     receipts/
     status/
     install-modes.ts
@@ -240,6 +242,19 @@ Keep the command verbs separate:
   state, and must leave status current. Repair must not adopt unknown targets
   (use `track` or `reconcile`), install missing or behind skills (use `apply`),
   mutate symlink-mode installs, or operate without explicit `--skill` filters.
+- `import-target` imports an intentionally-edited receipt-owned copy-mode target
+  skill back into the catalog as the source-of-truth inverse of `repair`:
+  `repair` discards the local edit (catalog -> target), while `import-target`
+  keeps it (target -> catalog) so it can land in the skills repo through
+  review. `--dry-run` is deterministic and read-only; `--apply` is
+  approval-gated, copies the live target tree into the catalog source path
+  (atomic backup-and-swap + hash verify), refreshes the receipt
+  (`mode: "import"`) so the target reads `current`, and leaves the catalog as
+  ordinary git changes for review. Import-target must not adopt unknown targets
+  (use `track` or `reconcile`), install missing or behind skills (use `apply`),
+  promote a target-created skill (use `promote`), mutate symlink-mode installs,
+  operate without explicit `--skill` filters, or run implicitly from a drift
+  report.
 - `rollback` reverses prior `apply`, `reconcile`, or `repair` mutations using
   receipt rollback state.
 - `promote` turns a target-created skill (for example a skill an agent wrote
