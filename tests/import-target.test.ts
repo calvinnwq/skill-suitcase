@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -517,7 +517,7 @@ test("import-target apply restores the catalog and receipt when a write fails af
     skills: ["skill-cleaner"],
     apply: true,
     __test: { failAfterBackup: true }
-  } as Parameters<typeof importTarget>[0] & { __test: { failAfterBackup: boolean } });
+  });
 
   assert.equal(result.ok, false);
   assert.deepEqual(result.imported.skills, []);
@@ -531,4 +531,54 @@ test("import-target apply restores the catalog and receipt when a write fails af
   assert.equal(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8"), receiptBefore);
   assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), LOCAL_RUNTIME);
   assert.equal(await readFile(path.join(fixture.targetSkill, "extra.js"), "utf8"), LOCAL_EXTRA);
+});
+
+test("import-target apply removes partial staging when copying the target fails", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await editTheTarget(fixture);
+  const receiptBefore = await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8");
+
+  const result = await importTarget({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true,
+    __test: { failDuringCopy: true }
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.imported.skills, []);
+  assert.equal(result.imported.files, 0);
+  assert.equal(result.errors.some((error) => error.code === "import_write_failed" && error.skill === "skill-cleaner"), true);
+  assert.equal(await readFile(path.join(fixture.sourceSkill, "runtime.js"), "utf8"), CATALOG_RUNTIME);
+  await assert.rejects(readFile(path.join(fixture.sourceSkill, "extra.js"), "utf8"), /ENOENT/);
+  assert.equal(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8"), receiptBefore);
+  const catalogParentEntries = await readdir(path.dirname(fixture.sourceSkill));
+  assert.equal(catalogParentEntries.some((name) => name.includes("suitcase-import-next")), false);
+});
+
+test("import-target apply restores the catalog and receipt when post-import status verification fails", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await editTheTarget(fixture);
+  const receiptBefore = await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8");
+
+  const result = await importTarget({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true,
+    __test: { failPostStatus: true }
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.imported.skills, []);
+  assert.equal(result.imported.files, 0);
+  assert.equal(result.errors.some((error) => error.code === "post_status_unavailable"), true);
+  assert.equal(await readFile(path.join(fixture.sourceSkill, "runtime.js"), "utf8"), CATALOG_RUNTIME);
+  await assert.rejects(readFile(path.join(fixture.sourceSkill, "extra.js"), "utf8"), /ENOENT/);
+  assert.equal(await readFile(path.join(fixture.targetRoot, RECEIPT_FILE), "utf8"), receiptBefore);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), LOCAL_RUNTIME);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "extra.js"), "utf8"), LOCAL_EXTRA);
+  const catalogParentEntries = await readdir(path.dirname(fixture.sourceSkill));
+  assert.equal(catalogParentEntries.some((name) => name.includes("suitcase-pre-import")), false);
 });

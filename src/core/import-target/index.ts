@@ -26,6 +26,8 @@ export type ImportTargetInput = {
   targetOverrides?: TargetOverrides | undefined;
   __test?: {
     failAfterBackup?: boolean;
+    failDuringCopy?: boolean;
+    failPostStatus?: boolean;
   };
 };
 
@@ -254,8 +256,8 @@ async function executeImport(input: ImportTargetInput, plan: ImportTargetBaseRes
     let installed = false;
 
     try {
-      await copyTree(targetPath, tmpPath);
       copied = true;
+      await copyTree(targetPath, tmpPath, { failAfterCreate: input.__test?.failDuringCopy === true });
       if (!(await treesMatch(targetPath, tmpPath))) {
         throw new Error(`Staged catalog copy for ${candidate.skill} does not match the live target.`);
       }
@@ -320,11 +322,7 @@ async function executeImport(input: ImportTargetInput, plan: ImportTargetBaseRes
       if (copied) {
         await removePath(tmpPath);
       }
-      await restoreOriginalReceipt({ receiptPath, previousReceiptText });
-      for (const done of completed.reverse()) {
-        await removePath(done.catalogPath);
-        await restorePath(done.backupPath, done.catalogPath);
-      }
+      await restoreCompletedImports({ completed, receiptPath, previousReceiptText });
       importedSkills.length = 0;
       importedFiles = 0;
       completed.length = 0;
@@ -360,12 +358,6 @@ async function executeImport(input: ImportTargetInput, plan: ImportTargetBaseRes
     }
   }
 
-  // Every swap succeeded: drop the catalog-side backups so the repo is left with
-  // only the ordinary git changes an operator reviews.
-  for (const done of completed) {
-    await removePath(done.backupPath);
-  }
-
   const statusInput: Parameters<typeof status>[0] = {
     source: plan.source,
     target: input.target
@@ -373,21 +365,52 @@ async function executeImport(input: ImportTargetInput, plan: ImportTargetBaseRes
   if (input.targetOverrides !== undefined) {
     statusInput.targetOverrides = input.targetOverrides;
   }
-  const postImportStatus = await status(statusInput).catch(() => null);
+  const postImportStatus = input.__test?.failPostStatus === true
+    ? null
+    : await status(statusInput).catch(() => null);
   const postStatusErrors = postStatusCurrentErrors({
     postImportStatus,
     plan,
     inputTarget: input.target
   });
+  if (postStatusErrors.length > 0) {
+    await restoreCompletedImports({ completed, receiptPath, previousReceiptText });
+    return {
+      ...plan,
+      ok: false,
+      dryRun: false,
+      readOnly: false,
+      refused: {
+        skills: [...new Set([...plan.refused.skills, ...plan.candidates.map((candidate) => candidate.skill)])].sort()
+      },
+      summary: {
+        ...plan.summary,
+        refused: Math.max(plan.summary.refused, plan.candidates.length)
+      },
+      errors: [
+        ...plan.errors,
+        ...postStatusErrors
+      ],
+      imported: {
+        skills: [],
+        files: 0
+      },
+      receiptPath: null,
+      postImportStatus
+    };
+  }
+
+  for (const done of completed) {
+    await removePath(done.backupPath);
+  }
 
   return {
     ...plan,
-    ok: postStatusErrors.length === 0,
+    ok: true,
     dryRun: false,
     readOnly: false,
     errors: [
-      ...plan.errors,
-      ...postStatusErrors
+      ...plan.errors
     ],
     imported: {
       skills: importedSkills.sort(),
@@ -396,6 +419,22 @@ async function executeImport(input: ImportTargetInput, plan: ImportTargetBaseRes
     receiptPath: receiptPathWritten,
     postImportStatus
   };
+}
+
+async function restoreCompletedImports({
+  completed,
+  receiptPath,
+  previousReceiptText
+}: {
+  completed: Array<{ catalogPath: string; backupPath: string }>;
+  receiptPath: string;
+  previousReceiptText: string | null;
+}): Promise<void> {
+  await restoreOriginalReceipt({ receiptPath, previousReceiptText });
+  for (const done of [...completed].reverse()) {
+    await removePath(done.catalogPath);
+    await restorePath(done.backupPath, done.catalogPath);
+  }
 }
 
 /**
@@ -1210,11 +1249,18 @@ async function listFiles(root: string): Promise<string[]> {
   return files.sort();
 }
 
-async function copyTree(sourcePath: string, targetPath: string): Promise<void> {
+async function copyTree(
+  sourcePath: string,
+  targetPath: string,
+  options: { failAfterCreate?: boolean } = {}
+): Promise<void> {
   if (isSameOrInsidePath(targetPath, sourcePath)) {
     throw new Error(`Refusing to copy ${sourcePath} into nested destination ${targetPath}.`);
   }
   await mkdir(targetPath, { recursive: true });
+  if (options.failAfterCreate === true) {
+    throw new Error("Injected failure during copy.");
+  }
   const entries = await readdir(sourcePath, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
