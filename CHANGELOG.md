@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.8.0...v0.9.0) (2026-06-21)
+
+
+### Features
+
+* block untracked source files during materialization ([de52788](https://github.com/calvinnwq/skill-suitcase/commit/de527885054d36e83e96e6b924231f44c251a877))
+* **core:** block untracked source materialization ([3be7030](https://github.com/calvinnwq/skill-suitcase/commit/3be70307747cdd3cd5572ab689e6d22694624658))
+
 ## [0.8.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.7.0...v0.8.0) (2026-06-20)
 
 
