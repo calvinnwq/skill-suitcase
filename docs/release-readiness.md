@@ -128,6 +128,9 @@ node "$CLI" diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --js
 
 Staging workflows are the next step. They may create an artifact under an
 explicit temporary output directory, but still do not write into agent homes.
+For Git-backed catalogs, selected source skills must not contain untracked,
+non-ignored files; track or remove those files before generating packs or plan
+locks.
 
 ```bash
 TMP="$(mktemp -d /tmp/skill-suitcase-pack.XXXXXX)"

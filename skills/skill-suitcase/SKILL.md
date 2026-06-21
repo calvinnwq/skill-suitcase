@@ -168,6 +168,10 @@ ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
 "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 ```
 
+For Git-backed catalogs, `pack`, plan-lock creation, and `apply` refuse selected
+source skills that contain untracked, non-ignored files. Track or remove scratch
+files in the selected skill before trying to materialize it.
+
 For another target, keep the same pattern and replace only the target id and
 override flags from the matrix.
 

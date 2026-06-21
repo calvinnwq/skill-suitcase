@@ -19,6 +19,11 @@ export type SourceHygieneResult = {
   errors: SourceHygieneError[];
 };
 
+/**
+ * Checks selected source skill directories before a command snapshots or
+ * installs them. Git-backed catalogs must not materialize untracked,
+ * non-ignored files from selected source skills; non-Git sources remain allowed.
+ */
 export function checkSelectedSourceHygiene({
   sourceRoot,
   plannedSkills

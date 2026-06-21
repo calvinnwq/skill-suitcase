@@ -138,6 +138,9 @@ The durable state model belongs to Skill Suitcase:
 
 - manifests describe approved skills, variants, assignments, and target paths
 - plans and diffs explain what would change before any mutation
+- source hygiene gates ensure materialization boundaries only snapshot or install
+  selected Git-backed source skills after untracked, non-ignored files are
+  removed or tracked
 - receipts record ownership, source provenance, install mode, file hashes, and
   rollback state
 - status decides whether a target is current, missing, dirty, blocked, unknown,
