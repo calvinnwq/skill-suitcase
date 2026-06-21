@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 
 export type PlannedSourceSkill = {
@@ -37,11 +38,15 @@ export function checkSelectedSourceHygiene({
     return { ok: true, errors: [] };
   }
 
-  const sourceRoots = selected.map((item) => ({
-    skill: item.skill,
-    absolutePath: path.resolve(item.sourcePath),
-    gitPath: normalizeGitPath(path.relative(gitRoot, path.resolve(item.sourcePath)))
-  }));
+  const sourceRoots = selected.map((item) => {
+    const comparablePath = resolveComparablePath(item.sourcePath);
+    return {
+      skill: item.skill,
+      absolutePath: path.resolve(item.sourcePath),
+      comparablePath,
+      gitPath: normalizeGitPath(path.relative(gitRoot, comparablePath))
+    };
+  });
   const outsideRepo = sourceRoots.filter(
     (item) => item.gitPath.length === 0 || item.gitPath.startsWith("..") || path.isAbsolute(item.gitPath)
   );
@@ -88,11 +93,11 @@ export function checkSelectedSourceHygiene({
   const pathsBySkill = new Map<string, string[]>();
   for (const gitPath of untrackedPaths) {
     const absolutePath = path.resolve(gitRoot, gitPath);
-    const owner = sourceRoots.find((item) => isInsideOrEqual(absolutePath, item.absolutePath));
+    const owner = sourceRoots.find((item) => isInsideOrEqual(absolutePath, item.comparablePath));
     if (owner === undefined) {
       continue;
     }
-    const relativePath = normalizeGitPath(path.relative(owner.absolutePath, absolutePath));
+    const relativePath = normalizeGitPath(path.relative(owner.comparablePath, absolutePath));
     const current = pathsBySkill.get(owner.skill) ?? [];
     current.push(relativePath);
     pathsBySkill.set(owner.skill, current);
@@ -125,7 +130,7 @@ function resolveGitRoot(sourceRoot: string): string | null {
     return null;
   }
   const gitRoot = result.stdout.trim();
-  return gitRoot.length > 0 ? path.resolve(gitRoot) : null;
+  return gitRoot.length > 0 ? resolveComparablePath(gitRoot) : null;
 }
 
 function isInsideOrEqual(candidate: string, root: string): boolean {
@@ -135,4 +140,13 @@ function isInsideOrEqual(candidate: string, root: string): boolean {
 
 function normalizeGitPath(value: string): string {
   return value.split(path.sep).join("/");
+}
+
+function resolveComparablePath(value: string): string {
+  const absolutePath = path.resolve(value);
+  try {
+    return realpathSync.native(absolutePath);
+  } catch {
+    return absolutePath;
+  }
 }
