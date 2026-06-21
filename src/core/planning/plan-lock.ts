@@ -4,6 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog } from "../catalog/index.js";
 import { plan, type PlanResult } from "./index.js";
+import { checkSelectedSourceHygiene } from "../source-hygiene.js";
 
 export const PLAN_LOCK_SCHEMA = "calvinnwq.skills.plan-lock.v0";
 
@@ -64,6 +65,14 @@ export async function buildPlanLock({
     throw new Error(
       `Cannot create lock for invalid plan target ${target}: ${planResult.errors[0]?.message}`
     );
+  }
+
+  const hygiene = checkSelectedSourceHygiene({
+    sourceRoot,
+    plannedSkills: planResult.planned
+  });
+  if (!hygiene.ok) {
+    throw new Error(`Cannot create lock for unclean source: ${hygiene.errors[0]?.message}`);
   }
 
   const normalizedAssignmentPath = normalizeValue(assignmentPath);

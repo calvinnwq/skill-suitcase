@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -248,6 +249,76 @@ assignments:
   assert.deepEqual(Object.keys(lock.fileHashes["office-hours"] ?? {}), ["SKILL.md"]);
 });
 
+test("buildPlanLock refuses selected source skills with untracked git files", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-plan-lock-untracked-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+
+  const skillRoot = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "---\nname: office-hours\n---\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+`
+  );
+  git(sourceRoot, "init");
+  git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md");
+  await writeFile(path.join(skillRoot, "untracked-notes.md"), "not tracked yet\n");
+
+  await assert.rejects(
+    () => buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }),
+    /untracked-notes\.md/
+  );
+});
+
+test("buildPlanLock allows ignored untracked files in selected source skills", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-plan-lock-ignored-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+
+  const skillRoot = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "---\nname: office-hours\n---\n");
+  await writeFile(path.join(sourceRoot, ".gitignore"), "*.tmp\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+`
+  );
+  git(sourceRoot, "init");
+  git(sourceRoot, "add", ".gitignore", "skill-suitcase.yaml", "skills/office-hours/SKILL.md");
+  await writeFile(path.join(skillRoot, "ignored.tmp"), "ignored by git\n");
+
+  const lock = await buildPlanLock({
+    source: sourceRoot,
+    target: "openclaw",
+    assignmentPath: "openclaw",
+    sourceCommit: "deadbeef"
+  });
+
+  assert.deepEqual(Object.keys(lock.fileHashes["office-hours"] ?? {}).sort(), ["SKILL.md", "ignored.tmp"]);
+});
+
 test("assessPlanLock returns valid when the lock matches the current plan state", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-plan-lock-valid-"));
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));
@@ -346,3 +417,12 @@ assignmentPaths:
   assert.ok(status.reasons.includes("source_ref_changed"));
   assert.ok(status.reasons.includes("plan_id_changed"));
 });
+
+function git(cwd: string, ...args: string[]): void {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  assert.equal(result.status, 0, result.stderr);
+}

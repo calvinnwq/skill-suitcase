@@ -19,6 +19,7 @@ import {
   type ReceiptInstallRecord
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
+import { checkSelectedSourceHygiene } from "../source-hygiene.js";
 import { status } from "../status/index.js";
 
 type ApplyInput = {
@@ -253,6 +254,32 @@ export async function apply({
         summary: emptyStatusSummary()
       },
       errors: diffFailureErrors(diffResult)
+    });
+  }
+
+  const hygiene = checkSelectedSourceHygiene({
+    sourceRoot: diffResult.source,
+    plannedSkills: diffResult.planned
+  });
+  if (!hygiene.ok) {
+    return failure({
+      source: diffResult.source,
+      target,
+      mode: context.mode,
+      input: context.input,
+      assignment: diffResult.assignment,
+      planTarget: diffResult.target,
+      installRoot: diffResult.installRoot,
+      summary: asSummary(diffResult),
+      preApplyStatus: {
+        source: diffResult.source,
+        statuses: [],
+        summary: emptyStatusSummary()
+      },
+      errors: hygiene.errors.map((error) => ({
+        code: error.code,
+        message: error.message
+      }))
     });
   }
 
