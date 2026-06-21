@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -95,7 +96,8 @@ test("pack writes an explicit staging bundle under managed artifact storage", as
       ref: string;
       manifestPath: string;
     };
-    files: Array<{ sha256: string }>;
+    files: Array<{ skill: string; relativePath: string; sha256: string }>;
+    fileHashes: Record<string, Record<string, string>>;
   };
   assert.equal(manifest.schema, "calvinnwq.skills.pack-bundle.v0");
   assert.equal(manifest.artifactId, result.bundle.artifactId);
@@ -106,9 +108,114 @@ test("pack writes an explicit staging bundle under managed artifact storage", as
   assert.ok(Array.isArray(manifest.files));
   assert.ok(manifest.files.length > 0);
   assert.ok(manifest.files.every((file) => /^[a-f0-9]{64}$/.test(file.sha256)));
+  const skillFile = manifest.files.find((file) => file.skill === "office-hours" && file.relativePath === "SKILL.md");
+  assert.ok(skillFile);
+  assert.equal(manifest.fileHashes["office-hours"]?.["SKILL.md"], skillFile.sha256);
   assert.equal(manifest.source.repo, result.source);
 
   await access(path.join(result.bundle.artifactPath, "skills", "office-hours", "SKILL.md"));
+});
+
+test("pack refuses selected source skills with untracked git files", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-untracked-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "# Office Hours\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+`
+  );
+  git(source, "init");
+  git(source, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md");
+  await writeFile(path.join(skillRoot, "new-migration.py"), "print('new')\n");
+
+  const result = await pack({ source, target: "openclaw", dryRun: true });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.files, 0);
+  assert.equal(result.files.length, 0);
+  const hygieneError = result.errors.find((error) => error.code === "source_untracked_files");
+  assert.ok(hygieneError);
+  assert.equal(hygieneError.skill, "office-hours");
+  assert.match(hygieneError.message, /new-migration\.py/);
+});
+
+test("pack ignores untracked files outside selected source skills", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-unselected-untracked-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+
+  await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });
+  await mkdir(path.join(source, "skills", "skillify"), { recursive: true });
+  await writeFile(path.join(source, "skills", "office-hours", "SKILL.md"), "# Office Hours\n");
+  await writeFile(path.join(source, "skills", "skillify", "SKILL.md"), "# Skillify\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+  unselected:
+    skills:
+      - skillify
+
+assignments:
+  codex:
+    suitcases:
+      - core
+`
+  );
+  git(source, "init");
+  git(source, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md", "skills/skillify/SKILL.md");
+  await writeFile(path.join(source, "skills", "skillify", "scratch.md"), "not selected\n");
+
+  const result = await pack({ source, target: "codex", dryRun: true });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.planned.map((item) => item.skill), ["office-hours"]);
+  assert.equal(result.errors.length, 0);
+});
+
+test("pack allows ignored untracked files in selected source skills", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-ignored-untracked-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "# Office Hours\n");
+  await writeFile(path.join(source, ".gitignore"), "*.tmp\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+`
+  );
+  git(source, "init");
+  git(source, "add", ".gitignore", "skill-suitcase.yaml", "skills/office-hours/SKILL.md");
+  await writeFile(path.join(skillRoot, "ignored.tmp"), "ignored by git\n");
+
+  const result = await pack({ source, target: "openclaw", dryRun: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.errors.length, 0);
 });
 
 test("pack allows existing output directories and refuses artifact-id overwrite", async (t) => {
@@ -277,3 +384,12 @@ variants:
   assert.equal(result.files[0]?.sourcePath, path.join(codex, "SKILL.md"));
   assert.equal(result.files[0]?.bundlePath, "skills/gnhf-postflight/SKILL.md");
 });
+
+function git(cwd: string, ...args: string[]): void {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  assert.equal(result.status, 0, result.stderr);
+}

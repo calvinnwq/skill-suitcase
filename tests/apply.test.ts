@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -486,6 +487,80 @@ test("apply refuses artifact with blocked plan entries", async (t) => {
   assert.equal(result.mode, "artifact");
   assert.equal(result.errors.some((error) => error.code === "artifact_blocked"), true);
   assert.equal(result.errors[0]?.code, "artifact_blocked");
+});
+
+test("apply refuses artifact installs when selected source has untracked files", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-untracked-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-untracked-target-"));
+  const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-untracked-artifact-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(artifactRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"baseline\");\n");
+  git(sourceRoot, "init");
+  git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md", "skills/office-hours/runtime.js");
+  await writeFile(path.join(sourceSkill, "untracked.js"), "console.log('not approved');\n");
+
+  const manifestPath = await writeArtifactManifest(artifactRoot, {
+    sourceRoot,
+    target: "openclaw",
+    plannedSkills: ["office-hours"]
+  });
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    artifact: manifestPath
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "source_untracked_files");
+  assert.match(result.errors[0]?.message ?? "", /untracked\.js/);
+  await assert.rejects(() => lstat(path.join(targetRoot, "office-hours", "untracked.js")));
+});
+
+test("apply refuses lock installs when selected source becomes untracked after lock creation", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-lock-untracked-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-lock-untracked-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"baseline\");\n");
+  git(sourceRoot, "init");
+  git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md", "skills/office-hours/runtime.js");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-lock-untracked-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+  await writeFile(path.join(sourceSkill, "untracked.js"), "console.log('not approved');\n");
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "plan_lock_current_plan_unavailable");
+  assert.match(result.errors[0]?.message ?? "", /current_plan_unavailable/);
+  await assert.rejects(() => lstat(path.join(targetRoot, "office-hours", "untracked.js")));
 });
 
 test("apply reports blocked canonical variants before mutating Codex targets", async (t) => {
@@ -2797,3 +2872,12 @@ test("apply --mode symlink rejects source paths whose realpath escapes the sourc
   assert.equal(result.errors.some((error) => error.code === "symlink_source_escape"), true);
   await assert.rejects(lstat(path.join(targetRoot, "office-hours")));
 });
+
+function git(cwd: string, ...args: string[]): void {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  assert.equal(result.status, 0, result.stderr);
+}

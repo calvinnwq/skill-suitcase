@@ -36,6 +36,10 @@ node dist/src/cli.js pack --source /path/to/skills-catalog --target openclaw --d
 node dist/src/cli.js status --source /path/to/skills-catalog --json
 ```
 
+For Git-backed catalogs, `pack` refuses selected source skills with untracked,
+non-ignored files. Commit, stage, or remove scratch files inside selected skills
+before expecting the pack smoke to pass.
+
 For a Codex/Claude-only machine, smoke local target overrides and target-scoped
 status without requiring OpenClaw paths from the shared catalog to exist:
 

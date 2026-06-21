@@ -5,6 +5,7 @@ import path from "node:path";
 import { loadCatalog, type LoadedCatalog, type TargetOverrides } from "../catalog/index.js";
 import { plan } from "../planning/index.js";
 import { type PlanResult } from "../planning/index.js";
+import { checkSelectedSourceHygiene } from "../source-hygiene.js";
 
 const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_MANIFEST = "skill-suitcase-bundle.json";
@@ -73,6 +74,7 @@ type PackArtifact = {
   planned: PlanLike[];
   blocked: PlanLike[];
   files: PackedFile[];
+  fileHashes: Record<string, Record<string, string>>;
   summary: PackArtifactSummary;
   createdAt: string;
 };
@@ -115,10 +117,19 @@ export async function pack({
   const planTarget = resolvePlanTarget(manifest, target);
   const planResult: PlanResult = await plan({ source: sourceRoot, target: planTarget });
   const files: PackedFile[] = [];
+  const errors: ErrorLike[] = [...planResult.errors];
 
   if (planResult.ok) {
-    for (const plannedSkill of planResult.planned) {
-      files.push(...(await collectSkillFiles(plannedSkill)));
+    const hygiene = checkSelectedSourceHygiene({
+      sourceRoot,
+      plannedSkills: planResult.planned
+    });
+    if (!hygiene.ok) {
+      errors.push(...hygiene.errors);
+    } else {
+      for (const plannedSkill of planResult.planned) {
+        files.push(...(await collectSkillFiles(plannedSkill)));
+      }
     }
   }
 
@@ -134,7 +145,7 @@ export async function pack({
   });
 
   const result: PackResult = {
-    ok: planResult.ok,
+    ok: planResult.ok && errors.length === 0,
     dryRun,
     source: sourceRoot,
     target,
@@ -151,7 +162,7 @@ export async function pack({
     blocked: planResult.blocked,
     files,
     summary: artifact.summary,
-    errors: planResult.errors
+    errors
   };
 
   if (output) {
@@ -206,6 +217,7 @@ function buildArtifactRecord({
     planned,
     blocked,
     files,
+    fileHashes: buildFileHashes(files),
     summary,
     createdAt: new Date().toISOString()
   };
@@ -243,6 +255,7 @@ function computeArtifactId(artifact: Omit<PackArtifact, "id">): string {
       sha256: item.sha256,
       bytes: item.bytes
     })),
+    fileHashes: artifact.fileHashes,
     summary: artifact.summary,
     schema: BUNDLE_SCHEMA
   };
@@ -282,6 +295,7 @@ function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {
     action: artifact.action,
     createdAt: artifact.createdAt,
     summary: artifact.summary,
+    fileHashes: artifact.fileHashes,
     files: artifact.files.map((item) => ({
       skill: item.skill,
       relativePath: item.relativePath,
@@ -307,6 +321,21 @@ function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {
       evidence: item.evidence
     }))
   };
+}
+
+function buildFileHashes(files: PackedFile[]): Record<string, Record<string, string>> {
+  const bySkill = new Map<string, Record<string, string>>();
+  for (const file of files) {
+    const current = bySkill.get(file.skill) ?? {};
+    current[file.relativePath] = file.sha256;
+    bySkill.set(file.skill, current);
+  }
+
+  const result: Record<string, Record<string, string>> = {};
+  for (const [skill, hashes] of [...bySkill.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    result[skill] = stableObject(hashes) as Record<string, string>;
+  }
+  return result;
 }
 
 function resolvePlanTarget(manifest: LoadedCatalog["manifest"], target: string): string {

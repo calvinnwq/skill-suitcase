@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { constants } from "node:fs";
-import { access, chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -120,6 +121,49 @@ assignments:
     ]
   );
   assert.equal(result.summary.warnings, 2);
+});
+
+test("import inspection remains loose when a source skill has untracked files", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-import-untracked-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "# Office Hours\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: /tmp/openclaw/skills
+
+compatibility:
+  office-hours:
+    agents:
+      - openclaw
+    variant: canonical
+`
+  );
+  git(source, "init");
+  git(source, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md");
+  await writeFile(path.join(skillRoot, "scratch.md"), "still importable\n");
+
+  const result = await inspectImportSource({ source });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.discoveredSkills, 1);
+  assert.equal(result.summary.findings, 0);
 });
 
 test("ignores support-only directories marked under skills", async () => {
@@ -466,3 +510,12 @@ variants:
     ]
   );
 });
+
+function git(cwd: string, ...args: string[]): void {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  assert.equal(result.status, 0, result.stderr);
+}

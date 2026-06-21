@@ -192,6 +192,10 @@ ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
 skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
 ```
 
+For Git-backed catalogs, staged artifacts and plan locks refuse selected source
+skills with untracked, non-ignored files. Track or remove scratch files inside a
+selected skill before packing or applying it.
+
 For Claude, use:
 
 ```bash

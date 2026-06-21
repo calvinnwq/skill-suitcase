@@ -9,8 +9,9 @@ status reports without touching target install paths or runtime homes.
 
 The `apply` command materializes skills in target install paths. It requires
 an explicit approval input (plan-lock or staging artifact), refuses dirty or
-unmanaged targets, writes copy installs transactionally, can create approved
-repo-pointing symlinks with `--mode symlink`, and emits receipts.
+unmanaged targets or untracked selected source files, writes copy installs
+transactionally, can create approved repo-pointing symlinks with
+`--mode symlink`, and emits receipts.
 
 The `rollback` command reverses receipt-backed apply, reconcile, or repair
 changes. It restores recorded previous contents, removes files, directories, or
@@ -524,6 +525,13 @@ be either an assignment name (`openclaw`) or an `assignmentPath` id
 (`codex`). The resolved assignment drives the plan, while the output and
 stored manifest `target` field echoes the value you passed.
 
+When the source is a Git checkout, `pack` refuses to materialize any selected
+source skill that contains untracked, non-ignored files. Track or remove those
+files before packing. Ignored files and untracked files outside the selected
+source skills do not block the pack. Hygiene failures surface in `errors` as
+`source_untracked_files`, `source_path_outside_repo`, or
+`source_hygiene_failed`.
+
 ```json
 {
   "ok": true,
@@ -583,8 +591,9 @@ Each artifact directory contains:
 - staged skill files under `skills/<skill-name>/...`
 
 The stored manifest uses schema `calvinnwq.skills.pack-bundle.v0` and records
-`artifactId`, `source`, `target`, `action`, `createdAt`, `summary`, `files`,
-`planned`, and `blocked`. `source` includes the resolved catalog repo,
+`artifactId`, `source`, `target`, `action`, `createdAt`, `summary`,
+`fileHashes`, `files`, `planned`, and `blocked`. `fileHashes` maps each packed
+skill to its per-file SHA-256 hashes. `source` includes the resolved catalog repo,
 `skill-suitcase.yaml` path, and best-effort `git rev-parse HEAD` commit/ref;
 the commit and ref are `null` when the source is not a Git checkout. Stored
 manifest `sourcePath` values are relative to the catalog source root.
@@ -759,10 +768,10 @@ name, `status` returns `ok: false` with an `unknown_target` error.
 
 `apply` requires exactly one of `--lock` (a plan-lock file path) or `--artifact`
 (a staging bundle path or directory). It validates the approval input, checks
-pre-apply target status, materializes planned skills, and emits a receipt per
-skill. Copy-mode receipts capture the pre-apply state of every written file (a
-`rollback` record) so the install can later be reversed with `skill-suitcase
-rollback`.
+pre-apply target status, verifies selected source hygiene for Git-backed
+catalogs, materializes planned skills, and emits a receipt per skill. Copy-mode
+receipts capture the pre-apply state of every written file (a `rollback` record)
+so the install can later be reversed with `skill-suitcase rollback`.
 
 `--mode` selects how each planned skill is materialized. The default
 `--mode copy` writes the source files into the target root. `--mode symlink`
@@ -811,6 +820,10 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
 - `artifact_target_mismatch` / `artifact_source_mismatch` — approval metadata does not match the apply invocation
 - `artifact_blocked` — artifact contains blocked plan entries
 - `artifact_missing_planned` — artifact contains no planned skills
+- `source_untracked_files` — a selected source skill contains untracked,
+  non-ignored files; track or remove them before packing/applying
+- `source_path_outside_repo` / `source_hygiene_failed` — source hygiene could
+  not prove that the selected source skill is inside the Git checkout and clean
 - `diff_*` — a target-resolution error propagated from the diff layer;
   `diff_blocked_skill` reports a planned skill that is blocked for the target
   (for example when a required source variant is missing)
@@ -1576,6 +1589,10 @@ Symlinks, `__pycache__` directories, and `.pyc` files are ignored. If
 `sourceCommit` is omitted, the module attempts `git rev-parse HEAD` from the
 source root and records `null` when no commit can be resolved.
 
+When the source is a Git checkout, lock creation refuses selected source skills
+with untracked, non-ignored files so a lock cannot approve files outside Git
+tracking. Ignored files can still be included in the deterministic file hashes.
+
 `assessPlanLock` rebuilds the lock from current state and returns `valid: true`
 if nothing changed, or `valid: false` with one or more `reasons` strings
 describing what drifted. Reason codes include `invalid_lock`,
@@ -1583,6 +1600,7 @@ describing what drifted. Reason codes include `invalid_lock`,
 `source_ref_changed`, `source_commit_changed`, `target_changed`,
 `assignment_path_changed`, `selected_skills_changed`, `plan_entries_changed`,
 `file_hashes_changed`, `plan_id_changed`, and `invalid_lock_schema`.
+An unclean selected source skill makes the current plan unavailable.
 
 This module does not write files or require the apply/install layer to exist.
 

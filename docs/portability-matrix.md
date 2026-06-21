@@ -52,6 +52,11 @@ They do not create or infer a variant model. If a platform needs a different
 source shape, add that model to `variants` in the source catalog first, then
 generate a pack from that catalog state.
 
+For Git-backed catalogs, pack and apply materialization refuse untracked,
+non-ignored files inside the selected variant source path. Track or remove those
+files before generating a pack so the snapshot only contains reviewed source
+state.
+
 ## Regression Fixture
 
 `tests/fixtures/skills-catalog/skill-suitcase.yaml` keeps `gnhf-postflight`
