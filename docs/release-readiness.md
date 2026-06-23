@@ -120,6 +120,7 @@ CLI="$PWD/dist/src/cli.js"
 
 node "$CLI" import --source "$SRC" --json
 node "$CLI" validate --source "$SRC" --strict --json
+node "$CLI" upstream check --source "$SRC" --json
 node "$CLI" targets --source "$SRC" --json
 node "$CLI" plan --source "$SRC" --target codex --json
 node "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
@@ -139,6 +140,19 @@ find "$TMP" -maxdepth 3 -type f | sort
 rm -rf "$TMP"
 ```
 
+Catalog-only upstream refresh is separate from live target mutation.
+Run `upstream check` first, use `upstream fetch --dry-run` to inspect one
+selected skill in an isolated temp workspace/home, and run
+`upstream import --apply` only after approval for the catalog source update:
+
+```bash
+node "$CLI" upstream fetch --source "$SRC" --skill existing-skill --dry-run --json
+node "$CLI" upstream import --source "$SRC" --skill existing-skill --apply --json
+```
+
+The import writes only `skills/<name>` and
+`.skill-suitcase/upstream-lock.json`, never live agent homes.
+
 Live mutation requires explicit approval input and should start in disposable
 fixtures or a clearly approved target:
 
@@ -155,8 +169,9 @@ node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.co
 ```
 
 Do not run live `apply`, `track`, `reconcile --apply`, `repair --apply`,
-`rollback`, `promote --apply`, or `import-target --apply` against Calvin's real
-agent homes or catalog repo without explicit approval for the target and mode.
+`rollback`, `promote --apply`, `import-target --apply`, or
+`upstream import --apply` against Calvin's real agent homes or catalog repo
+without explicit approval for the target, catalog source, and mode.
 
 ## Calvin-Local Versus Portable Support
 
@@ -166,7 +181,9 @@ Portable support:
 - target overrides such as `--codex-home`, `--codex-skills`, and
   `--claude-skills`
 - read-only planning, diffing, status, target discovery, validation, and import
+- read-only upstream declaration checks and sandboxed upstream fetch diffs
 - staging bundles and plan locks
+- catalog-only upstream imports for declared, pinned source refreshes
 - copy and symlink apply modes when explicitly approved
 - targeted reconcile for selected unknown catalog-owned targets when explicitly
   approved

@@ -27,6 +27,7 @@ src/
     repair.ts
     promote.ts
     import-target.ts
+    upstream.ts
   core/
     planning/
     diffing/
@@ -39,6 +40,7 @@ src/
     repair/
     promote/
     import-target/
+    upstream/
     receipts/
     status/
     install-modes.ts
@@ -89,6 +91,7 @@ Command modules should stay thin. They adapt the outside world to core code.
 - apply/install workflows
 - rollback, reconcile, repair, import-target, and existing-install adoption
   workflows
+- upstream-managed catalog source refresh workflows
 - install mode classification and safety checks
 - receipt creation and validation
 - catalog, manifest, target, and validation rules
@@ -193,7 +196,7 @@ An upstream-managed skill is still a catalog-owned skill. The catalog stores the
 reviewed source files, target assignments, variants, and install policy. The
 upstream provider only describes where a fresh source copy can be fetched from.
 
-The first supported upstream lane is planned for `skills.sh` / `npx skills`.
+The first supported upstream lane is for `skills.sh` / `npx skills`.
 Its v1 boundary is source refresh only:
 
 ```txt
@@ -317,6 +320,15 @@ Keep the command verbs separate:
 - `promote` turns a target-created skill (for example a skill an agent wrote
   into an agent home directory) into a repo-owned catalog skill. `--dry-run`
   runs a read-only plan; `--apply` runs the approval-gated live promotion.
+- `upstream` refreshes catalog source for declared upstream-managed skills.
+  `upstream check` is read-only and reports declaration health, pinned package
+  runner availability, and catalog hash drift. `upstream fetch --dry-run` runs
+  the pinned fetch in an isolated temp workspace/home and reports a file-level
+  catalog diff. `upstream import --apply` refuses dirty selected catalog source,
+  repeats the pinned fetch, copies only the selected skill into the catalog
+  source tree, updates `.skill-suitcase/upstream-lock.json`, and leaves ordinary
+  repository diffs for review. It must not write live target homes, receipts, or
+  commits.
 
 A target-created skill must not be handled by `track` unless it already exists
 in the catalog and matches the selected source. For a new skill created inside
@@ -346,6 +358,8 @@ Live mutations require explicit approval input or an approved command mode:
 - creating or replacing symlinks in an agent home
 - writing receipts
 - copying target-created skills into the catalog repo
+- importing upstream-managed source into the catalog repo
+- updating `.skill-suitcase/upstream-lock.json`
 - editing manifest metadata during promotion
 - deleting or trashing prior target state
 

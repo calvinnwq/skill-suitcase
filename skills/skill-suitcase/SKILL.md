@@ -1,6 +1,6 @@
 ---
 name: skill-suitcase
-description: Use when asked to install, audit, sync, track, reconcile, repair, import-target, apply, rollback, or explain Skill Suitcase-managed agent skills, including dirty repair/import flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, or another machine using a skills catalog.
+description: Use when asked to install, audit, sync, track, reconcile, repair, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, or another machine using a skills catalog.
 ---
 
 # Skill Suitcase
@@ -13,7 +13,8 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
 
 - Treat read-only commands as the default path: `import`, `validate --strict`,
   `targets`, `plan`, `status`, `diff`, `pack --dry-run`, and
-  `upstream check`.
+  `upstream check`; when explicitly refreshing source, use
+  `upstream fetch --dry-run` before `upstream import --apply`.
 - Mutate live skill roots only after explicit human approval naming the target
   and action.
 - Work one target at a time. Do not bulk-repair every target after seeing a
@@ -104,6 +105,7 @@ Run the catalog gates first:
 ```bash
 "$CLI" import --source "$SRC" --json
 "$CLI" validate --source "$SRC" --strict --json
+"$CLI" upstream check --source "$SRC" --json
 "$CLI" targets --source "$SRC" --json
 "$CLI" status --source "$SRC" --json
 ```

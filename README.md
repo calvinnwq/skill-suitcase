@@ -2,10 +2,11 @@
 
 Skill Suitcase is a CLI for planning portable skill installs from a catalog repo.
 
-Read-only commands (`plan`, `diff`, `pack`, `import`, `validate`, `targets`,
-`status`) read a catalog manifest, resolve assignments and assignment paths, and
-emit JSON plans, diffs, import findings, target discovery, bundle manifests, or
-status reports without touching target install paths or runtime homes.
+Read-only commands (`plan`, `diff`, `pack --dry-run`, `import`, `validate`,
+`targets`, `status`, `upstream check`, and `upstream fetch`) read a catalog
+manifest, resolve assignments and assignment paths, and emit JSON plans, diffs,
+import findings, target discovery, bundle manifests, status reports, or upstream
+source-refresh reports without touching target install paths or runtime homes.
 
 The `apply` command materializes skills in target install paths. It requires
 an explicit approval input (plan-lock or staging artifact), refuses dirty or
@@ -57,6 +58,14 @@ catalog hashes plus planned repo writes without mutation; `import-target
 catalog source, refreshes the target receipt, and leaves ordinary git changes
 for review.
 
+The `upstream` command family refreshes catalog source from pinned upstream
+providers. `upstream check` reports declared upstream-managed skills without
+mutation. `upstream fetch --dry-run` fetches one selected skill into an isolated
+temp workspace/home and reports the catalog diff. `upstream import --apply`
+repeats that pinned fetch, refuses dirty selected catalog source, writes only the
+selected catalog skill directory plus `.skill-suitcase/upstream-lock.json`, and
+leaves ordinary git changes for review.
+
 ## Install
 
 ```bash
@@ -97,6 +106,9 @@ node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-ski
 node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --apply --json
 node dist/src/cli.js import-target --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
 node dist/src/cli.js import-target --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
+node dist/src/cli.js upstream check --source /Users/ngxcalvin/repos/skills --json
+node dist/src/cli.js upstream fetch --source /Users/ngxcalvin/repos/skills --skill hyperframes --dry-run --json
+node dist/src/cli.js upstream import --source /Users/ngxcalvin/repos/skills --skill hyperframes --apply --json
 ```
 
 `import --json` is a read-only onboarding inspection for existing skills repos.
@@ -174,6 +186,7 @@ CLI="$PWD/dist/src/cli.js"
 
 node "$CLI" import --source "$SRC" --json
 node "$CLI" validate --source "$SRC" --strict --json
+node "$CLI" upstream check --source "$SRC" --json
 node "$CLI" targets --source "$SRC" --json
 node "$CLI" plan --source "$SRC" --target codex --json
 node "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
@@ -244,6 +257,9 @@ The lock file is catalog metadata, separate from target assignments and receipts
   }
 }
 ```
+
+`provider` must be `skills-sh`, `packageVersion` must be an exact pinned
+version, and optional `packageName` defaults to `skills`.
 
 Check declared upstream skills without writing files:
 
@@ -392,9 +408,10 @@ Each finding has `level`, `code`, `message`, and `path`. Warning codes include
 ## `validate` Strict Mode
 
 `validate --source <skills-repo> --json` runs fast catalog-health checks only
-(manifest relationships plus per-skill `SKILL.md` presence). Adding `--strict`
-extends the same command into strict Skillify-10 contract validation for every
-skill referenced by a suitcase.
+(manifest relationships, per-skill `SKILL.md` presence, and upstream lock
+metadata when `.skill-suitcase/upstream-lock.json` exists).
+Adding `--strict` extends the same command into strict Skillify-10 contract
+validation for every skill referenced by a suitcase.
 
 ```bash
 node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --json
@@ -402,8 +419,11 @@ node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --
 
 Strict mode mirrors the deterministic checks in
 `skills/skillify/scripts/check_skillify_contract.py` from the catalog repo, so
-the CLI scores each skill the same way without shelling out to Python. The
-result gains two fields:
+the CLI scores each skill the same way without shelling out to Python.
+All validation results include `summary.upstreamDeclarations`, the number of
+valid upstream-managed skills declared in `.skill-suitcase/upstream-lock.json`.
+
+Strict validation gains two fields:
 
 - `strict`: `true` when strict scoring ran (`false` for basic validation, where
   `contracts` is always empty).
@@ -413,7 +433,14 @@ result gains two fields:
   `missing` reasons. Evidence paths are emitted relative to the source root for
   deterministic JSON.
 
-`summary` also gains `contractsEvaluated` and `contractsComplete` counts.
+Strict `summary` also gains `contractsEvaluated` and `contractsComplete` counts.
+Upstream lock findings are release-blocking errors.
+Those error codes include `invalid_upstream_lock_json`,
+`invalid_upstream_lock_schema`, `invalid_upstream_skill_name`,
+`invalid_upstream_declaration`, `unsupported_upstream_provider`,
+`invalid_upstream_package_version`, `invalid_upstream_package_name`,
+`invalid_upstream_identity`, `invalid_upstream_group`,
+`invalid_upstream_imported`, and `unreferenced_upstream_skill`.
 
 Strict mode distinguishes warnings from release-blocking failures:
 
@@ -428,7 +455,7 @@ Strict mode distinguishes warnings from release-blocking failures:
 {
   "ok": false,
   "strict": true,
-  "summary": { "referencedSkills": 4, "contractsEvaluated": 4, "contractsComplete": 3, "findings": 3 },
+  "summary": { "referencedSkills": 4, "upstreamDeclarations": 1, "contractsEvaluated": 4, "contractsComplete": 3, "findings": 3 },
   "contracts": [
     {
       "skill": "office-hours",
@@ -457,6 +484,103 @@ Strict mode distinguishes warnings from release-blocking failures:
   ]
 }
 ```
+
+## `upstream` Output
+
+`upstream` is a source-refresh command family for catalog-owned skills.
+Every subcommand requires `--source <skills-repo> --json`.
+It does not accept target flags because upstream refresh writes catalog source
+only, then ordinary `pack`, `apply`, `status`, and `diff` commands synchronize
+live targets from the reviewed catalog.
+
+`upstream check` is read-only and reports the declarations in
+`.skill-suitcase/upstream-lock.json`:
+
+```json
+{
+  "ok": true,
+  "readOnly": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "lockPath": "/Users/ngxcalvin/repos/skills/.skill-suitcase/upstream-lock.json",
+  "declarations": [
+    {
+      "skill": "hyperframes",
+      "provider": "skills-sh",
+      "packageName": "skills",
+      "packageVersion": "1.5.11",
+      "upstreamRepo": "heygen-com/hyperframes",
+      "upstreamSkill": "hyperframes",
+      "group": "hyperframes",
+      "importedHash": "previous-catalog-tree-hash",
+      "catalogHash": "current-catalog-tree-hash",
+      "packageAvailable": true,
+      "refresh": "catalog-hash-drift",
+      "errors": []
+    }
+  ],
+  "summary": { "declared": 1, "packageAvailable": 1, "failures": 0 },
+  "errors": []
+}
+```
+
+`refresh` is `unknown` when no imported hash or catalog hash is available,
+`unchanged` when the imported hash matches the current catalog tree, and
+`catalog-hash-drift` when the catalog has changed after the last recorded
+import.
+
+`upstream fetch --skill <name> --dry-run` fetches a selected upstream skill into
+an isolated temp workspace/home, validates that the fetched directory remains
+inside that sandbox and contains `SKILL.md`, and returns a file-level diff
+without writing the catalog or targets:
+
+```json
+{
+  "ok": true,
+  "readOnly": true,
+  "dryRun": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "skill": "hyperframes",
+  "fetchedSkillPath": "/var/folders/.../skill-suitcase-upstream-.../workspace/...",
+  "diff": [
+    { "relativePath": "SKILL.md", "action": "update", "catalogHash": "old", "upstreamHash": "new" },
+    { "relativePath": "new-only.txt", "action": "create", "catalogHash": null, "upstreamHash": "new" }
+  ],
+  "summary": { "create": 1, "update": 1, "delete": 0, "unchanged": 0 },
+  "errors": []
+}
+```
+
+`upstream import --skill <name> --apply` first checks the selected catalog skill
+directory and upstream lock path with Git.
+It refuses non-Git catalogs, uncommitted local edits, untracked selected source
+files, and unpinned upstream package versions before fetching.
+On success it copies the fetched skill into `skills/<name>`, updates
+`.skill-suitcase/upstream-lock.json`, and reports ordinary repository diffs for
+review:
+
+```json
+{
+  "ok": true,
+  "readOnly": false,
+  "apply": true,
+  "source": "/Users/ngxcalvin/repos/skills",
+  "skill": "hyperframes",
+  "catalogSkillPath": "/Users/ngxcalvin/repos/skills/skills/hyperframes",
+  "summary": { "create": 1, "update": 1, "delete": 0, "unchanged": 0, "filesWritten": 2 },
+  "metadata": {
+    "lockPath": "/Users/ngxcalvin/repos/skills/.skill-suitcase/upstream-lock.json",
+    "importedHash": "new-catalog-tree-hash"
+  },
+  "errors": []
+}
+```
+
+Upstream error codes include `unknown_upstream_skill`,
+`upstream_package_runner_missing`, `upstream_fetch_failed`,
+`upstream_fetch_missing_skill`, `upstream_fetch_outside_sandbox`,
+`upstream_fetch_missing_skill_file`, `source_hygiene_requires_git`,
+`source_hygiene_failed`, `dirty_catalog_source`,
+`invalid_upstream_package_version`, and `upstream_import_failed`.
 
 ## `plan` Output
 

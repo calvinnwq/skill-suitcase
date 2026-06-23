@@ -44,6 +44,12 @@ variant metadata. It reports missing compatibility labels, missing variant agent
 lists, blocked platform compatibility without variant sources, and variant
 sources that are missing, lack `SKILL.md`, or resolve outside the source repo.
 
+Upstream source refresh operates on the canonical `skills/<name>` directory for
+a declared upstream-managed skill.
+If an upstream refresh should affect platform-specific variants, model and
+review that variant source separately instead of expecting `upstream import` to
+rewrite `variants/<agent>/<name>`.
+
 ## Generated Packs
 
 Generated packs are immutable snapshots of a resolved plan. They preserve the

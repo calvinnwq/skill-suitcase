@@ -126,6 +126,9 @@ Optional upstream source refresh audit:
 skill-suitcase upstream check --source "$SRC" --json
 ```
 
+`validate --strict` also validates `.skill-suitcase/upstream-lock.json` when the
+catalog has one.
+
 If the catalog declares an upstream-managed skill and you are explicitly
 refreshing source, fetch one named skill into an isolated temp workspace/home and
 review the repo diff shape:

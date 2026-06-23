@@ -126,6 +126,12 @@ The v1 lock file is `.skill-suitcase/upstream-lock.json`:
 }
 ```
 
+Each declaration must use provider `skills-sh`, pin an exact `packageVersion`,
+and include `upstream.repo` plus `upstream.skill`.
+An optional `packageName` can override the default npm package name `skills`.
+`validate --source <repo> --json` validates this metadata and counts valid
+declarations in `summary.upstreamDeclarations`.
+
 The operator commands are:
 
 ```bash
