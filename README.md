@@ -12,8 +12,8 @@ The `apply` command materializes skills in target install paths. It requires
 an explicit approval input (plan-lock or staging artifact), refuses unmanaged
 targets or untracked selected source files, writes copy installs transactionally,
 can update a receipt-owned `dirty` skill only when the catalog is also ahead and
-the approved diff is proven to touch no unrelated dirty target state, can create approved repo-pointing symlinks with
-`--mode symlink`, and emits receipts.
+the approved input carries matching per-file hash proof for the same skill, can
+create approved repo-pointing symlinks with `--mode symlink`, and emits receipts.
 
 The `rollback` command reverses receipt-backed apply, reconcile, or repair
 changes. It restores recorded previous contents, removes files, directories, or
@@ -955,11 +955,14 @@ so the install can later be reversed with `skill-suitcase rollback`.
 Dirty targets remain stop-and-inspect by default. The one supported dirty
 pre-state is a receipt-owned copy install whose receipt hash is behind the
 catalog, whose live target is still a real managed directory, whose approved
-lock/artifact writes that same skill, and whose written target files still match
-the receipt before apply touches them. This lets `pack` + `apply` resolve
+lock/artifact writes that same skill, and whose approval input carries matching
+file hashes for every write. Written target files must still match the receipt
+before apply touches them, and unchanged target files must already be recorded
+in the receipt. This lets `pack` + `apply` resolve narrow
 stale-receipt/catalog-update cases without routing into a `repair` dead end;
-ordinary dirty edits, unknown targets, symlink replacements, target extras, and
-dirty skills with no approved writes are still refused.
+ordinary dirty edits, unknown targets, symlink replacements, target extras,
+unreceipted unchanged files, and dirty skills with no approved writes are still
+refused.
 
 `--mode` selects how each planned skill is materialized. The default
 `--mode copy` writes the source files into the target root. `--mode symlink`

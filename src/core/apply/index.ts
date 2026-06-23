@@ -73,14 +73,25 @@ type PlanLockManifest = PlanLock & {
 
 type ArtifactManifest = {
   schema: string;
+  artifactId?: string;
   source: {
     repo: string;
     ref?: string | null;
     commit?: string | null;
   };
   target: string;
+  action?: string;
+  summary?: unknown;
   planned: Array<{ skill: string; sourcePath?: string }>;
   blocked?: Array<{ skill: string }>;
+  files?: Array<{
+    skill: string;
+    relativePath: string;
+    bundlePath: string;
+    bytes?: number;
+    sha256: string;
+  }>;
+  fileHashes?: Record<string, Record<string, string>>;
 };
 
 type DiffForApply = {
@@ -313,6 +324,7 @@ export async function apply({
   const skillsWithWrites = new Set(writeEntries.items.map((entry) => entry.skill));
   const diffEntriesBySkill = groupDiffEntriesBySkill(diffResult.entries);
   const approvedSkills = new Set(context.approvedSkills);
+  const approvedFileHashes = context.approvedFileHashes;
   const preApplyErrors: ApplyFinding[] = [];
 
   if (preStatus.errors.length > 0) {
@@ -339,6 +351,7 @@ export async function apply({
         skillsWithWrites,
         diffEntriesBySkill,
         approvedSkills,
+        approvedFileHashes,
         receipt,
         installRoot
       })
@@ -989,6 +1002,7 @@ type ApprovalContext = {
   input: string;
   sourceCommit: string;
   approvedSkills: string[];
+  approvedFileHashes: Map<string, Map<string, string>> | null;
   errors: ApplyFinding[];
 };
 
@@ -1008,6 +1022,7 @@ async function resolveLockContext({ lockPath, source, target }: {
       input: resolved,
       sourceCommit: "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{ code: "invalid_apply_input", message: `Invalid lockfile at ${resolved}` }]
     };
   }
@@ -1020,6 +1035,7 @@ async function resolveLockContext({ lockPath, source, target }: {
       input: resolved,
       sourceCommit: lock.source.commit ?? "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "plan_lock_target_mismatch",
         message: `Plan-lock target ${lock.target} does not match apply target ${target}`
@@ -1034,6 +1050,7 @@ async function resolveLockContext({ lockPath, source, target }: {
       input: resolved,
       sourceCommit: lock.source.commit ?? "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "plan_lock_source_mismatch",
         message: `Plan-lock source ${lock.source.repo} does not match apply source ${source}`
@@ -1056,6 +1073,7 @@ async function resolveLockContext({ lockPath, source, target }: {
       input: resolved,
       sourceCommit: lock.source.commit ?? "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: assessed.reasons.map((reason) => ({
         code: `plan_lock_${reason}`,
         message: `Plan-lock is stale: ${reason}`
@@ -1069,6 +1087,7 @@ async function resolveLockContext({ lockPath, source, target }: {
     input: resolved,
     sourceCommit: lock.source.commit ?? "",
     approvedSkills: lock.selectedSkills,
+    approvedFileHashes: fileHashesToMap(lock.fileHashes),
     errors: []
   };
 }
@@ -1086,6 +1105,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: artifactPath,
       sourceCommit: "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "invalid_artifact_manifest",
         message: "Cannot locate skill-suitcase-bundle.json"
@@ -1101,6 +1121,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: manifestPath,
       sourceCommit: "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Invalid artifact manifest at ${manifestPath}`
@@ -1116,6 +1137,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: manifestPath,
       sourceCommit: "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Invalid artifact manifest at ${manifestPath}`
@@ -1134,6 +1156,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: manifestPath,
       sourceCommit: "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Invalid artifact manifest at ${manifestPath}`
@@ -1152,6 +1175,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: manifestPath,
       sourceCommit: "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Invalid artifact manifest at ${manifestPath}`
@@ -1166,6 +1190,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Unsupported artifact schema ${manifest.schema}`
@@ -1180,6 +1205,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "artifact_target_mismatch",
         message: `Artifact target ${manifest.target} does not match apply target ${target}`
@@ -1194,6 +1220,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "artifact_source_mismatch",
         message: `Artifact source ${manifest.source.repo} does not match apply source ${source}`
@@ -1208,6 +1235,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "artifact_blocked",
         message: "Artifact includes blocked plan entries"
@@ -1222,6 +1250,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
       approvedSkills: [],
+      approvedFileHashes: null,
       errors: [{
         code: "artifact_missing_planned",
         message: "Artifact contains no planned skills"
@@ -1237,6 +1266,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
     approvedSkills: manifest.planned
       .map((planned) => planned.skill)
       .filter((skill): skill is string => typeof skill === "string" && skill.trim().length > 0),
+    approvedFileHashes: await validatedArtifactFileHashes({ manifest, manifestPath }),
     errors: []
   };
 }
@@ -1348,6 +1378,7 @@ async function isApprovedDirtyBehindUpdate({
   skillsWithWrites,
   diffEntriesBySkill,
   approvedSkills,
+  approvedFileHashes,
   receipt,
   installRoot
 }: {
@@ -1355,6 +1386,7 @@ async function isApprovedDirtyBehindUpdate({
   skillsWithWrites: Set<string>;
   diffEntriesBySkill: Map<string, DiffForApply["entries"]>;
   approvedSkills: Set<string>;
+  approvedFileHashes: Map<string, Map<string, string>> | null;
   receipt: Receipt;
   installRoot: string;
 }): Promise<boolean> {
@@ -1371,6 +1403,7 @@ async function isApprovedDirtyBehindUpdate({
     || statusItem.installedHash === statusItem.currentHash
     || !skillsWithWrites.has(statusItem.skill)
     || !approvedSkills.has(statusItem.skill)
+    || approvedFileHashes === null
     || !(await isPathWithinRoot({ candidatePath: statusItem.targetPath, rootPath: installRoot }))
     || !(await isRealDirectory(statusItem.targetPath))
   ) {
@@ -1384,7 +1417,8 @@ async function isApprovedDirtyBehindUpdate({
     && await targetEntriesAreSafeForDirtyBehind({
       entries: skillEntries,
       installRecord,
-      targetRoot: statusItem.targetPath
+      targetRoot: statusItem.targetPath,
+      approvedFileHashes: approvedFileHashes.get(statusItem.skill) ?? null
     });
 }
 
@@ -1400,14 +1434,16 @@ async function isRealDirectory(targetPath: string): Promise<boolean> {
 async function targetEntriesAreSafeForDirtyBehind({
   entries,
   installRecord,
-  targetRoot
+  targetRoot,
+  approvedFileHashes
 }: {
   entries: DiffForApply["entries"];
   installRecord: ReceiptInstallRecord;
   targetRoot: string;
+  approvedFileHashes: Map<string, string> | null;
 }): Promise<boolean> {
   const installedFiles = receiptInstalledFileHashes(installRecord.installedFiles);
-  if (installedFiles === null) {
+  if (installedFiles === null || approvedFileHashes === null) {
     return false;
   }
 
@@ -1416,21 +1452,34 @@ async function targetEntriesAreSafeForDirtyBehind({
   }
 
   for (const entry of entries) {
-    if (entry.action !== "create" && entry.action !== "update") {
-      continue;
-    }
-
     const relativePath = typeof entry.relativePath === "string" ? entry.relativePath : null;
     const targetPath = typeof entry.targetPath === "string" ? entry.targetPath : null;
+
     if (relativePath === null || targetPath === null) {
       return false;
+    }
+
+    const expectedHash = installedFiles.get(relativePath);
+    if (entry.action === "unchanged") {
+      if (expectedHash === undefined) {
+        return false;
+      }
+      continue;
     }
 
     if (!(await plannedWriteStaysInRealTarget({ targetRoot, targetPath }))) {
       return false;
     }
 
-    const expectedHash = installedFiles.get(relativePath);
+    const approvedHash = approvedFileHashes.get(relativePath);
+    if (approvedHash === undefined) {
+      return false;
+    }
+    const sourcePath = typeof entry.sourcePath === "string" ? entry.sourcePath : null;
+    if (sourcePath === null || !(await sourceFileMatchesApprovedHash({ sourcePath, approvedHash }))) {
+      return false;
+    }
+
     if (entry.action === "create") {
       if (expectedHash !== undefined) {
         return false;
@@ -1508,6 +1557,169 @@ function receiptInstalledFileHashes(installedFiles: unknown): Map<string, string
   return hashes;
 }
 
+function fileHashesToMap(fileHashes: unknown): Map<string, Map<string, string>> | null {
+  if (!isRecord(fileHashes)) {
+    return null;
+  }
+
+  const result = new Map<string, Map<string, string>>();
+  for (const [skill, hashes] of Object.entries(fileHashes)) {
+    if (!isRecord(hashes)) {
+      return null;
+    }
+
+    const skillHashes = new Map<string, string>();
+    for (const [relativePath, hash] of Object.entries(hashes)) {
+      if (typeof hash !== "string" || hash.trim().length === 0) {
+        return null;
+      }
+      skillHashes.set(relativePath, hash);
+    }
+    result.set(skill, skillHashes);
+  }
+  return result;
+}
+
+async function validatedArtifactFileHashes({
+  manifest,
+  manifestPath
+}: {
+  manifest: ArtifactManifest;
+  manifestPath: string;
+}): Promise<Map<string, Map<string, string>> | null> {
+  if (
+    typeof manifest.artifactId !== "string"
+    || manifest.artifactId.trim().length === 0
+    || manifest.action !== "pack"
+    || !Array.isArray(manifest.files)
+  ) {
+    return null;
+  }
+
+  const artifactRoot = path.dirname(manifestPath);
+  if (path.basename(artifactRoot) !== manifest.artifactId) {
+    return null;
+  }
+
+  const approvedHashes = fileHashesToMap(manifest.fileHashes);
+  if (approvedHashes === null) {
+    return null;
+  }
+
+  if (computeStoredArtifactId(manifest) !== manifest.artifactId) {
+    return null;
+  }
+
+  const filesSeen = new Set<string>();
+  for (const file of manifest.files) {
+    if (!isArtifactFileRecord(file)) {
+      return null;
+    }
+
+    const skillHashes = approvedHashes.get(file.skill);
+    if (skillHashes?.get(file.relativePath) !== file.sha256) {
+      return null;
+    }
+
+    const bundlePath = path.join(artifactRoot, file.bundlePath);
+    if (!(await isPathWithinRoot({ candidatePath: bundlePath, rootPath: artifactRoot }))) {
+      return null;
+    }
+
+    let bundleHash: string;
+    try {
+      bundleHash = createHash("sha256").update(await readFile(bundlePath)).digest("hex");
+    } catch {
+      return null;
+    }
+    if (bundleHash !== file.sha256) {
+      return null;
+    }
+    filesSeen.add(`${file.skill}\0${file.relativePath}`);
+  }
+
+  for (const [skill, hashes] of approvedHashes) {
+    for (const relativePath of hashes.keys()) {
+      if (!filesSeen.has(`${skill}\0${relativePath}`)) {
+        return null;
+      }
+    }
+  }
+
+  return approvedHashes;
+}
+
+function computeStoredArtifactId(manifest: ArtifactManifest): string | null {
+  if (
+    manifest.action !== "pack"
+    || !Array.isArray(manifest.files)
+    || !isRecord(manifest.summary)
+    || !isRecord(manifest.fileHashes)
+  ) {
+    return null;
+  }
+
+  const stableArtifact = {
+    source: manifest.source,
+    target: manifest.target,
+    action: manifest.action,
+    planned: manifest.planned.map((item) => ({
+      skill: item.skill,
+      action: (item as { action?: unknown }).action,
+      variant: (item as { variant?: unknown }).variant,
+      sourcePath: normalizeArtifactSourcePath(manifest.source.repo, item.sourcePath),
+      evidence: evidenceArray(item)
+    })),
+    blocked: (manifest.blocked ?? []).map((item) => ({
+      skill: item.skill,
+      action: (item as { action?: unknown }).action,
+      target: (item as { target?: unknown }).target,
+      reason: (item as { reason?: unknown }).reason,
+      variant: (item as { variant?: unknown }).variant,
+      sourcePath: normalizeArtifactSourcePath(manifest.source.repo, (item as { sourcePath?: unknown }).sourcePath),
+      evidence: evidenceArray(item)
+    })),
+    files: manifest.files.map((item) => ({
+      skill: item.skill,
+      relativePath: item.relativePath,
+      sha256: item.sha256,
+      bytes: item.bytes
+    })),
+    fileHashes: manifest.fileHashes,
+    summary: manifest.summary,
+    schema: BUNDLE_SCHEMA
+  };
+
+  return createHash("sha256").update(JSON.stringify(stableObject(stableArtifact))).digest("hex");
+}
+
+function normalizeArtifactSourcePath(sourceRoot: string, sourcePath: unknown): unknown {
+  if (typeof sourcePath !== "string") {
+    return sourcePath;
+  }
+  return path.isAbsolute(sourcePath) ? sourcePath : path.join(sourceRoot, sourcePath);
+}
+
+function evidenceArray(value: unknown): unknown[] {
+  const evidence = isRecord(value) ? value.evidence : undefined;
+  return Array.isArray(evidence) ? [...evidence] : [];
+}
+
+async function sourceFileMatchesApprovedHash({
+  sourcePath,
+  approvedHash
+}: {
+  sourcePath: string;
+  approvedHash: string;
+}): Promise<boolean> {
+  try {
+    const sourceHash = createHash("sha256").update(await readFile(sourcePath)).digest("hex");
+    return sourceHash === approvedHash;
+  } catch {
+    return false;
+  }
+}
+
 async function receiptOwnedFilesStillMatch({
   targetRoot,
   installedFiles
@@ -1549,6 +1761,32 @@ function isReceiptInstalledFile(file: unknown): file is ReceiptInstalledFile {
     && typeof file === "object"
     && typeof (file as { path?: unknown }).path === "string"
     && typeof (file as { hash?: unknown }).hash === "string";
+}
+
+function isArtifactFileRecord(file: unknown): file is NonNullable<ArtifactManifest["files"]>[number] {
+  return file !== null
+    && typeof file === "object"
+    && typeof (file as { skill?: unknown }).skill === "string"
+    && typeof (file as { relativePath?: unknown }).relativePath === "string"
+    && typeof (file as { bundlePath?: unknown }).bundlePath === "string"
+    && typeof (file as { sha256?: unknown }).sha256 === "string";
+}
+
+function stableObject(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => stableObject(item));
+  }
+
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  const source = value as Record<string, unknown>;
+  const ordered: Record<string, unknown> = {};
+  for (const key of Object.keys(source).sort()) {
+    ordered[key] = stableObject(source[key]);
+  }
+  return ordered;
 }
 
 function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {
