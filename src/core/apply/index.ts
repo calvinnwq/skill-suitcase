@@ -312,6 +312,7 @@ export async function apply({
   const writeEntries = collectApplyEntries(diffResult.entries);
   const skillsWithWrites = new Set(writeEntries.items.map((entry) => entry.skill));
   const diffEntriesBySkill = groupDiffEntriesBySkill(diffResult.entries);
+  const approvedSkills = new Set(context.approvedSkills);
   const preApplyErrors: ApplyFinding[] = [];
 
   if (preStatus.errors.length > 0) {
@@ -337,6 +338,7 @@ export async function apply({
         statusItem: targetStatus,
         skillsWithWrites,
         diffEntriesBySkill,
+        approvedSkills,
         receipt,
         installRoot
       })
@@ -986,6 +988,7 @@ type ApprovalContext = {
   mode: ApplyMode;
   input: string;
   sourceCommit: string;
+  approvedSkills: string[];
   errors: ApplyFinding[];
 };
 
@@ -1004,6 +1007,7 @@ async function resolveLockContext({ lockPath, source, target }: {
       mode: "lock",
       input: resolved,
       sourceCommit: "",
+      approvedSkills: [],
       errors: [{ code: "invalid_apply_input", message: `Invalid lockfile at ${resolved}` }]
     };
   }
@@ -1015,6 +1019,7 @@ async function resolveLockContext({ lockPath, source, target }: {
       mode: "lock",
       input: resolved,
       sourceCommit: lock.source.commit ?? "",
+      approvedSkills: [],
       errors: [{
         code: "plan_lock_target_mismatch",
         message: `Plan-lock target ${lock.target} does not match apply target ${target}`
@@ -1028,6 +1033,7 @@ async function resolveLockContext({ lockPath, source, target }: {
       mode: "lock",
       input: resolved,
       sourceCommit: lock.source.commit ?? "",
+      approvedSkills: [],
       errors: [{
         code: "plan_lock_source_mismatch",
         message: `Plan-lock source ${lock.source.repo} does not match apply source ${source}`
@@ -1049,6 +1055,7 @@ async function resolveLockContext({ lockPath, source, target }: {
       mode: "lock",
       input: resolved,
       sourceCommit: lock.source.commit ?? "",
+      approvedSkills: [],
       errors: assessed.reasons.map((reason) => ({
         code: `plan_lock_${reason}`,
         message: `Plan-lock is stale: ${reason}`
@@ -1061,6 +1068,7 @@ async function resolveLockContext({ lockPath, source, target }: {
     mode: "lock",
     input: resolved,
     sourceCommit: lock.source.commit ?? "",
+    approvedSkills: lock.selectedSkills,
     errors: []
   };
 }
@@ -1077,6 +1085,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: artifactPath,
       sourceCommit: "",
+      approvedSkills: [],
       errors: [{
         code: "invalid_artifact_manifest",
         message: "Cannot locate skill-suitcase-bundle.json"
@@ -1091,6 +1100,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: manifestPath,
       sourceCommit: "",
+      approvedSkills: [],
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Invalid artifact manifest at ${manifestPath}`
@@ -1105,6 +1115,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: manifestPath,
       sourceCommit: "",
+      approvedSkills: [],
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Invalid artifact manifest at ${manifestPath}`
@@ -1122,6 +1133,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: manifestPath,
       sourceCommit: "",
+      approvedSkills: [],
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Invalid artifact manifest at ${manifestPath}`
@@ -1139,6 +1151,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: manifestPath,
       sourceCommit: "",
+      approvedSkills: [],
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Invalid artifact manifest at ${manifestPath}`
@@ -1152,6 +1165,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
+      approvedSkills: [],
       errors: [{
         code: "invalid_artifact_manifest",
         message: `Unsupported artifact schema ${manifest.schema}`
@@ -1165,6 +1179,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
+      approvedSkills: [],
       errors: [{
         code: "artifact_target_mismatch",
         message: `Artifact target ${manifest.target} does not match apply target ${target}`
@@ -1178,6 +1193,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
+      approvedSkills: [],
       errors: [{
         code: "artifact_source_mismatch",
         message: `Artifact source ${manifest.source.repo} does not match apply source ${source}`
@@ -1191,6 +1207,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
+      approvedSkills: [],
       errors: [{
         code: "artifact_blocked",
         message: "Artifact includes blocked plan entries"
@@ -1204,6 +1221,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
       mode: "artifact",
       input: manifestPath,
       sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
+      approvedSkills: [],
       errors: [{
         code: "artifact_missing_planned",
         message: "Artifact contains no planned skills"
@@ -1216,6 +1234,9 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
     mode: "artifact",
     input: manifestPath,
     sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
+    approvedSkills: manifest.planned
+      .map((planned) => planned.skill)
+      .filter((skill): skill is string => typeof skill === "string" && skill.trim().length > 0),
     errors: []
   };
 }
@@ -1326,12 +1347,14 @@ async function isApprovedDirtyBehindUpdate({
   statusItem,
   skillsWithWrites,
   diffEntriesBySkill,
+  approvedSkills,
   receipt,
   installRoot
 }: {
   statusItem: StatusItem;
   skillsWithWrites: Set<string>;
   diffEntriesBySkill: Map<string, DiffForApply["entries"]>;
+  approvedSkills: Set<string>;
   receipt: Receipt;
   installRoot: string;
 }): Promise<boolean> {
@@ -1347,6 +1370,7 @@ async function isApprovedDirtyBehindUpdate({
     || statusItem.currentHash === null
     || statusItem.installedHash === statusItem.currentHash
     || !skillsWithWrites.has(statusItem.skill)
+    || !approvedSkills.has(statusItem.skill)
     || !(await isPathWithinRoot({ candidatePath: statusItem.targetPath, rootPath: installRoot }))
     || !(await isRealDirectory(statusItem.targetPath))
   ) {
