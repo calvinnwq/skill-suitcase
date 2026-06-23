@@ -301,6 +301,7 @@ export async function apply({
     target,
     targetOverrides
   });
+  const receipt = await readReceipt({ installRoot }).catch((): Receipt => ({}));
   const targetAssignment = diffResult.assignment ?? target;
   const targetStatuses = preStatus.statuses.filter(
     (entry) => entry.target === installRoot && entry.assignment === targetAssignment
@@ -330,7 +331,7 @@ export async function apply({
   for (const targetStatus of targetStatuses) {
     if (
       targetStatus.status === "dirty"
-      && isApprovedDirtyBehindUpdate({ statusItem: targetStatus, skillsWithWrites })
+      && isApprovedDirtyBehindUpdate({ statusItem: targetStatus, skillsWithWrites, receipt, installRoot })
     ) {
       continue;
     }
@@ -1302,12 +1303,23 @@ function collectApplyEntries(entries: DiffForApply["entries"]): WriteEntries {
 
 function isApprovedDirtyBehindUpdate({
   statusItem,
-  skillsWithWrites
+  skillsWithWrites,
+  receipt,
+  installRoot
 }: {
   statusItem: StatusItem;
   skillsWithWrites: Set<string>;
+  receipt: Receipt;
+  installRoot: string;
 }): boolean {
-  return statusItem.installedHash !== null
+  const installRecord = findReceiptInstallRecord({
+    receipt,
+    skillName: statusItem.skill,
+    targetPath: statusItem.targetPath,
+    installRoot
+  });
+  return installRecord?.mode === "copy"
+    && statusItem.installedHash !== null
     && statusItem.currentHash !== null
     && statusItem.installedHash !== statusItem.currentHash
     && skillsWithWrites.has(statusItem.skill);

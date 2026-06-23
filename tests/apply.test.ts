@@ -1097,6 +1097,78 @@ test("apply updates a dirty target when the receipt is behind the approved catal
   assert.equal(record?.rollback?.files?.[0]?.previous?.kind, "file");
 });
 
+test("apply refuses dirty-behind symlink installs before writing copy entries", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-dirty-behind-symlink-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-dirty-behind-symlink-target-"));
+  const staleRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-dirty-behind-symlink-stale-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(staleRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"old catalog\");\n");
+
+  const staleSkill = path.join(staleRoot, "office-hours");
+  await mkdir(staleSkill, { recursive: true });
+  await cp(sourceSkill, staleSkill, { recursive: true });
+  const oldHash = await hashDirectory(sourceSkill);
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"new catalog\");\n");
+
+  const targetSkill = path.join(targetRoot, "office-hours");
+  await symlink(staleSkill, targetSkill, "dir");
+  const beforeStaleRuntime = await readFile(path.join(staleSkill, "runtime.js"), "utf8");
+  const beforeLinkTarget = await readlink(targetSkill);
+
+  await upsertAndWriteReceipt({
+    installRoot: targetRoot,
+    skillName: "office-hours",
+    installRecord: {
+      skill: "office-hours",
+      agent: "openclaw",
+      target: "openclaw",
+      mode: "symlink",
+      source: {
+        path: sourceSkill
+      },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      version: "2026.06.11",
+      sourceHash: oldHash,
+      installedFiles: []
+    }
+  });
+  const beforeReceipt = await readFile(path.join(targetRoot, ".skill-suitcase-receipt.json"), "utf8");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-dirty-behind-symlink-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "unsafe_target_state"), true);
+  assert.equal(result.postApplyStatus, null);
+  assert.equal(await readFile(path.join(staleSkill, "runtime.js"), "utf8"), beforeStaleRuntime);
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+  assert.equal(await readlink(targetSkill), beforeLinkTarget);
+  assert.equal(await readFile(path.join(targetRoot, ".skill-suitcase-receipt.json"), "utf8"), beforeReceipt);
+});
+
 test("apply refuses unknown target state by default", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-unknown-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-unknown-target-"));
