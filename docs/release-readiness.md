@@ -202,6 +202,7 @@ Before a public announcement or npm publish:
 - GitHub visibility/ruleset decision is explicit.
 - Support boundary explains Calvin-local paths versus portable config.
 - No docs imply `skills.sh` runtime delegation is part of the managed installer.
+- Docs that mention `skills.sh` source refresh distinguish catalog-only refresh from live agent-home installs.
 
 ## Current Decision
 

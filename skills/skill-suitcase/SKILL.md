@@ -19,6 +19,8 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
   mixed status report.
 - Use local path overrides instead of editing the shared catalog for another
   machine.
+- Treat `skills.sh` / `npx skills` as catalog-only source refresh input when an issue explicitly asks for upstream-managed source refresh.
+  Never run it directly against live Codex, Claude, OpenClaw, or other agent homes for setup or sync.
 - Prefer provider/source matrix rows and `targets --json` discovery over
   hardcoding every current and future runtime variant.
 - Use `track` only for exact existing matches.
@@ -72,6 +74,9 @@ Refresh the catalog before inspecting:
 ```bash
 git -C "$SRC" pull --ff-only
 ```
+
+New-machine setup uses this catalog plus Suitcase `pack`, `apply`, `track`, `status`, and `diff` flows.
+If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the ordinary repository diff, and then return to the normal target sync workflow.
 
 ## Read-Only Audit
 

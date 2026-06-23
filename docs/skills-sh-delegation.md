@@ -1,6 +1,6 @@
 # skills.sh Delegation Spike
 
-Status: recommendation for Linear `NGX-458` / `SS-11`.
+Status: recommendation for Linear `NGX-458` / `SS-11`, extended by `NGX-513`.
 
 Recommendation: do not add runtime `skills.sh` installer delegation yet. Keep
 Skill Suitcase's native provider, apply, reconcile, repair, import-target,
@@ -8,6 +8,12 @@ symlink, promote, receipt, status, and rollback paths as the managed
 install/repair path. Treat `skills.sh` as a compatibility metadata source for
 now, and only add installer delegation later behind a narrow adapter if the
 post-install state can be reconciled into Skill Suitcase receipts.
+
+NGX-513 adds a narrower accepted use: `skills.sh` / `npx skills` may be used as
+a pinned upstream source refresh lane for selected catalog skills. That lane
+fetches source into an isolated temp workspace, compares it with the catalog,
+and imports reviewed changes into the skills repo. It does not install into
+live agent homes.
 
 ## Evidence Checked
 
@@ -59,6 +65,42 @@ Native Skill Suitcase install/repair path:
 The native path is therefore safer for managed installs. Delegation is not bad;
 it is just not ready to become part of the authoritative write path.
 
+## Source Refresh Lane
+
+Source refresh is different from installer delegation. It uses upstream tooling
+to refresh the catalog source, then lets Skill Suitcase manage targets exactly
+as before.
+
+The intended v1 flow is:
+
+```txt
+upstream check -> sandboxed fetch/diff -> catalog import -> Git review -> pack/apply
+```
+
+Rules:
+
+1. Pin the `skills` package version or use a reviewed vendored command path.
+   Do not shell out to unpinned `npx skills`.
+2. Run `npx skills` only in an isolated temp workspace/home for source refresh.
+   Do not point it at Codex, Claude, OpenClaw, or other real agent homes.
+3. Store upstream metadata with the catalog, separate from target assignment
+   policy. Metadata may include provider, pinned package version, upstream skill
+   identity, group labels, imported hash, and last imported provenance.
+4. Treat the fetched upstream copy as proposed source, not as an install. Show a
+   catalog diff before importing it.
+5. Import only into the catalog source tree, and only after the selected source
+   skill has no uncommitted edits or untracked files.
+6. Do not auto-commit. The import should produce ordinary repository diffs for
+   review.
+7. New-machine setup still installs from the skills repo through Skill Suitcase,
+   not from `skills.sh` directly.
+8. After import, use normal `pack`, `apply`, `track`, `status`, and `diff`
+   flows to synchronize targets and write receipts.
+
+This lane is useful for upstream-managed skill families such as HyperFrames:
+`skills.sh` can provide a fresh source copy, while Skill Suitcase remains the
+catalog, receipt, status, dirty-detection, and rollback authority.
+
 ## Wrapper Contract For A Future Issue
 
 If delegation is added later, the adapter should be constrained like this:
@@ -88,8 +130,8 @@ If delegation is added later, the adapter should be constrained like this:
 
 ## Decision
 
-Defer runtime delegation. The next useful follow-up, if needed, is a small
-implementation issue for a pinned `skills.sh` adapter contract or snapshot
-refresh tool. That should still start read-only and should not replace native
-Skill Suitcase install, reconcile, repair, import-target, promote, receipt,
-status, or rollback semantics.
+Defer runtime delegation. Proceed first with source-only upstream refresh:
+metadata, read-only checks, sandboxed fetch/diff, catalog import, and dogfood
+with a real upstream-managed skill family. This should not replace native Skill
+Suitcase install, reconcile, repair, import-target, promote, receipt, status, or
+rollback semantics.

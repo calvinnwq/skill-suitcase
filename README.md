@@ -152,8 +152,11 @@ checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
 canonical bundle versus platform variant rules.
 The `skills.sh` installer delegation spike is documented in
 [`docs/skills-sh-delegation.md`](docs/skills-sh-delegation.md); current guidance
-is to defer runtime delegation and keep Skill Suitcase native installs
-authoritative.
+is to defer runtime delegation, keep Skill Suitcase native installs
+authoritative, and treat `skills.sh` / `npx skills` source refresh as a
+catalog-only upstream lane. New-machine setup installs from the skills repo
+through Suitcase; upstream refresh can later update selected catalog source
+directories through reviewable repository diffs.
 Release and public-readiness decisions are tracked in
 [`docs/release-readiness.md`](docs/release-readiness.md).
 
@@ -194,6 +197,9 @@ first or require explicit approval for the real agent home and catalog repo.
 
 For a machine with Codex and Claude but no OpenClaw, keep the catalog as the
 shared source of truth and supply local paths at command time:
+
+Do not run `skills.sh` or `npx skills` directly against live Codex or Claude homes for new-machine setup.
+If an upstream-managed skill needs a refresh, fetch it through the catalog-only source refresh lane first, review the ordinary repository diff, then use the normal Suitcase target sync commands below.
 
 ```bash
 cd ~/repos/skill-suitcase

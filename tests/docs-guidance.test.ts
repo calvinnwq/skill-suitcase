@@ -170,3 +170,54 @@ test("operator skill routes catalog-owned local edits to import-target after app
     "operator skill should keep the stop-and-report reflex for drifted targets"
   );
 });
+
+/**
+ * NGX-513 splits `skills.sh` into two separate concepts: a source-only upstream
+ * refresh lane that may update the catalog after review, and deferred live
+ * installer delegation that must not write directly into agent homes in v1.
+ */
+const UPSTREAM_SOURCE_REFRESH_PHRASES = [
+  "source refresh",
+  "catalog source",
+  "isolated temp",
+  "new-machine setup",
+  "ordinary repository diffs",
+  "do not auto-commit",
+  "live agent homes"
+];
+
+function assertDocumentsUpstreamSourceRefresh(label: string, normalized: string): void {
+  for (const phrase of UPSTREAM_SOURCE_REFRESH_PHRASES) {
+    assert.ok(
+      normalized.includes(phrase),
+      `${label} should document the upstream source-refresh phrase: ${phrase}`
+    );
+  }
+}
+
+test("architecture documents source-only upstream refresh as separate from live installer delegation", async () => {
+  const normalized = await loadNormalized("ARCHITECTURE.md");
+  assertDocumentsUpstreamSourceRefresh("ARCHITECTURE.md", normalized);
+  assert.ok(
+    normalized.includes("must not write directly into codex, claude, openclaw"),
+    "ARCHITECTURE.md should forbid direct live target writes in the source-refresh model"
+  );
+});
+
+test("skills.sh delegation spike documents catalog-only source refresh lane", async () => {
+  const normalized = await loadNormalized("docs/skills-sh-delegation.md");
+  assertDocumentsUpstreamSourceRefresh("docs/skills-sh-delegation.md", normalized);
+  assert.ok(
+    normalized.includes("upstream check -> sandboxed fetch/diff -> catalog import -> git review -> pack/apply"),
+    "skills.sh delegation spike should document the intended source-refresh flow"
+  );
+});
+
+test("README points new-machine setup at Suitcase-managed catalog installs", async () => {
+  const normalized = await loadNormalized("README.md");
+  assert.ok(normalized.includes("catalog-only upstream lane"), "README should mention the catalog-only upstream lane");
+  assert.ok(
+    normalized.includes("new-machine setup installs from the skills repo through suitcase"),
+    "README should keep new-machine setup on the skills repo plus Suitcase path"
+  );
+});
