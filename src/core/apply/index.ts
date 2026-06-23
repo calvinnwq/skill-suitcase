@@ -1357,7 +1357,11 @@ async function isApprovedDirtyBehindUpdate({
   return skillEntries.length > 0
     && skillEntries.every((entry) => entry.action === "create" || entry.action === "update" || entry.action === "unchanged")
     && skillEntries.some((entry) => entry.action === "create" || entry.action === "update")
-    && await targetUpdatesStillMatchReceipt({ entries: skillEntries, installRecord });
+    && await targetEntriesAreSafeForDirtyBehind({
+      entries: skillEntries,
+      installRecord,
+      targetRoot: statusItem.targetPath
+    });
 }
 
 async function isRealDirectory(targetPath: string): Promise<boolean> {
@@ -1369,12 +1373,14 @@ async function isRealDirectory(targetPath: string): Promise<boolean> {
   }
 }
 
-async function targetUpdatesStillMatchReceipt({
+async function targetEntriesAreSafeForDirtyBehind({
   entries,
-  installRecord
+  installRecord,
+  targetRoot
 }: {
   entries: DiffForApply["entries"];
   installRecord: ReceiptInstallRecord;
+  targetRoot: string;
 }): Promise<boolean> {
   const installedFiles = receiptInstalledFileHashes(installRecord.installedFiles);
   if (installedFiles === null) {
@@ -1382,7 +1388,7 @@ async function targetUpdatesStillMatchReceipt({
   }
 
   for (const entry of entries) {
-    if (entry.action !== "update") {
+    if (entry.action !== "create" && entry.action !== "update") {
       continue;
     }
 
@@ -1392,7 +1398,18 @@ async function targetUpdatesStillMatchReceipt({
       return false;
     }
 
+    if (!(await plannedWriteStaysInRealTarget({ targetRoot, targetPath }))) {
+      return false;
+    }
+
     const expectedHash = installedFiles.get(relativePath);
+    if (entry.action === "create") {
+      if (expectedHash !== undefined) {
+        return false;
+      }
+      continue;
+    }
+
     if (expectedHash === undefined) {
       return false;
     }
@@ -1410,6 +1427,17 @@ async function targetUpdatesStillMatchReceipt({
   }
 
   return true;
+}
+
+async function plannedWriteStaysInRealTarget({
+  targetRoot,
+  targetPath
+}: {
+  targetRoot: string;
+  targetPath: string;
+}): Promise<boolean> {
+  return (await isPathWithinRoot({ candidatePath: targetPath, rootPath: targetRoot }))
+    || (await isPathWithinRoot({ candidatePath: path.dirname(targetPath), rootPath: targetRoot }));
 }
 
 function receiptInstalledFileHashes(installedFiles: unknown): Map<string, string> | null {
