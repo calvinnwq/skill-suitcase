@@ -11,6 +11,7 @@ import { rollbackCommand } from "./rollback.js";
 import { statusCommand } from "./status.js";
 import { targetsCommand } from "./targets.js";
 import { trackCommand } from "./track.js";
+import { upstreamCommand } from "./upstream.js";
 import { validateCommand } from "./validate.js";
 import { exitCodeForCommandResult, EXIT_CODE_USAGE } from "../renderers/exit-codes.js";
 import { usageText } from "../renderers/usage.js";
@@ -30,7 +31,8 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   reconcileCommand,
   repairCommand,
   promoteCommand,
-  importTargetCommand
+  importTargetCommand,
+  upstreamCommand
 ];
 
 const KNOWN_COMMAND_NAMES: ReadonlySet<string> = new Set(
@@ -64,9 +66,10 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
     dryRun: false,
     json: false
   };
+  const commandRest = args.command === "upstream" ? parseUpstreamAction(rest, args) : rest;
 
-  for (let index = 0; index < rest.length; index += 1) {
-    const token = rest[index];
+  for (let index = 0; index < commandRest.length; index += 1) {
+    const token = commandRest[index];
     if (token === undefined) {
       break;
     }
@@ -101,15 +104,10 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
     }
 
     if (token === "--skill") {
-      if (
-        args.command !== "track" &&
-        args.command !== "reconcile" &&
-        args.command !== "repair" &&
-        args.command !== "import-target"
-      ) {
+      if (!isSkillFlagAllowed(args.command)) {
         throw new Error(`Unknown argument: ${token}`);
       }
-      const value = rest[index + 1];
+      const value = commandRest[index + 1];
       if (value === undefined || value === "" || value.startsWith("--")) {
         throw new Error(`${token} requires a value`);
       }
@@ -125,7 +123,7 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       if (!isFlagAllowedForCommand(args.command, token)) {
         throw new Error(`Unknown argument: ${token}`);
       }
-      const value = rest[index + 1];
+      const value = commandRest[index + 1];
       if (value === undefined || value === "" || value.startsWith("--")) {
         throw new Error(`${token} requires a value`);
       }
@@ -182,6 +180,26 @@ function isValueArg(token: string): boolean {
     || token === "--codex-home" || token === "--codex-skills" || token === "--claude-skills";
 }
 
+function parseUpstreamAction(rest: string[], args: ParsedCommandArgs): string[] {
+  const [action, ...remaining] = rest;
+  if (action === "check" || action === "fetch" || action === "import") {
+    args.upstreamAction = action;
+    return remaining;
+  }
+  if (action === undefined || action.startsWith("--")) {
+    return rest;
+  }
+  throw new Error(`Unknown upstream action: ${action}`);
+}
+
+function isSkillFlagAllowed(command: CommandName | "help"): boolean {
+  return command === "track" ||
+    command === "reconcile" ||
+    command === "repair" ||
+    command === "import-target" ||
+    command === "upstream";
+}
+
 function valueFlagName(token: string): ValueFlagName {
   switch (token) {
     case "--target-skill":
@@ -207,7 +225,7 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
       return command === "plan" || command === "diff" || command === "pack" || command === "import"
         || command === "validate" || command === "targets" || command === "status" || command === "apply"
         || command === "track" || command === "reconcile" || command === "repair" || command === "promote"
-        || command === "import-target";
+        || command === "import-target" || command === "upstream";
     case "--target":
       return command === "plan" || command === "diff" || command === "pack" || command === "apply"
         || command === "track" || command === "reconcile" || command === "repair" || command === "status"
@@ -230,10 +248,10 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
         || command === "import-target";
     case "--dry-run":
       return command === "pack" || command === "promote" || command === "reconcile" || command === "repair"
-        || command === "import-target";
+        || command === "import-target" || command === "upstream";
     case "--apply":
       return command === "promote" || command === "reconcile" || command === "repair"
-        || command === "import-target";
+        || command === "import-target" || command === "upstream";
     case "--strict":
       return command === "validate";
     default:

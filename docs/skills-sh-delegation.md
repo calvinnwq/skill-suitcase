@@ -101,6 +101,50 @@ This lane is useful for upstream-managed skill families such as HyperFrames:
 `skills.sh` can provide a fresh source copy, while Skill Suitcase remains the
 catalog, receipt, status, dirty-detection, and rollback authority.
 
+The v1 lock file is `.skill-suitcase/upstream-lock.json`:
+
+```json
+{
+  "schema": "calvinnwq.skills.upstream-lock.v0",
+  "skills": {
+    "hyperframes": {
+      "provider": "skills-sh",
+      "packageVersion": "1.5.11",
+      "upstream": {
+        "repo": "heygen-com/hyperframes",
+        "skill": "hyperframes"
+      },
+      "group": "hyperframes",
+      "imported": {
+        "sha256": "<catalog-tree-hash>",
+        "packageVersion": "1.5.11",
+        "at": "2026-06-23T08:30:00.000Z",
+        "source": "skills-sh:heygen-com/hyperframes:hyperframes"
+      }
+    }
+  }
+}
+```
+
+Each declaration must use provider `skills-sh`, pin an exact `packageVersion`,
+and include `upstream.repo` plus `upstream.skill`.
+An optional `packageName` can override the default npm package name `skills`.
+`validate --source <repo> --json` validates this metadata and counts valid
+declarations in `summary.upstreamDeclarations`.
+
+The operator commands are:
+
+```bash
+skill-suitcase upstream check --source "$SRC" --json
+skill-suitcase upstream fetch --source "$SRC" --skill hyperframes --dry-run --json
+skill-suitcase upstream import --source "$SRC" --skill hyperframes --apply --json
+```
+
+`upstream fetch` and `upstream import` use an isolated temp workspace/home for
+the pinned package execution. `fetch` is read-only and returns a file-level
+catalog diff. `import` writes only to the catalog skill directory and the
+upstream lock file; it does not install, sync, or receipt any live target.
+
 ## Wrapper Contract For A Future Issue
 
 If delegation is added later, the adapter should be constrained like this:

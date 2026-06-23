@@ -1,6 +1,7 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { type Catalog, loadCatalog } from "../catalog/index.js";
+import { loadUpstreamLock } from "../upstream/index.js";
 import { type ContractReport, scoreSkillContract } from "./skillify-contract.js";
 
 type FindingLevel = "error" | "warning";
@@ -16,6 +17,7 @@ type ValidationSummary = {
   suitcases: number;
   assignments: number;
   assignmentPaths: number;
+  upstreamDeclarations: number;
   referencedSkills: number;
   contractsEvaluated: number;
   contractsComplete: number;
@@ -115,6 +117,27 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
   }
 
   const contracts = strict ? await scoreReferencedContracts(sourceRoot, referencedSkills, findings) : [];
+  const upstream = await loadUpstreamLock(sourceRoot);
+  findings.push(
+    ...upstream.findings.map((item) => ({
+      level: "error" as const,
+      code: item.code,
+      message: item.message,
+      path: item.path
+    }))
+  );
+
+  for (const declaration of upstream.declarations) {
+    if (!referencedSkills.has(declaration.skill)) {
+      findings.push(
+        error(
+          "unreferenced_upstream_skill",
+          `Upstream declaration ${declaration.skill} is not referenced by any suitcase.`,
+          `upstream.skills.${declaration.skill}`
+        )
+      );
+    }
+  }
 
   return {
     ok: findings.every((finding) => finding.level !== "error"),
@@ -125,6 +148,7 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
       suitcases: Object.keys(manifest.suitcases).length,
       assignments: Object.keys(manifest.assignments).length,
       assignmentPaths: Object.keys(manifest.assignmentPaths).length,
+      upstreamDeclarations: upstream.declarations.length,
       referencedSkills: referencedSkills.size,
       contractsEvaluated: contracts.length,
       contractsComplete: contracts.filter((report) => report.complete).length,

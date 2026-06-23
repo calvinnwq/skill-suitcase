@@ -30,6 +30,7 @@ Then smoke import and the read-only command boundaries:
 
 ```bash
 node dist/src/cli.js import --source /path/to/skills-catalog --json
+node dist/src/cli.js validate --source /path/to/skills-catalog --strict --json
 node dist/src/cli.js plan --source /path/to/skills-catalog --target openclaw --json
 node dist/src/cli.js diff --source /path/to/skills-catalog --target openclaw --json
 node dist/src/cli.js pack --source /path/to/skills-catalog --target openclaw --dry-run --json
@@ -39,6 +40,24 @@ node dist/src/cli.js status --source /path/to/skills-catalog --json
 For Git-backed catalogs, `pack` refuses selected source skills with untracked,
 non-ignored files. Commit, stage, or remove scratch files inside selected skills
 before expecting the pack smoke to pass.
+
+If the catalog declares upstream-managed skills in
+`.skill-suitcase/upstream-lock.json`, smoke the source-refresh read-only
+boundary before any catalog import:
+
+```bash
+node dist/src/cli.js upstream check --source /path/to/skills-catalog --json
+node dist/src/cli.js upstream fetch --source /path/to/skills-catalog --skill existing-skill --dry-run --json
+```
+
+`upstream check` should report declared skills, pinned package metadata, package
+runner availability, and refresh status without writing files.
+`upstream fetch` may execute the pinned provider in an isolated temp
+workspace/home, but it must not write the catalog or any live target root.
+Only run `upstream import --apply` against a disposable Git-backed catalog or an
+intentionally approved catalog source; it writes `skills/<name>` and
+`.skill-suitcase/upstream-lock.json` only, then leaves ordinary repository diffs
+for review.
 
 For a Codex/Claude-only machine, smoke local target overrides and target-scoped
 status without requiring OpenClaw paths from the shared catalog to exist:
