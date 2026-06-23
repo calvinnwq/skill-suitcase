@@ -187,6 +187,44 @@ recommendation is to defer runtime delegation and keep `skills.sh` as
 compatibility/reference data until a pinned adapter can prove post-install
 receipt reconciliation and rollback boundaries.
 
+## Upstream-Managed Source Refresh
+
+An upstream-managed skill is still a catalog-owned skill. The catalog stores the
+reviewed source files, target assignments, variants, and install policy. The
+upstream provider only describes where a fresh source copy can be fetched from.
+
+The first supported upstream lane is planned for `skills.sh` / `npx skills`.
+Its v1 boundary is source refresh only:
+
+```txt
+pinned upstream fetch -> isolated temp workspace -> catalog diff -> catalog import
+```
+
+This lane must not write directly into Codex, Claude, OpenClaw, or any other
+live agent homes. New-machine setup remains deterministic: clone or update the
+skills catalog, then use normal Skill Suitcase `pack`, `apply`, `track`,
+`status`, and `diff` flows to populate local targets from the catalog source.
+
+Upstream refresh metadata should be reviewed with the catalog and kept separate
+from target assignment policy. It may record provider name, pinned package or
+command version, upstream skill identity, grouped imports, imported content
+hashes, and last imported provenance. It must not replace receipts. Receipts
+remain the target-side record of what Skill Suitcase installed.
+
+Source refresh commands should be explicit and staged:
+
+1. read-only check of declared upstream-managed skills
+2. sandboxed fetch and diff against the catalog
+3. approval-gated import into the catalog source tree
+4. ordinary Git review/commit
+5. ordinary Skill Suitcase target sync from the catalog
+
+Catalog imports must refuse uncommitted local edits or untracked files in the
+selected skill source. They should create ordinary repository diffs; in v1, do
+not auto-commit upstream imports. Live `skills.sh` installer delegation is a
+separate future feature and must not be introduced as part of this
+source-refresh model.
+
 ## Install Modes
 
 Skill Suitcase supports copy and native symlink installs. Install modes should
