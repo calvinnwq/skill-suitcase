@@ -1387,6 +1387,10 @@ async function targetEntriesAreSafeForDirtyBehind({
     return false;
   }
 
+  if (!(await receiptOwnedFilesStillMatch({ targetRoot, installedFiles }))) {
+    return false;
+  }
+
   for (const entry of entries) {
     if (entry.action !== "create" && entry.action !== "update") {
       continue;
@@ -1436,8 +1440,33 @@ async function plannedWriteStaysInRealTarget({
   targetRoot: string;
   targetPath: string;
 }): Promise<boolean> {
-  return (await isPathWithinRoot({ candidatePath: targetPath, rootPath: targetRoot }))
-    || (await isPathWithinRoot({ candidatePath: path.dirname(targetPath), rootPath: targetRoot }));
+  const resolvedTargetRoot = path.resolve(targetRoot);
+  const resolvedTargetPath = path.resolve(targetPath);
+  const relativePath = path.relative(resolvedTargetRoot, resolvedTargetPath);
+  if (relativePath === "" || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return false;
+  }
+
+  let candidatePath = resolvedTargetPath;
+  while (true) {
+    try {
+      const info = await lstat(candidatePath);
+      if (info.isSymbolicLink()) {
+        return false;
+      }
+      return isPathWithinRoot({ candidatePath, rootPath: targetRoot });
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "ENOENT") {
+        return false;
+      }
+    }
+
+    const parentPath = path.dirname(candidatePath);
+    if (parentPath === candidatePath) {
+      return false;
+    }
+    candidatePath = parentPath;
+  }
 }
 
 function receiptInstalledFileHashes(installedFiles: unknown): Map<string, string> | null {
@@ -1453,6 +1482,42 @@ function receiptInstalledFileHashes(installedFiles: unknown): Map<string, string
     hashes.set(file.path, file.hash);
   }
   return hashes;
+}
+
+async function receiptOwnedFilesStillMatch({
+  targetRoot,
+  installedFiles
+}: {
+  targetRoot: string;
+  installedFiles: Map<string, string>;
+}): Promise<boolean> {
+  for (const [relativePath, expectedHash] of installedFiles) {
+    const targetPath = path.join(targetRoot, relativePath);
+    if (!(await plannedWriteStaysInRealTarget({ targetRoot, targetPath }))) {
+      return false;
+    }
+
+    let info;
+    try {
+      info = await lstat(targetPath);
+    } catch {
+      return false;
+    }
+    if (!info.isFile() || info.isSymbolicLink()) {
+      return false;
+    }
+
+    let targetHash: string;
+    try {
+      targetHash = createHash("sha256").update(await readFile(targetPath)).digest("hex");
+    } catch {
+      return false;
+    }
+    if (targetHash !== expectedHash) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function isReceiptInstalledFile(file: unknown): file is ReceiptInstalledFile {
