@@ -11,8 +11,8 @@ source-refresh reports without touching target install paths or runtime homes.
 The `apply` command materializes skills in target install paths. It requires
 an explicit approval input (plan-lock or staging artifact), refuses unmanaged
 targets or untracked selected source files, writes copy installs transactionally,
-can update a receipt-owned `dirty` skill when the catalog is also ahead and the
-approved diff writes that same skill, can create approved repo-pointing symlinks with
+can update a receipt-owned `dirty` skill only when the catalog is also ahead and
+the approved diff is proven to touch no unrelated dirty target state, can create approved repo-pointing symlinks with
 `--mode symlink`, and emits receipts.
 
 The `rollback` command reverses receipt-backed apply, reconcile, or repair
@@ -954,10 +954,12 @@ so the install can later be reversed with `skill-suitcase rollback`.
 
 Dirty targets remain stop-and-inspect by default. The one supported dirty
 pre-state is a receipt-owned copy install whose receipt hash is behind the
-catalog and whose approved lock/artifact writes that same skill. This lets
-`pack` + `apply` resolve stale-receipt/catalog-update cases without routing into
-a `repair` dead end; ordinary dirty edits, unknown targets, and dirty skills with
-no approved writes are still refused.
+catalog, whose live target is still a real managed directory, whose approved
+lock/artifact writes that same skill, and whose written target files still match
+the receipt before apply touches them. This lets `pack` + `apply` resolve
+stale-receipt/catalog-update cases without routing into a `repair` dead end;
+ordinary dirty edits, unknown targets, symlink replacements, target extras, and
+dirty skills with no approved writes are still refused.
 
 `--mode` selects how each planned skill is materialized. The default
 `--mode copy` writes the source files into the target root. `--mode symlink`
@@ -1015,7 +1017,8 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
   (for example when a required source variant is missing)
 - `unmanaged_target` — target has no managed status entries; install it first
 - `unsafe_target_state` — a planned skill is `unknown`, or is `dirty` without
-  also being a receipt-owned behind-catalog update covered by approved writes
+  also being a receipt-owned behind-catalog update whose approved writes and
+  receipt metadata prove no unrelated target drift will be overwritten or blessed
 - `symlink_source_escape` — a planned symlink source path escapes the approved source root
 - `symlink_target_conflict` — a planned symlink target already exists as a real directory, wrong link, or broken link and would require explicit approval to replace
 - `symlink_write_error` — a symlink creation or receipt write failed during symlink-mode apply

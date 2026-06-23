@@ -16,6 +16,7 @@ import {
   readReceipt,
   upsertAndWriteReceipt,
   type Receipt,
+  type ReceiptInstalledFile,
   type ReceiptInstallRecord
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
@@ -1355,7 +1356,8 @@ async function isApprovedDirtyBehindUpdate({
   const skillEntries = diffEntriesBySkill.get(statusItem.skill) ?? [];
   return skillEntries.length > 0
     && skillEntries.every((entry) => entry.action === "create" || entry.action === "update" || entry.action === "unchanged")
-    && skillEntries.some((entry) => entry.action === "create" || entry.action === "update");
+    && skillEntries.some((entry) => entry.action === "create" || entry.action === "update")
+    && await targetUpdatesStillMatchReceipt({ entries: skillEntries, installRecord });
 }
 
 async function isRealDirectory(targetPath: string): Promise<boolean> {
@@ -1365,6 +1367,71 @@ async function isRealDirectory(targetPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function targetUpdatesStillMatchReceipt({
+  entries,
+  installRecord
+}: {
+  entries: DiffForApply["entries"];
+  installRecord: ReceiptInstallRecord;
+}): Promise<boolean> {
+  const installedFiles = receiptInstalledFileHashes(installRecord.installedFiles);
+  if (installedFiles === null) {
+    return false;
+  }
+
+  for (const entry of entries) {
+    if (entry.action !== "update") {
+      continue;
+    }
+
+    const relativePath = typeof entry.relativePath === "string" ? entry.relativePath : null;
+    const targetPath = typeof entry.targetPath === "string" ? entry.targetPath : null;
+    if (relativePath === null || targetPath === null) {
+      return false;
+    }
+
+    const expectedHash = installedFiles.get(relativePath);
+    if (expectedHash === undefined) {
+      return false;
+    }
+
+    let targetHash: string;
+    try {
+      targetHash = createHash("sha256").update(await readFile(targetPath)).digest("hex");
+    } catch {
+      return false;
+    }
+
+    if (targetHash !== expectedHash) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function receiptInstalledFileHashes(installedFiles: unknown): Map<string, string> | null {
+  if (!Array.isArray(installedFiles) || installedFiles.length === 0) {
+    return null;
+  }
+
+  const hashes = new Map<string, string>();
+  for (const file of installedFiles) {
+    if (!isReceiptInstalledFile(file)) {
+      return null;
+    }
+    hashes.set(file.path, file.hash);
+  }
+  return hashes;
+}
+
+function isReceiptInstalledFile(file: unknown): file is ReceiptInstalledFile {
+  return file !== null
+    && typeof file === "object"
+    && typeof (file as { path?: unknown }).path === "string"
+    && typeof (file as { hash?: unknown }).hash === "string";
 }
 
 function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {
