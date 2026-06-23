@@ -286,7 +286,13 @@ Keep the command verbs separate:
   source. It writes receipts only and does not rewrite skill files.
 - `apply` installs or updates skills from an approved plan lock or artifact.
   Symlink support belongs here as an explicit `--mode symlink` install mode,
-  not as an implicit side effect.
+  not as an implicit side effect. Apply normally refuses dirty targets, but it
+  may update a receipt-owned dirty skill when the receipt hash is behind the
+  catalog, the approved lock/artifact writes that same skill, the live target is
+  still a real managed directory, the approval input carries matching per-file
+  hash proof, and per-file receipt metadata proves apply will not overwrite or
+  bless unrelated local drift. That is the supported route for narrow
+  stale-receipt/catalog-update cases that `repair` routes to `pack` + `apply`.
 - `reconcile` repairs selected catalog-planned target skills that are unknown
   because the live target directory exists without a Suitcase receipt and differs
   from the catalog source. `--dry-run` is deterministic and read-only; `--apply`

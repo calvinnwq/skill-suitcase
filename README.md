@@ -9,10 +9,11 @@ import findings, target discovery, bundle manifests, status reports, or upstream
 source-refresh reports without touching target install paths or runtime homes.
 
 The `apply` command materializes skills in target install paths. It requires
-an explicit approval input (plan-lock or staging artifact), refuses dirty or
-unmanaged targets or untracked selected source files, writes copy installs
-transactionally, can create approved repo-pointing symlinks with
-`--mode symlink`, and emits receipts.
+an explicit approval input (plan-lock or staging artifact), refuses unmanaged
+targets or untracked selected source files, writes copy installs transactionally,
+can update a receipt-owned `dirty` skill only when the catalog is also ahead and
+the approved input carries matching per-file hash proof for the same skill, can
+create approved repo-pointing symlinks with `--mode symlink`, and emits receipts.
 
 The `rollback` command reverses receipt-backed apply, reconcile, or repair
 changes. It restores recorded previous contents, removes files, directories, or
@@ -951,6 +952,18 @@ catalogs, materializes planned skills, and emits a receipt per skill. Copy-mode
 receipts capture the pre-apply state of every written file (a `rollback` record)
 so the install can later be reversed with `skill-suitcase rollback`.
 
+Dirty targets remain stop-and-inspect by default. The one supported dirty
+pre-state is a receipt-owned copy install whose receipt hash is behind the
+catalog, whose live target is still a real managed directory, whose approved
+lock/artifact writes that same skill, and whose approval input carries matching
+file hashes for every write. Written target files must still match the receipt
+before apply touches them, and unchanged target files must already be recorded
+in the receipt. This lets `pack` + `apply` resolve narrow
+stale-receipt/catalog-update cases without routing into a `repair` dead end;
+ordinary dirty edits, unknown targets, symlink replacements, target extras,
+unreceipted unchanged files, and dirty skills with no approved writes are still
+refused.
+
 `--mode` selects how each planned skill is materialized. The default
 `--mode copy` writes the source files into the target root. `--mode symlink`
 instead links each agent skill path to its catalog source path (agent skill
@@ -1006,7 +1019,9 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
   `diff_blocked_skill` reports a planned skill that is blocked for the target
   (for example when a required source variant is missing)
 - `unmanaged_target` — target has no managed status entries; install it first
-- `unsafe_target_state` — a planned skill is `dirty` or `unknown`
+- `unsafe_target_state` — a planned skill is `unknown`, or is `dirty` without
+  also being a receipt-owned behind-catalog update whose approved writes and
+  receipt metadata prove no unrelated target drift will be overwritten or blessed
 - `symlink_source_escape` — a planned symlink source path escapes the approved source root
 - `symlink_target_conflict` — a planned symlink target already exists as a real directory, wrong link, or broken link and would require explicit approval to replace
 - `symlink_write_error` — a symlink creation or receipt write failed during symlink-mode apply
