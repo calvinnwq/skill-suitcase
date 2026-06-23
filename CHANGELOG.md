@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.9.0...v0.10.0) (2026-06-23)
+
+
+### Features
+
+* **upstream:** add source refresh lane ([43adcab](https://github.com/calvinnwq/skill-suitcase/commit/43adcab1ca30043c6ee78d11c9cde34cd479561a))
+* **upstream:** add source refresh lane ([e91842b](https://github.com/calvinnwq/skill-suitcase/commit/e91842ba3198f1acafb814e4a882b2dc0b7a48b0))
+
+
+### Bug Fixes
+
+* **apply:** harden dirty-behind provenance checks ([a81e3bf](https://github.com/calvinnwq/skill-suitcase/commit/a81e3bf7a08feb749f52f4f24dbecadae1802a34))
+
 ## [0.9.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.8.0...v0.9.0) (2026-06-21)
 
 
