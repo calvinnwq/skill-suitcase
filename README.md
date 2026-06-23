@@ -223,6 +223,54 @@ node "$CLI" status --source "$SRC" --target claude --claude-skills "$HOME/.claud
 node "$CLI" diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
 ```
 
+## Upstream Source Refresh
+
+Upstream-managed skills are declared in `.skill-suitcase/upstream-lock.json`.
+The lock file is catalog metadata, separate from target assignments and receipts:
+
+```json
+{
+  "schema": "calvinnwq.skills.upstream-lock.v0",
+  "skills": {
+    "hyperframes": {
+      "provider": "skills-sh",
+      "packageVersion": "1.5.11",
+      "upstream": {
+        "repo": "heygen-com/hyperframes",
+        "skill": "hyperframes"
+      },
+      "group": "hyperframes"
+    }
+  }
+}
+```
+
+Check declared upstream skills without writing files:
+
+```bash
+node "$CLI" upstream check --source "$SRC" --json
+```
+
+Fetch a selected skill into an isolated temp workspace/home and review the
+catalog diff:
+
+```bash
+node "$CLI" upstream fetch --source "$SRC" --skill hyperframes --dry-run --json
+```
+
+Import the selected fetched source into the catalog only:
+
+```bash
+node "$CLI" upstream import --source "$SRC" --skill hyperframes --apply --json
+```
+
+`upstream import` refuses dirty or untracked selected catalog source before it
+fetches. It updates the catalog skill directory and
+`.skill-suitcase/upstream-lock.json`, but it does not auto-commit and does not
+write to Codex, Claude, OpenClaw, or other live target roots. After reviewing
+and committing the repo diff, use the normal `pack`/`apply`/`status` target sync
+commands.
+
 If matching skills already exist, adopt them without rewriting files:
 
 ```bash

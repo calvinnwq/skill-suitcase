@@ -120,6 +120,26 @@ node "$CLI" targets --source "$SRC" --json
 node "$CLI" status --source "$SRC" --json
 ```
 
+Optional upstream source refresh audit:
+
+```bash
+skill-suitcase upstream check --source "$SRC" --json
+```
+
+If the catalog declares an upstream-managed skill and you are explicitly
+refreshing source, fetch one named skill into an isolated temp workspace/home and
+review the repo diff shape:
+
+```bash
+skill-suitcase upstream fetch --source "$SRC" --skill <skill-name> --dry-run --json
+# after approval for catalog-only source import:
+skill-suitcase upstream import --source "$SRC" --skill <skill-name> --apply --json
+```
+
+`upstream import` writes only the selected catalog skill directory and
+`.skill-suitcase/upstream-lock.json`. It does not auto-commit and does not write
+to live Codex, Claude, OpenClaw, or other agent homes.
+
 Inspect local Codex and Claude targets with overrides:
 
 ```bash

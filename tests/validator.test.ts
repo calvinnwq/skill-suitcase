@@ -14,6 +14,7 @@ test("validates the skills repo fixture", async () => {
   assert.equal(result.summary.suitcases, 2);
   assert.equal(result.summary.assignments, 4);
   assert.equal(result.summary.assignmentPaths, 4);
+  assert.equal(result.summary.upstreamDeclarations, 0);
   assert.equal(result.summary.referencedSkills, 3);
   assert.deepEqual(result.findings, []);
 });
@@ -59,4 +60,92 @@ compatibility:
   assert.ok(codes.includes("missing_skill_directory"));
   assert.ok(codes.includes("unknown_assignment_path_target"));
   assert.ok(codes.includes("unused_compatibility"));
+});
+
+test("validates upstream lock metadata when present", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upstream-valid-"));
+  await mkdir(path.join(source, "skills", "hyperframes"), { recursive: true });
+  await mkdir(path.join(source, ".skill-suitcase"), { recursive: true });
+  await writeFile(path.join(source, "skills", "hyperframes", "SKILL.md"), "# HyperFrames\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - hyperframes
+
+assignments:
+  codex:
+    suitcases:
+      - core
+`
+  );
+  await writeFile(
+    path.join(source, ".skill-suitcase", "upstream-lock.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.upstream-lock.v0",
+      skills: {
+        hyperframes: {
+          provider: "skills-sh",
+          packageVersion: "1.0.0",
+          upstream: {
+            repo: "heygen-com/hyperframes",
+            skill: "hyperframes"
+          },
+          group: "hyperframes"
+        }
+      }
+    }, null, 2)}\n`
+  );
+
+  const result = await validate({ source });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.upstreamDeclarations, 1);
+  assert.deepEqual(result.findings, []);
+});
+
+test("reports malformed upstream lock metadata deterministically", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upstream-invalid-"));
+  await mkdir(path.join(source, "skills", "hyperframes"), { recursive: true });
+  await mkdir(path.join(source, ".skill-suitcase"), { recursive: true });
+  await writeFile(path.join(source, "skills", "hyperframes", "SKILL.md"), "# HyperFrames\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - hyperframes
+
+assignments:
+  codex:
+    suitcases:
+      - core
+`
+  );
+  await writeFile(
+    path.join(source, ".skill-suitcase", "upstream-lock.json"),
+    `${JSON.stringify({
+      schema: "wrong",
+      skills: {
+        "bad/name": {
+          provider: "unknown"
+        },
+        hyperframes: {
+          provider: "skills-sh",
+          packageVersion: "latest",
+          upstream: {}
+        }
+      }
+    }, null, 2)}\n`
+  );
+
+  const result = await validate({ source });
+  const codes = result.findings.map((finding) => finding.code);
+
+  assert.equal(result.ok, false);
+  assert.ok(codes.includes("invalid_upstream_lock_schema"));
+  assert.ok(codes.includes("invalid_upstream_skill_name"));
+  assert.ok(codes.includes("invalid_upstream_package_version"));
+  assert.ok(codes.includes("invalid_upstream_identity"));
 });

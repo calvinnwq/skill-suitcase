@@ -12,7 +12,8 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
 ## Contract
 
 - Treat read-only commands as the default path: `import`, `validate --strict`,
-  `targets`, `plan`, `status`, `diff`, and `pack --dry-run`.
+  `targets`, `plan`, `status`, `diff`, `pack --dry-run`, and
+  `upstream check`.
 - Mutate live skill roots only after explicit human approval naming the target
   and action.
 - Work one target at a time. Do not bulk-repair every target after seeing a
@@ -77,6 +78,24 @@ git -C "$SRC" pull --ff-only
 
 New-machine setup uses this catalog plus Suitcase `pack`, `apply`, `track`, `status`, and `diff` flows.
 If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the ordinary repository diff, and then return to the normal target sync workflow.
+
+## Upstream Source Refresh
+
+Use this lane only when the task explicitly asks to refresh catalog source from
+an upstream provider such as `skills.sh`. It never writes live agent homes.
+
+```bash
+"$CLI" upstream check --source "$SRC" --json
+"$CLI" upstream fetch --source "$SRC" --skill <skill-name> --dry-run --json
+# after approval for catalog-only source import:
+"$CLI" upstream import --source "$SRC" --skill <skill-name> --apply --json
+```
+
+The declaration file is `.skill-suitcase/upstream-lock.json` with schema
+`calvinnwq.skills.upstream-lock.v0`. `upstream fetch` uses an isolated temp
+workspace/home and reports file-level catalog diffs. `upstream import` writes
+only the selected catalog skill directory plus the upstream lock metadata; it
+does not auto-commit and does not install, receipt, or sync targets.
 
 ## Read-Only Audit
 

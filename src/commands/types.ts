@@ -12,6 +12,7 @@ import type { rollback } from "../core/rollback/index.js";
 import type { status } from "../core/status/index.js";
 import type { targets } from "../core/catalog/targets.js";
 import type { track } from "../core/track/index.js";
+import type { checkUpstream, fetchUpstreamSkillDryRun, importUpstreamSkill } from "../core/upstream/index.js";
 import type { validate } from "../core/validation/index.js";
 
 export type CommandName =
@@ -28,7 +29,8 @@ export type CommandName =
   | "reconcile"
   | "repair"
   | "promote"
-  | "import-target";
+  | "import-target"
+  | "upstream";
 
 export type ParsedCommandArgs = {
   command: CommandName | "help";
@@ -36,6 +38,7 @@ export type ParsedCommandArgs = {
   json: boolean;
   strict?: boolean;
   apply?: boolean;
+  upstreamAction?: "check" | "fetch" | "import";
   source?: string;
   target?: string;
   targetSkill?: string;
@@ -78,7 +81,10 @@ export type CommandJsonResult =
   | Awaited<ReturnType<typeof repair>>
   | Awaited<ReturnType<typeof planPromote>>
   | Awaited<ReturnType<typeof executePromote>>
-  | Awaited<ReturnType<typeof importTarget>>;
+  | Awaited<ReturnType<typeof importTarget>>
+  | Awaited<ReturnType<typeof checkUpstream>>
+  | Awaited<ReturnType<typeof fetchUpstreamSkillDryRun>>
+  | Awaited<ReturnType<typeof importUpstreamSkill>>;
 
 export type CommandModule = {
   name: CommandName;

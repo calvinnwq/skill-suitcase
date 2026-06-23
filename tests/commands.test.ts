@@ -21,7 +21,8 @@ test("command registry exposes every public command explicitly", () => {
     "reconcile",
     "repair",
     "promote",
-    "import-target"
+    "import-target",
+    "upstream"
   ]);
 });
 
@@ -68,6 +69,64 @@ test("parseCommandArgs preserves repeated track skill filters", () => {
     dryRun: false,
     json: true
   });
+});
+
+test("parseCommandArgs supports upstream source-refresh actions", () => {
+  assert.deepEqual(parseCommandArgs([
+    "upstream",
+    "check",
+    "--source",
+    fixtureSource,
+    "--json"
+  ]), {
+    command: "upstream",
+    upstreamAction: "check",
+    source: fixtureSource,
+    dryRun: false,
+    json: true
+  });
+
+  assert.deepEqual(parseCommandArgs([
+    "upstream",
+    "fetch",
+    "--source",
+    fixtureSource,
+    "--skill",
+    "hyperframes",
+    "--dry-run",
+    "--json"
+  ]), {
+    command: "upstream",
+    upstreamAction: "fetch",
+    source: fixtureSource,
+    skill: ["hyperframes"],
+    dryRun: true,
+    json: true
+  });
+
+  assert.deepEqual(parseCommandArgs([
+    "upstream",
+    "import",
+    "--source",
+    fixtureSource,
+    "--skill",
+    "hyperframes",
+    "--apply",
+    "--json"
+  ]), {
+    command: "upstream",
+    upstreamAction: "import",
+    source: fixtureSource,
+    skill: ["hyperframes"],
+    apply: true,
+    dryRun: false,
+    json: true
+  });
+
+  assert.throws(
+    () => parseCommandArgs(["upstream", "install", "--source", fixtureSource, "--json"]),
+    /Unknown upstream action: install/
+  );
 });
 
 test("parseCommandArgs supports explicit reconcile dry-run and apply modes", () => {
