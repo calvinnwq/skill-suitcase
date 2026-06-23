@@ -198,6 +198,9 @@ first or require explicit approval for the real agent home and catalog repo.
 For a machine with Codex and Claude but no OpenClaw, keep the catalog as the
 shared source of truth and supply local paths at command time:
 
+Do not run `skills.sh` or `npx skills` directly against live Codex or Claude homes for new-machine setup.
+If an upstream-managed skill needs a refresh, fetch it through the catalog-only source refresh lane first, review the ordinary repository diff, then use the normal Suitcase target sync commands below.
+
 ```bash
 cd ~/repos/skill-suitcase
 pnpm install

@@ -97,6 +97,9 @@ Use the catalog as the source of truth:
 export SRC="$HOME/repos/skills"
 ```
 
+New-machine setup installs from this catalog through Skill Suitcase, not directly from `skills.sh` or `npx skills`.
+If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the repository diff, and then resume the normal Suitcase audit and sync flow.
+
 ## 4. Read-Only Audit First
 
 With a global CLI:
