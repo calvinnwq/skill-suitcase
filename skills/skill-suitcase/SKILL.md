@@ -182,7 +182,10 @@ intentional local edit you want in the repo, import it the other direction
 "$CLI" status --source "$SRC" --target openclaw --json
 ```
 
-For missing or behind skills, stage an immutable bundle and apply the artifact:
+For missing, behind, or receipt-owned dirty+behind skills, stage an immutable
+bundle and apply the artifact. The dirty+behind case is allowed only when the
+catalog is ahead and the approved bundle writes that same skill; ordinary dirty
+edits still require `repair` or `import-target` after inspection:
 
 ```bash
 TMP="$(mktemp -d /tmp/skill-suitcase-codex.XXXXXX)"
@@ -224,6 +227,8 @@ Status meanings:
 
 - `current`: installed content and receipt match the catalog.
 - `missing` or `behind`: stage with `pack --output`, then apply the artifact.
+  A receipt-owned `dirty` skill whose receipt hash is also behind the catalog can
+  use the same pack/apply path when the approved artifact writes that skill.
 - `unknown`: existing target lacks a usable Suitcase receipt. Use `track` for
   exact matches or selected `reconcile` for catalog-owned receiptless drift.
 - `dirty`: target differs from the last recorded Suitcase install. Stop and

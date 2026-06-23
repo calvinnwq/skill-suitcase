@@ -307,6 +307,8 @@ export async function apply({
   );
   const preApplySummary = summarizeStatus(targetStatuses);
 
+  const writeEntries = collectApplyEntries(diffResult.entries);
+  const skillsWithWrites = new Set(writeEntries.items.map((entry) => entry.skill));
   const preApplyErrors: ApplyFinding[] = [];
 
   if (preStatus.errors.length > 0) {
@@ -326,6 +328,13 @@ export async function apply({
   }
 
   for (const targetStatus of targetStatuses) {
+    if (
+      targetStatus.status === "dirty"
+      && isApprovedDirtyBehindUpdate({ statusItem: targetStatus, skillsWithWrites })
+    ) {
+      continue;
+    }
+
     if (targetStatus.status === "dirty" || targetStatus.status === "unknown") {
       preApplyErrors.push({
         code: "unsafe_target_state",
@@ -366,7 +375,6 @@ export async function apply({
     });
   }
 
-  const writeEntries = collectApplyEntries(diffResult.entries);
   if (writeEntries.errors.length > 0) {
     return failure({
       source: diffResult.source,
@@ -1290,6 +1298,19 @@ function collectApplyEntries(entries: DiffForApply["entries"]): WriteEntries {
   }
 
   return { items, errors };
+}
+
+function isApprovedDirtyBehindUpdate({
+  statusItem,
+  skillsWithWrites
+}: {
+  statusItem: StatusItem;
+  skillsWithWrites: Set<string>;
+}): boolean {
+  return statusItem.installedHash !== null
+    && statusItem.currentHash !== null
+    && statusItem.installedHash !== statusItem.currentHash
+    && skillsWithWrites.has(statusItem.skill);
 }
 
 function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {

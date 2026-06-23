@@ -1025,6 +1025,78 @@ test("apply does not mutate a dirty target on refusal", async (t) => {
   assert.equal(afterReceipt, beforeReceipt ?? null);
 });
 
+test("apply updates a dirty target when the receipt is behind the approved catalog diff", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-dirty-behind-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-dirty-behind-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"old catalog\");\n");
+
+  const targetSkill = path.join(targetRoot, "office-hours");
+  await mkdir(targetSkill, { recursive: true });
+  await cp(sourceSkill, targetSkill, { recursive: true });
+  const oldHash = await hashDirectory(sourceSkill);
+  await upsertAndWriteReceipt({
+    installRoot: targetRoot,
+    skillName: "office-hours",
+    installRecord: {
+      skill: "office-hours",
+      agent: "openclaw",
+      target: "openclaw",
+      mode: "copy",
+      source: {
+        path: sourceSkill
+      },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      version: "2026.06.11",
+      sourceHash: oldHash,
+      installedFiles: []
+    }
+  });
+
+  await writeFile(path.join(targetSkill, "runtime.js"), "console.log(\"target drift before catalog update\");\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"new catalog\");\n");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-dirty-behind-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.preApplyStatus.summary.dirty, 1);
+  assert.equal(result.applied.skills.includes("office-hours"), true);
+  assert.equal(result.postApplyStatus?.summary.current, 1);
+  assert.equal(result.postApplyStatus?.summary.dirty, 0);
+  assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new catalog\");\n");
+
+  const receiptText = await readFile(path.join(targetRoot, ".skill-suitcase-receipt.json"), "utf8");
+  const receipt = JSON.parse(receiptText) as {
+    installs?: Record<string, { priorState?: { status?: string }; rollback?: { files?: Array<{ previous?: { kind?: string; bytes?: string } }> } }>;
+  };
+  const record = receipt.installs?.["office-hours"];
+  assert.equal(record?.priorState?.status, "dirty");
+  assert.equal(record?.rollback?.files?.[0]?.previous?.kind, "file");
+});
+
 test("apply refuses unknown target state by default", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-unknown-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-unknown-target-"));
