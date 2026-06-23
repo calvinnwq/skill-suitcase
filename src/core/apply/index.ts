@@ -310,6 +310,7 @@ export async function apply({
 
   const writeEntries = collectApplyEntries(diffResult.entries);
   const skillsWithWrites = new Set(writeEntries.items.map((entry) => entry.skill));
+  const diffEntriesBySkill = groupDiffEntriesBySkill(diffResult.entries);
   const preApplyErrors: ApplyFinding[] = [];
 
   if (preStatus.errors.length > 0) {
@@ -331,7 +332,13 @@ export async function apply({
   for (const targetStatus of targetStatuses) {
     if (
       targetStatus.status === "dirty"
-      && isApprovedDirtyBehindUpdate({ statusItem: targetStatus, skillsWithWrites, receipt, installRoot })
+      && await isApprovedDirtyBehindUpdate({
+        statusItem: targetStatus,
+        skillsWithWrites,
+        diffEntriesBySkill,
+        receipt,
+        installRoot
+      })
     ) {
       continue;
     }
@@ -1301,28 +1308,63 @@ function collectApplyEntries(entries: DiffForApply["entries"]): WriteEntries {
   return { items, errors };
 }
 
-function isApprovedDirtyBehindUpdate({
+function groupDiffEntriesBySkill(entries: DiffForApply["entries"]): Map<string, DiffForApply["entries"]> {
+  const entriesBySkill = new Map<string, DiffForApply["entries"]>();
+  for (const entry of entries) {
+    const bucket = entriesBySkill.get(entry.skill);
+    if (bucket === undefined) {
+      entriesBySkill.set(entry.skill, [entry]);
+      continue;
+    }
+    bucket.push(entry);
+  }
+  return entriesBySkill;
+}
+
+async function isApprovedDirtyBehindUpdate({
   statusItem,
   skillsWithWrites,
+  diffEntriesBySkill,
   receipt,
   installRoot
 }: {
   statusItem: StatusItem;
   skillsWithWrites: Set<string>;
+  diffEntriesBySkill: Map<string, DiffForApply["entries"]>;
   receipt: Receipt;
   installRoot: string;
-}): boolean {
+}): Promise<boolean> {
   const installRecord = findReceiptInstallRecord({
     receipt,
     skillName: statusItem.skill,
     targetPath: statusItem.targetPath,
     installRoot
   });
-  return installRecord?.mode === "copy"
-    && statusItem.installedHash !== null
-    && statusItem.currentHash !== null
-    && statusItem.installedHash !== statusItem.currentHash
-    && skillsWithWrites.has(statusItem.skill);
+  if (
+    installRecord?.mode !== "copy"
+    || statusItem.installedHash === null
+    || statusItem.currentHash === null
+    || statusItem.installedHash === statusItem.currentHash
+    || !skillsWithWrites.has(statusItem.skill)
+    || !(await isPathWithinRoot({ candidatePath: statusItem.targetPath, rootPath: installRoot }))
+    || !(await isRealDirectory(statusItem.targetPath))
+  ) {
+    return false;
+  }
+
+  const skillEntries = diffEntriesBySkill.get(statusItem.skill) ?? [];
+  return skillEntries.length > 0
+    && skillEntries.every((entry) => entry.action === "create" || entry.action === "update" || entry.action === "unchanged")
+    && skillEntries.some((entry) => entry.action === "create" || entry.action === "update");
+}
+
+async function isRealDirectory(targetPath: string): Promise<boolean> {
+  try {
+    const info = await lstat(targetPath);
+    return info.isDirectory() && !info.isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {
