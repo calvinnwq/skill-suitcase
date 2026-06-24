@@ -780,6 +780,10 @@ Like `diff`, `pack` resolves `--target` to an assignment plan, so `--target` may
 be either an assignment name (`openclaw`) or an `assignmentPath` id
 (`codex`). The resolved assignment drives the plan, while the output and
 stored manifest `target` field echoes the value you passed.
+Provider-backed adapter kinds such as OpenCode and Pi are read-only even when
+the catalog declares a custom `assignmentPaths` entry for review. `pack` refuses
+those targets with `read_only_target` before staging an artifact, so broad sync
+cannot turn a provider-managed home into a Suitcase-owned install root.
 
 When the source is a Git checkout, `pack` refuses to materialize any selected
 source skill that contains untracked, non-ignored files. Track or remove those

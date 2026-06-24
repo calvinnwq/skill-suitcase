@@ -145,6 +145,53 @@ assignmentPaths:
   await assert.rejects(() => stat(opencodeRoot));
 });
 
+test("track refuses custom provider assignment paths instead of adopting them", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-provider-alias-src-"));
+  const providerRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-provider-alias-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(providerRoot, { recursive: true, force: true }));
+
+  await mkdir(path.join(sourceRoot, "skills", "office-hours"), { recursive: true });
+  await writeFile(path.join(sourceRoot, "skills", "office-hours", "SKILL.md"), "---\nname: office-hours\n---\n");
+  await mkdir(path.join(providerRoot, "office-hours"), { recursive: true });
+  await writeFile(path.join(providerRoot, "office-hours", "SKILL.md"), "---\nname: office-hours\n---\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  opencode:
+    suitcases:
+      - core
+
+assignmentPaths:
+  reviewed-opencode:
+    kind: opencode-skills-root
+    assignment: opencode
+    path: ${providerRoot}
+
+compatibility:
+  office-hours:
+    agents:
+      - opencode
+`
+  );
+
+  const result = await track({
+    source: sourceRoot,
+    target: "opencode",
+    skills: ["office-hours"]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.installRoot, providerRoot);
+  assert.ok(result.errors.some((error) => error.code === "read_only_target"));
+  await assert.rejects(() => stat(path.join(providerRoot, RECEIPT_FILE)));
+});
+
 test("track refuses canonical gnhf-postflight for Codex slimmer variant targets", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-codex-blocked-src-"));
   const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-codex-blocked-home-"));

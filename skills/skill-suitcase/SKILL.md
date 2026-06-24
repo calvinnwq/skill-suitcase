@@ -148,7 +148,7 @@ same model; do not rewrite the workflow around provider-specific prose.
 | Global Codex | `codex` | `targets --json` | `--codex-home` or `--codex-skills` | live only after approval |
 | OpenClaw Codex home | `openclaw-codex` | `targets --json` | target-specific Codex home if needed | live only after approval |
 | Claude skills root | `claude` | `targets --json` | `--claude-skills` | live only after approval |
-| Provider-managed skills | provider-specific | provider/plugin docs | none in Suitcase | read-only or skip |
+| Provider-managed skills | provider-specific | provider/plugin docs | none in Suitcase | read-only or skip; `pack`/mutation commands refuse even custom manifest assignment paths |
 | Future provider | manifest target id | `targets --json` | provider adapter override if supported | read-only until proven |
 
 For any provider, first inspect the target:

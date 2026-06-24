@@ -417,6 +417,11 @@ planning error before mutation.
 
 Read-only commands may discover provider data and report missing targets, but
 they must not create target roots, receipts, symlinks, or source repo files.
+Provider-backed adapter kinds such as OpenCode and Pi remain read-only even
+when a catalog declares a custom `assignmentPaths` entry for review. Broad
+materialization flows such as `pack`, `apply`, `track`, `reconcile`, `repair`,
+and `import-target` must refuse them instead of converting provider-owned homes
+into Suitcase-managed install roots.
 
 Live mutations require explicit approval input or an approved command mode:
 
