@@ -21,6 +21,7 @@ type ValidationSummary = {
   referencedSkills: number;
   contractsEvaluated: number;
   contractsComplete: number;
+  contractsSkippedUpstream: number;
   findings: number;
 };
 
@@ -116,8 +117,9 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
     }
   }
 
-  const contracts = strict ? await scoreReferencedContracts(sourceRoot, referencedSkills, findings) : [];
   const upstream = await loadUpstreamLock(sourceRoot);
+  const upstreamManagedSkills = new Set(upstream.declarations.map((declaration) => declaration.skill));
+  const contracts = strict ? await scoreReferencedContracts(sourceRoot, referencedSkills, findings, upstreamManagedSkills) : [];
   findings.push(
     ...upstream.findings.map((item) => ({
       level: "error" as const,
@@ -152,6 +154,7 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
       referencedSkills: referencedSkills.size,
       contractsEvaluated: contracts.length,
       contractsComplete: contracts.filter((report) => report.complete).length,
+      contractsSkippedUpstream: strict ? countIntersectingSkills(referencedSkills, upstreamManagedSkills) : 0,
       findings: findings.length
     },
     findings,
@@ -162,11 +165,16 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
 async function scoreReferencedContracts(
   sourceRoot: string,
   referencedSkills: Set<string>,
-  findings: Finding[]
+  findings: Finding[],
+  upstreamManagedSkills: Set<string>
 ): Promise<ContractReport[]> {
   const contracts: ContractReport[] = [];
 
   for (const skillName of [...referencedSkills].sort()) {
+    if (upstreamManagedSkills.has(skillName)) {
+      continue;
+    }
+
     const report = await scoreSkillContract(sourceRoot, skillName);
     contracts.push(report);
 
@@ -199,6 +207,16 @@ async function scoreReferencedContracts(
   }
 
   return contracts;
+}
+
+function countIntersectingSkills(referencedSkills: Set<string>, upstreamManagedSkills: Set<string>): number {
+  let count = 0;
+  for (const skillName of referencedSkills) {
+    if (upstreamManagedSkills.has(skillName)) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function collectReferencedSkills(manifest: Catalog): Set<string> {

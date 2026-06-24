@@ -225,6 +225,12 @@ and stores the last imported catalog content hash under `imported.sha256`.
 This file is catalog source metadata only; it does not grant target write
 authority.
 
+Upstream-managed source is provider-owned, not Skillify-authored catalog source.
+Strict validation must still validate upstream declarations and referenced
+skill presence, but it must not apply the Skillify-10 authoring contract to
+skills declared in the upstream lock. The Skillify contract is for skills we
+create and maintain ourselves.
+
 Source refresh commands should be explicit and staged:
 
 1. `upstream check --source <repo> --json` reports declared upstream-managed

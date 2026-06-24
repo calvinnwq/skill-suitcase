@@ -97,6 +97,9 @@ The declaration file is `.skill-suitcase/upstream-lock.json` with schema
 workspace/home and reports file-level catalog diffs. `upstream import` writes
 only the selected catalog skill directory plus the upstream lock metadata; it
 does not auto-commit and does not install, receipt, or sync targets.
+Strict validation checks the upstream declaration and `SKILL.md` presence for
+these skills, but excludes upstream-managed skills from Skillify-10 contract
+scoring because that contract applies only to locally authored/managed skills.
 
 ## Read-Only Audit
 

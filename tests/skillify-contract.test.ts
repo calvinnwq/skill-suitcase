@@ -458,3 +458,56 @@ assignmentPaths:
   assert.equal(basicResult.summary.contractsEvaluated, 0);
   assert.ok(!basicResult.findings.some((finding) => finding.code.startsWith("skillify_contract")));
 });
+
+test("strict validate skips upstream-managed skills for Skillify contract scoring", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(root, "upstream-video", "# Upstream Video\n\nProvider-owned source shape.\n");
+  await writeSkill(root, "local-broken", "# Local Broken\n\nNo frontmatter.\n");
+  await mkdir(path.join(root, ".skill-suitcase"), { recursive: true });
+  await writeFile(
+    path.join(root, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - upstream-video
+      - local-broken
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    assignment: openclaw
+`
+  );
+  await writeFile(
+    path.join(root, ".skill-suitcase", "upstream-lock.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.upstream-lock.v0",
+      skills: {
+        "upstream-video": {
+          provider: "skills-sh",
+          packageVersion: "1.5.13",
+          upstream: {
+            repo: "heygen-com/hyperframes",
+            skill: "upstream-video"
+          },
+          group: "video"
+        }
+      }
+    }, null, 2)}\n`
+  );
+
+  const result = await validate({ source: root, strict: true });
+
+  assert.equal(result.strict, true);
+  assert.equal(result.summary.referencedSkills, 2);
+  assert.equal(result.summary.upstreamDeclarations, 1);
+  assert.equal(result.summary.contractsEvaluated, 1);
+  assert.equal(result.summary.contractsSkippedUpstream, 1);
+  assert.deepEqual(result.contracts.map((contract) => contract.skill), ["local-broken"]);
+  assert.ok(result.findings.some((finding) => finding.path?.startsWith("skills.local-broken.contract.")));
+  assert.ok(!result.findings.some((finding) => finding.path?.startsWith("skills.upstream-video.contract.")));
+});

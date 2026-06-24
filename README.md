@@ -416,7 +416,9 @@ Each finding has `level`, `code`, `message`, and `path`. Warning codes include
 (manifest relationships, per-skill `SKILL.md` presence, and upstream lock
 metadata when `.skill-suitcase/upstream-lock.json` exists).
 Adding `--strict` extends the same command into strict Skillify-10 contract
-validation for every skill referenced by a suitcase.
+validation for catalog-authored skills referenced by a suitcase. Skills declared
+in `.skill-suitcase/upstream-lock.json` are upstream-managed provider source, so
+strict mode tracks their declarations but skips Skillify-10 scoring for them.
 
 ```bash
 node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --json
@@ -428,7 +430,7 @@ the CLI scores each skill the same way without shelling out to Python.
 All validation results include `summary.upstreamDeclarations`, the number of
 valid upstream-managed skills declared in `.skill-suitcase/upstream-lock.json`.
 
-Strict validation gains two fields:
+Strict validation gains these top-level fields:
 
 - `strict`: `true` when strict scoring ran (`false` for basic validation, where
   `contracts` is always empty).
@@ -438,7 +440,9 @@ Strict validation gains two fields:
   `missing` reasons. Evidence paths are emitted relative to the source root for
   deterministic JSON.
 
-Strict `summary` also gains `contractsEvaluated` and `contractsComplete` counts.
+Strict `summary` also gains `contractsEvaluated`, `contractsComplete`, and
+`contractsSkippedUpstream` counts. `contractsSkippedUpstream` is the number of
+referenced upstream-managed skills excluded from Skillify-10 scoring.
 Upstream lock findings are release-blocking errors.
 Those error codes include `invalid_upstream_lock_json`,
 `invalid_upstream_lock_schema`, `invalid_upstream_skill_name`,
@@ -460,7 +464,7 @@ Strict mode distinguishes warnings from release-blocking failures:
 {
   "ok": false,
   "strict": true,
-  "summary": { "referencedSkills": 4, "upstreamDeclarations": 1, "contractsEvaluated": 4, "contractsComplete": 3, "findings": 3 },
+  "summary": { "referencedSkills": 4, "upstreamDeclarations": 1, "contractsEvaluated": 3, "contractsComplete": 2, "contractsSkippedUpstream": 1, "findings": 3 },
   "contracts": [
     {
       "skill": "office-hours",
