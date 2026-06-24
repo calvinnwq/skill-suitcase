@@ -184,6 +184,11 @@ skill-suitcase diff --source "$SRC" --target claude --claude-skills "$HOME/.clau
 
 Use `node "$CLI"` instead of `skill-suitcase` in those commands when operating
 from a source checkout.
+Provider-backed targets such as OpenCode and Pi are read-only compatibility
+surfaces, even when the catalog declares a custom `assignmentPaths` review root.
+Treat `read_only_target` from `pack`, `apply`, `track`, `reconcile`, `repair`,
+or `import-target` as the expected boundary instead of trying to adopt that
+provider-owned home.
 
 ## 5. Mutate Only After Approval
 

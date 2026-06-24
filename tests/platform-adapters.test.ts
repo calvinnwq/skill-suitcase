@@ -160,6 +160,8 @@ test("manifest assignment paths outrank provider fallbacks by assignment", () =>
   assert.equal(direct.id, "reviewed-opencode");
   assert.equal(direct.source, "manifest");
   assert.equal(direct.path, "/tmp/reviewed-opencode-skills");
+  assert.equal(direct.readOnly, true);
+  assert.equal(direct.provider, "skills.sh");
   assert.deepEqual(assignmentMatches.map((entry) => entry.id), ["reviewed-opencode"]);
   assert.equal(allEntries.some((entry) => entry.id === "opencode" && entry.source === "provider"), false);
 });

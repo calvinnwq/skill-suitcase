@@ -42,6 +42,9 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
   skills.
 - Never force provider-managed Codex skills such as Codex `linear` into Suitcase
   ownership.
+- Never run `pack`, `apply`, `track`, `reconcile`, `repair`, or `import-target`
+  to adopt OpenCode, Pi, or other provider-backed adapter roots, even when the
+  catalog declares a custom manifest `assignmentPaths` entry for review.
 
 ## Setup
 
@@ -148,7 +151,7 @@ same model; do not rewrite the workflow around provider-specific prose.
 | Global Codex | `codex` | `targets --json` | `--codex-home` or `--codex-skills` | live only after approval |
 | OpenClaw Codex home | `openclaw-codex` | `targets --json` | target-specific Codex home if needed | live only after approval |
 | Claude skills root | `claude` | `targets --json` | `--claude-skills` | live only after approval |
-| Provider-managed skills | provider-specific | provider/plugin docs | none in Suitcase | read-only or skip |
+| Provider-managed skills | provider-specific | provider/plugin docs | none in Suitcase | read-only or skip; `pack`/mutation commands refuse even custom manifest assignment paths |
 | Future provider | manifest target id | `targets --json` | provider adapter override if supported | read-only until proven |
 
 For any provider, first inspect the target:
@@ -171,6 +174,8 @@ Use local overrides on machines whose homes differ from the catalog defaults:
 
 For nested or provider-specific homes, inspect `targets` first and use only
 install roots that exist on the machine and are intended to be Suitcase-owned.
+Provider-backed OpenCode and Pi roots are not Suitcase-owned, so a
+`read_only_target` refusal is the correct outcome for pack or mutation flows.
 
 ## Sync Workflow
 

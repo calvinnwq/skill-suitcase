@@ -306,6 +306,21 @@ test("operator-facing docs describe upstream lineage reporting", async () => {
   }
 });
 
+test("operator-facing docs describe provider-managed read-only boundaries", async () => {
+  const architecture = await loadNormalized("ARCHITECTURE.md");
+  assert.ok(architecture.includes("provider-backed adapter kinds"), "ARCHITECTURE.md should name provider-backed adapter kinds");
+  assert.ok(architecture.includes("custom `assignmentpaths` entry"), "ARCHITECTURE.md should cover custom assignmentPaths entries");
+  assert.ok(architecture.includes("must refuse"), "ARCHITECTURE.md should require mutation refusal");
+
+  const readme = await loadNormalized("README.md");
+  assert.ok(readme.includes("read-only even when the catalog declares a custom `assignmentpaths` entry"), "README should document custom provider paths as read-only");
+  assert.ok(readme.includes("read_only_target"), "README should document the provider pack refusal code");
+
+  const skill = await loadNormalized("skills/skill-suitcase/SKILL.md");
+  assert.ok(skill.includes("provider-managed skills"), "operator skill should keep a provider-managed row");
+  assert.ok(skill.includes("custom manifest assignment paths"), "operator skill should call out custom manifest provider paths");
+});
+
 test("README points new-machine setup at Suitcase-managed catalog installs", async () => {
   const normalized = await loadNormalized("README.md");
   assert.ok(normalized.includes("catalog-only upstream lane"), "README should mention the catalog-only upstream lane");

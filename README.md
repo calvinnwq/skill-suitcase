@@ -134,12 +134,15 @@ Targets currently exercised against fixture #1:
 - `codex`
 - `openclaw-codex`
 - `claude`
+- `opencode`
+- `pi`
 
 Platform adapters are explicit. `openclaw-skills-root` uses the declared `path`
 as the workspace skill root. `codex-home` installs into `skillsPath` without
 assuming a universal Codex home. `claude-skills-root` uses the declared `path`.
 The `nested-home-codex` adapter is still supported for legacy nested homes, but
 it is not part of the current default target set.
+Provider-backed `opencode-skills-root` and `pi-skills-root` entries are compatibility/reference targets with read-only metadata, not Suitcase-owned install roots.
 
 Smoke-test discovery with:
 
@@ -768,6 +771,10 @@ not write files. If target resolution fails (for example ambiguous or missing
 `assignmentPath` entries), `ok` is `false`, `installRoot` is `null`, and
 `errors` includes structured codes like `ambiguous_install_root` and
 `missing_install_root`.
+Provider-backed adapter kinds such as OpenCode and Pi stay read-only even when
+the catalog declares a custom `assignmentPaths` entry, so `diff` reports
+`readOnly: true` for that resolved install root and does not plan file entries
+for Suitcase adoption.
 Errors tied to a planned source skill may also include a `skill` field.
 
 ## `pack` Output
@@ -780,6 +787,10 @@ Like `diff`, `pack` resolves `--target` to an assignment plan, so `--target` may
 be either an assignment name (`openclaw`) or an `assignmentPath` id
 (`codex`). The resolved assignment drives the plan, while the output and
 stored manifest `target` field echoes the value you passed.
+Provider-backed adapter kinds such as OpenCode and Pi are read-only even when
+the catalog declares a custom `assignmentPaths` entry for review. `pack` refuses
+those targets with `read_only_target` before staging an artifact, so broad sync
+cannot turn a provider-managed home into a Suitcase-owned install root.
 
 When the source is a Git checkout, `pack` refuses to materialize any selected
 source skill that contains untracked, non-ignored files. Track or remove those
@@ -1128,6 +1139,7 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
 - `artifact_target_mismatch` / `artifact_source_mismatch` — approval metadata does not match the apply invocation
 - `artifact_blocked` — artifact contains blocked plan entries
 - `artifact_missing_planned` — artifact contains no planned skills
+- `read_only_target` - the resolved target provider is modeled read-only
 - `source_untracked_files` — a selected source skill contains untracked,
   non-ignored files; track or remove them before packing/applying
 - `source_path_outside_repo` / `source_hygiene_failed` — source hygiene could
@@ -1243,6 +1255,9 @@ runs a `diff` of `--source` against `--target`, then writes a receipt for every
 planned skill whose live install already matches the catalog source exactly.
 By default, `track` remains target-level all-or-nothing: every planned skill must
 match before any receipt is written.
+Provider-backed adapter kinds such as OpenCode and Pi are not adopted by
+`track`, including when a custom manifest `assignmentPaths` entry points at a
+review root for that provider.
 
 Use repeatable `--skill <name>` filters to adopt only selected, already-matching
 skills before applying new skills. In targeted mode, only selected skills are
@@ -1301,6 +1316,7 @@ is blocked. With `--skill`, the same refusal rules apply only to selected skills
 and `summary.planned` counts only selected planned skills. Error codes include:
 
 - `missing_install_root` — the target could not be resolved to an install root
+- `read_only_target` - the resolved target provider is modeled read-only
 - `invalid_skill_filter` — targeted tracking was requested without a non-blank
   skill filter
 - `target_missing` — a planned skill's target directory or file is absent

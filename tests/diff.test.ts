@@ -449,8 +449,9 @@ compatibility:
   assert.equal(result.ok, true);
   assert.equal(result.assignment, "opencode");
   assert.equal(result.installRoot, reviewedRoot);
-  assert.equal(result.readOnly, false);
-  assert.equal(result.summary.create, 1);
+  assert.equal(result.readOnly, true);
+  assert.equal(result.summary.create, 0);
+  assert.equal(result.entries.length, 0);
   assert.deepEqual(result.errors, []);
 });
 

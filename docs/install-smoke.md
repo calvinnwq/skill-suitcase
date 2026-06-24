@@ -25,6 +25,10 @@ Expected target adapters:
   `skillsPath`, and requires `home`, `codexHome`, and `skillsPath`.
 - `claude-skills-root` resolves to platform adapter `claude`, install root field
   `path`.
+- `opencode-skills-root` resolves to platform adapter `opencode`, install root
+  field `path`, compatibility name `opencode`, and read-only provider metadata.
+- `pi-skills-root` resolves to platform adapter `pi`, install root field
+  `path`, compatibility name `pi`, and read-only provider metadata.
 
 Then smoke import and the read-only command boundaries:
 
@@ -40,6 +44,11 @@ node dist/src/cli.js status --source /path/to/skills-catalog --json
 For Git-backed catalogs, `pack` refuses selected source skills with untracked,
 non-ignored files. Commit, stage, or remove scratch files inside selected skills
 before expecting the pack smoke to pass.
+When a catalog declares a custom `assignmentPaths` entry with a provider-backed
+kind such as `opencode-skills-root` or `pi-skills-root`, smoke the boundary as
+read-only: `targets`, `status`, and `diff` may report the target, but `pack`,
+`apply`, `track`, `reconcile`, `repair`, and `import-target` should return
+`read_only_target` instead of writing artifacts, receipts, or target files.
 
 If the catalog declares upstream-managed skills in
 `.skill-suitcase/upstream-lock.json`, smoke the source-refresh read-only

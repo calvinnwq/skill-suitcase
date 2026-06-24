@@ -171,6 +171,12 @@ Trust only the exact pinned upstream package in the isolated temp workspace/home
 for catalog source refresh.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.
+Provider-backed adapter kinds such as OpenCode and Pi stay read-only
+compatibility surfaces, including when a catalog declares custom
+`assignmentPaths` review roots.
+`pack`, `apply`, `track`, `reconcile`, `repair`, and `import-target` should
+return `read_only_target` for those roots instead of adopting them as
+Suitcase-owned install targets.
 
 Live mutation requires explicit approval input and should start in disposable
 fixtures or a clearly approved target:
@@ -239,6 +245,8 @@ Before a public announcement or npm publish:
 - Support boundary explains Calvin-local paths versus portable config.
 - No docs imply `skills.sh` runtime delegation is part of the managed installer.
 - Docs that mention `skills.sh` source refresh distinguish catalog-only refresh from live agent-home installs.
+- Docs that mention OpenCode or Pi provider roots describe them as read-only,
+  including custom manifest `assignmentPaths` roots.
 - Docs that mention upstream-managed refresh preserve the separate
   upstream-to-catalog and catalog-to-target lifecycle policy.
 

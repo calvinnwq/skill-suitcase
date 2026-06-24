@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import type { Catalog, TargetOverrides } from "./index.js";
+import { resolvePlatformAdapter } from "../platform-adapters.js";
 
 export type TargetRegistrySource = "manifest" | "provider";
 
@@ -167,10 +168,12 @@ function manifestEntryToTarget(
   const fallbackAssignment = provider?.assignment ?? targetId;
   const assignment = normalized.assignment ?? fallbackAssignment;
   const kind = normalized.kind ?? provider?.kind ?? "";
+  const adapter = resolvePlatformAdapter(kind);
   const nextPath = normalized.path ?? provider?.path ?? null;
   const nextHome = normalized.home ?? provider?.home ?? null;
   const nextCodexHome = normalized.codexHome ?? provider?.codexHome ?? null;
   const nextSkillsPath = normalized.skillsPath ?? provider?.skillsPath ?? null;
+  const adapterProvider = adapter?.metadata.skillsShCompatibility ? SKILLS_SH_PROVIDER : null;
 
   return {
     id: targetId,
@@ -181,8 +184,8 @@ function manifestEntryToTarget(
     home: nextHome,
     codexHome: nextCodexHome,
     skillsPath: nextSkillsPath,
-    provider: provider?.provider ?? null,
-    readOnly: provider?.readOnly ?? false,
+    provider: provider?.provider ?? adapterProvider,
+    readOnly: Boolean(provider?.readOnly || adapter?.metadata.readOnly),
     source: "manifest",
     assignmentPath: stringifyAssignmentPath({
       ...provider?.assignmentPath,
