@@ -489,6 +489,48 @@ test("apply refuses artifact with blocked plan entries", async (t) => {
   assert.equal(result.errors[0]?.code, "artifact_blocked");
 });
 
+test("apply honors sourcePolicy excludes during source hygiene", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-excluded-untracked-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-excluded-untracked-target-"));
+  const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-excluded-untracked-artifact-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(artifactRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `${await readFile(path.join(sourceRoot, "skill-suitcase.yaml"), "utf8")}
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(path.join(sourceSkill, ".cache"), { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"baseline\");\n");
+  git(sourceRoot, "init");
+  git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md", "skills/office-hours/runtime.js");
+  await writeFile(path.join(sourceSkill, ".cache", "generated.js"), "console.log('generated');\n");
+
+  const manifestPath = await writeArtifactManifest(artifactRoot, {
+    sourceRoot,
+    target: "openclaw",
+    plannedSkills: ["office-hours"]
+  });
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    artifact: manifestPath
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(await readFile(path.join(targetRoot, "office-hours", "runtime.js"), "utf8"), "console.log(\"baseline\");\n");
+  await assert.rejects(() => lstat(path.join(targetRoot, "office-hours", ".cache", "generated.js")));
+});
+
 test("apply refuses artifact installs when selected source has untracked files", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-untracked-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-untracked-target-"));

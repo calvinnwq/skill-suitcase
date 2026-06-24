@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assessPlanLock, type PlanLock, PLAN_LOCK_SCHEMA } from "../planning/plan-lock.js";
-import type { TargetOverrides } from "../catalog/index.js";
+import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
 import {
   classifySymlinkInstall,
@@ -269,9 +269,11 @@ export async function apply({
     });
   }
 
+  const { manifest } = await loadCatalog(diffResult.source, { targetOverrides });
   const hygiene = checkSelectedSourceHygiene({
     sourceRoot: diffResult.source,
-    plannedSkills: diffResult.planned
+    plannedSkills: diffResult.planned,
+    sourcePolicy: manifest.sourcePolicy
   });
   if (!hygiene.ok) {
     return failure({
