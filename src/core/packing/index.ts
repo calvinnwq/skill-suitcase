@@ -3,7 +3,10 @@ import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type LoadedCatalog, type TargetOverrides } from "../catalog/index.js";
-import { resolveTargetRegistryEntryFromManifest } from "../catalog/target-registry.js";
+import {
+  findTargetRegistryEntriesByAssignment,
+  resolveTargetRegistryEntryFromManifest
+} from "../catalog/target-registry.js";
 import { plan } from "../planning/index.js";
 import { type PlanResult } from "../planning/index.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
@@ -115,8 +118,7 @@ export async function pack({
   }
 
   const { sourceRoot, manifestPath, manifest } = await loadCatalog(source, { targetOverrides });
-  const targetEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides);
-  if (targetEntry?.readOnly === true) {
+  if (isReadOnlyPackTarget(manifest, target, targetOverrides)) {
     const sourceCommit = resolveSourceCommit(sourceRoot);
     const errors: ErrorLike[] = [{
       code: "read_only_target",
@@ -226,6 +228,20 @@ export async function pack({
   }
 
   return result;
+}
+
+function isReadOnlyPackTarget(
+  manifest: LoadedCatalog["manifest"],
+  target: string,
+  targetOverrides?: TargetOverrides | undefined
+): boolean {
+  const targetEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides);
+  if (targetEntry?.readOnly === true) {
+    return true;
+  }
+
+  return findTargetRegistryEntriesByAssignment(manifest, target, targetOverrides)
+    .some((entry) => entry.readOnly === true);
 }
 
 function buildArtifactRecord({

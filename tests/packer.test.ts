@@ -95,6 +95,60 @@ compatibility:
   await assert.rejects(() => access(path.join(output, ".skill-suitcase")));
 });
 
+test("pack refuses ambiguous provider-modeled read-only target assignments", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-provider-ambiguous-"));
+  const output = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-provider-ambiguous-output-"));
+  const firstRoot = path.join(source, "reviewed-opencode-skills-a");
+  const secondRoot = path.join(source, "reviewed-opencode-skills-b");
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(output, { recursive: true, force: true }));
+
+  await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });
+  await mkdir(firstRoot, { recursive: true });
+  await mkdir(secondRoot, { recursive: true });
+  await writeFile(path.join(source, "skills", "office-hours", "SKILL.md"), "# Office Hours\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  opencode:
+    suitcases:
+      - core
+
+assignmentPaths:
+  reviewed-opencode-a:
+    kind: opencode-skills-root
+    assignment: opencode
+    path: ${firstRoot}
+  reviewed-opencode-b:
+    kind: opencode-skills-root
+    assignment: opencode
+    path: ${secondRoot}
+
+compatibility:
+  office-hours:
+    agents:
+      - opencode
+`
+  );
+
+  const dryRun = await pack({ source, target: "opencode", dryRun: true });
+  assert.equal(dryRun.ok, false);
+  assert.equal(dryRun.summary.files, 0);
+  assert.equal(dryRun.files.length, 0);
+  assert.equal(dryRun.errors.some((error) => error.code === "read_only_target"), true);
+
+  const staged = await pack({ source, target: "opencode", output });
+  assert.equal(staged.ok, false);
+  assert.equal(staged.bundle.artifactPath, null);
+  assert.equal(staged.summary.files, 0);
+  await assert.rejects(() => access(path.join(output, ".skill-suitcase")));
+});
+
 test("pack refuses non dry-run mode", async () => {
   await assert.rejects(
     () => pack({ source: fixtureSource, target: "openclaw", dryRun: false }),
