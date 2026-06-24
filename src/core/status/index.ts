@@ -99,6 +99,10 @@ type StatusCheckResult = {
   currentHash: string | null;
   errors: StatusFinding[];
 };
+type StatusLineageResult = {
+  lineageBySkill: Map<string, Omit<UpstreamLineage, "target">>;
+  errors: StatusFinding[];
+};
 type ReceiptReadingResult = {
   found: boolean;
   receipt: {
@@ -196,7 +200,9 @@ export async function status({
     };
   }
   const registryEntries = resolveTargetRegistryEntries(manifest, targetOverrides);
-  const upstreamLineageBySkill = await loadStatusLineage(sourceRoot);
+  const lineageResult = await loadStatusLineage(sourceRoot);
+  const upstreamLineageBySkill = lineageResult.lineageBySkill;
+  errors.push(...lineageResult.errors);
   const exactTargetExists = target !== undefined &&
     target.trim().length > 0 &&
     registryEntries.some((entry) => entry.id === target);
@@ -292,9 +298,10 @@ export async function status({
         blocked,
         assignmentName,
         assignmentPathId,
-      kind,
+        kind,
         installRoot
       });
+      attachStatusLineage(blockedStatus, upstreamLineageBySkill.get(blocked.skill));
       const blockedError = {
         code: "blocked_skill",
         message: `Skill ${blocked.skill} is blocked for ${assignmentName}: ${blocked.reason}`,
@@ -378,16 +385,7 @@ export async function status({
         variant: planned.variant
       };
       const upstream = upstreamLineageBySkill.get(planned.skill);
-      if (upstream !== undefined) {
-        resultStatus.lineage = {
-          ...upstream,
-          target: {
-            status: resultStatus.status,
-            receiptHash: resultStatus.installedHash,
-            receiptCommit: resultStatus.installedCommit
-          }
-        };
-      }
+      attachStatusLineage(resultStatus, upstream);
 
       if (!VALID_STATUSES.has(resultStatus.status)) {
         errors.push({
@@ -424,17 +422,62 @@ export async function status({
   };
 }
 
-async function loadStatusLineage(sourceRoot: string): Promise<Map<string, Omit<UpstreamLineage, "target">>> {
-  const loaded = await loadUpstreamLock(sourceRoot).catch(() => null);
-  if (loaded === null || !loaded.ok) {
-    return new Map();
+async function loadStatusLineage(sourceRoot: string): Promise<StatusLineageResult> {
+  let loaded: Awaited<ReturnType<typeof loadUpstreamLock>>;
+  try {
+    loaded = await loadUpstreamLock(sourceRoot);
+  } catch (error) {
+    return {
+      lineageBySkill: new Map(),
+      errors: [
+        {
+          code: "upstream_lock_load_failed",
+          message: `Unable to load upstream lock lineage: ${errorMessage(error)}`,
+          scope: "upstream"
+        }
+      ]
+    };
   }
-  return new Map(
-    loaded.declarations.map((entry) => {
-      const { target: _target, ...lineage } = upstreamLineage(entry);
-      return [entry.skill, lineage];
-    })
-  );
+  const errors = loaded.findings.map((item): StatusFinding => {
+    const finding: StatusFinding = {
+      code: item.code,
+      message: item.message,
+      scope: "upstream"
+    };
+    if (item.path !== null) {
+      finding.path = item.path;
+    }
+    return finding;
+  });
+  if (!loaded.ok) {
+    return {
+      lineageBySkill: new Map(),
+      errors
+    };
+  }
+  return {
+    lineageBySkill: new Map(
+      loaded.declarations.map((entry) => {
+        const { target: _target, ...lineage } = upstreamLineage(entry);
+        return [entry.skill, lineage];
+      })
+    ),
+    errors
+  };
+}
+
+function attachStatusLineage(status: StatusItem, upstream: Omit<UpstreamLineage, "target"> | undefined): void {
+  if (upstream === undefined) {
+    return;
+  }
+  status.lineage = {
+    ...upstream,
+    target: {
+      status: status.status,
+      receiptHash: status.installedHash,
+      receiptCommit: status.installedCommit
+    }
+  };
 }
 
 type BlockedStatusInput = {

@@ -214,6 +214,132 @@ compatibility:
   });
 });
 
+test("status attaches upstream lineage for blocked upstream-managed skills", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-blocked-upstream-source-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-blocked-upstream-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "hyperframes");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(path.join(sourceRoot, ".skill-suitcase"), { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: hyperframes\nversion: 1.0.0\n---\n");
+  const sourceHash = await hashDirectory(sourceSkill);
+  await writeFile(
+    path.join(sourceRoot, ".skill-suitcase", "upstream-lock.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.upstream-lock.v0",
+      skills: {
+        hyperframes: {
+          provider: "skills-sh",
+          packageVersion: "1.5.13",
+          upstream: {
+            repo: "heygen-com/hyperframes",
+            skill: "hyperframes"
+          },
+          group: "video-authoring",
+          imported: {
+            sha256: sourceHash,
+            packageVersion: "1.5.13",
+            at: "2026-06-24T01:00:00.000Z",
+            source: "skills-sh:heygen-com/hyperframes:hyperframes"
+          }
+        }
+      }
+    }, null, 2)}\n`
+  );
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  video-authoring:
+    skills:
+      - hyperframes
+
+assignments:
+  codex:
+    suitcases:
+      - video-authoring
+
+assignmentPaths:
+  codex:
+    kind: codex-home
+    assignment: codex
+    skillsPath: ${installRoot}
+
+compatibility:
+  hyperframes:
+    blockedAgents:
+      codex: Codex must use a local variant.
+`);
+
+  const result = await status({ source: sourceRoot, target: "codex" });
+  const item = firstItem(result.statuses, "statuses");
+
+  assert.equal(result.ok, false);
+  assert.equal(item.status, "blocked");
+  assert.deepEqual(item.lineage?.target, {
+    status: "blocked",
+    receiptHash: null,
+    receiptCommit: null
+  });
+  assert.equal(item.lineage?.upstream.provider, "skills-sh");
+  assert.equal(item.lineage?.imported?.hash, sourceHash);
+  assert.equal(typeof item.lineage?.catalog.hash, "string");
+});
+
+test("status surfaces malformed upstream lock errors", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-upstream-source-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-bad-upstream-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "hyperframes");
+  const targetSkill = path.join(installRoot, "hyperframes");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(path.join(sourceRoot, ".skill-suitcase"), { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: hyperframes\nversion: 1.0.0\n---\n");
+  await cp(sourceSkill, targetSkill, { recursive: true });
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "hyperframes",
+    version: "1.0.0",
+    sourceHash: await hashDirectory(sourceSkill)
+  });
+  await writeFile(path.join(sourceRoot, ".skill-suitcase", "upstream-lock.json"), "{ not json\n");
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  video-authoring:
+    skills:
+      - hyperframes
+
+assignments:
+  codex:
+    suitcases:
+      - video-authoring
+
+assignmentPaths:
+  codex:
+    kind: codex-home
+    assignment: codex
+    skillsPath: ${installRoot}
+
+compatibility:
+  hyperframes:
+    agents:
+      - codex
+`);
+
+  const result = await status({ source: sourceRoot, target: "codex" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.errors.some((entry) => entry.code === "invalid_upstream_lock_json"), true);
+  const upstreamError = requireValue(
+    result.errors.find((entry) => entry.code === "invalid_upstream_lock_json"),
+    "expected invalid_upstream_lock_json error"
+  );
+  assert.equal(upstreamError.scope, "upstream");
+  assert.equal(upstreamError.path, ".skill-suitcase/upstream-lock.json");
+});
+
 test("status reports provider-modeled read-only targets without requiring live roots", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-provider-"));
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));
