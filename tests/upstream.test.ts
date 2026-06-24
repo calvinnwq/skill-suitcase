@@ -21,6 +21,20 @@ test("upstream check reports declared skills without mutating targets", async (t
   assert.equal(result.summary.declared, 1);
   assert.equal(result.declarations[0]?.skill, "hyperframes");
   assert.equal(result.declarations[0]?.provider, "skills-sh");
+  assert.equal(result.declarations[0]?.importedPackageVersion, "1.0.0");
+  assert.equal(result.declarations[0]?.importedAt, "2026-06-23T08:30:00.000Z");
+  assert.equal(result.declarations[0]?.importedSource, "skills-sh:heygen-com/hyperframes:hyperframes");
+  assert.deepEqual(result.declarations[0]?.lineage.upstream, {
+    provider: "skills-sh",
+    packageName: "skills",
+    packageVersion: "1.0.0",
+    repo: "heygen-com/hyperframes",
+    skill: "hyperframes",
+    group: "hyperframes"
+  });
+  assert.equal(result.declarations[0]?.lineage.imported?.hash, "old-hash");
+  assert.equal(result.declarations[0]?.lineage.catalog.drift, "catalog-hash-drift");
+  assert.equal(result.declarations[0]?.lineage.target, null);
   assert.equal(await readFile(path.join(targetRoot, "sentinel.txt"), "utf8"), "untouched\n");
 });
 
@@ -231,7 +245,14 @@ async function writeUpstreamLock(source: string, importedHash: string | null, pa
     },
     group: "hyperframes"
   };
-  const imported = importedHash === null ? {} : { imported: { sha256: importedHash } };
+  const imported = importedHash === null ? {} : {
+    imported: {
+      sha256: importedHash,
+      packageVersion,
+      at: "2026-06-23T08:30:00.000Z",
+      source: "skills-sh:heygen-com/hyperframes:hyperframes"
+    }
+  };
   await writeFile(
     path.join(source, ".skill-suitcase", "upstream-lock.json"),
     `${JSON.stringify({

@@ -48,7 +48,32 @@ export type UpstreamDeclarationEntry = {
   upstreamSkill: string;
   group: string | null;
   importedHash: string | null;
+  importedPackageVersion: string | null;
+  importedAt: string | null;
+  importedSource: string | null;
   catalogHash: string | null;
+};
+
+export type UpstreamLineage = {
+  upstream: {
+    provider: typeof SKILLS_SH_PROVIDER;
+    packageName: string;
+    packageVersion: string;
+    repo: string;
+    skill: string;
+    group: string | null;
+  };
+  imported: {
+    hash: string;
+    packageVersion: string | null;
+    at: string | null;
+    source: string | null;
+  } | null;
+  catalog: {
+    hash: string | null;
+    drift: "unknown" | "catalog-hash-drift" | "unchanged";
+  };
+  target: null;
 };
 
 export type UpstreamLoadResult = {
@@ -66,8 +91,9 @@ export type UpstreamCheckResult = {
   source: string;
   lockPath: string;
   declarations: Array<UpstreamDeclarationEntry & {
+    lineage: UpstreamLineage;
     packageAvailable: boolean;
-    refresh: "unknown" | "catalog-hash-drift" | "unchanged";
+    refresh: UpstreamLineage["catalog"]["drift"];
     errors: UpstreamFinding[];
   }>;
   summary: {
@@ -201,13 +227,10 @@ export async function checkUpstream(source: string): Promise<UpstreamCheckResult
     const entryErrors = packageAvailable ? [] : [
       finding("upstream_package_runner_missing", "Unable to run npm for pinned skills-sh package checks.", `upstream.skills.${entry.skill}`)
     ];
-    const refresh = entry.importedHash !== null && entry.catalogHash !== null && entry.importedHash !== entry.catalogHash
-      ? "catalog-hash-drift" as const
-      : entry.importedHash !== null && entry.catalogHash !== null
-        ? "unchanged" as const
-        : "unknown" as const;
+    const refresh = upstreamCatalogDrift(entry);
     return {
       ...entry,
+      lineage: upstreamLineage(entry),
       packageAvailable,
       refresh,
       errors: entryErrors
@@ -270,6 +293,42 @@ export async function fetchUpstreamSkillDryRun(
   } finally {
     await prepared.cleanup();
   }
+}
+
+export function upstreamCatalogDrift(entry: Pick<UpstreamDeclarationEntry, "importedHash" | "catalogHash">): UpstreamLineage["catalog"]["drift"] {
+  if (entry.importedHash !== null && entry.catalogHash !== null && entry.importedHash !== entry.catalogHash) {
+    return "catalog-hash-drift";
+  }
+  if (entry.importedHash !== null && entry.catalogHash !== null) {
+    return "unchanged";
+  }
+  return "unknown";
+}
+
+export function upstreamLineage(entry: UpstreamDeclarationEntry): UpstreamLineage {
+  return {
+    upstream: {
+      provider: entry.provider,
+      packageName: entry.packageName,
+      packageVersion: entry.packageVersion,
+      repo: entry.upstreamRepo,
+      skill: entry.upstreamSkill,
+      group: entry.group
+    },
+    imported: entry.importedHash === null
+      ? null
+      : {
+          hash: entry.importedHash,
+          packageVersion: entry.importedPackageVersion,
+          at: entry.importedAt,
+          source: entry.importedSource
+        },
+    catalog: {
+      hash: entry.catalogHash,
+      drift: upstreamCatalogDrift(entry)
+    },
+    target: null
+  };
 }
 
 export async function importUpstreamSkill(
@@ -648,6 +707,9 @@ async function declarationEntryForSkill(
     upstreamSkill: declaration.upstream.skill,
     group: declaration.group ?? null,
     importedHash: declaration.imported?.sha256 ?? null,
+    importedPackageVersion: declaration.imported?.packageVersion ?? null,
+    importedAt: declaration.imported?.at ?? null,
+    importedSource: declaration.imported?.source ?? null,
     catalogHash
   };
 }

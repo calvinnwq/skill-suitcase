@@ -229,6 +229,17 @@ const UPSTREAM_LIFECYCLE_PHRASES = [
   "prove rollback"
 ];
 
+const UPSTREAM_LINEAGE_PHRASES = [
+  "lineage",
+  "upstream package/version",
+  "upstream repo/skill",
+  "imported hash",
+  "current catalog hash",
+  "target status",
+  "receipt hash",
+  "receipt commit"
+];
+
 function assertDocumentsUpstreamSourceRefresh(label: string, normalized: string): void {
   for (const phrase of UPSTREAM_SOURCE_REFRESH_PHRASES) {
     assert.ok(
@@ -243,6 +254,15 @@ function assertDocumentsUpstreamLifecycle(label: string, normalized: string): vo
     assert.ok(
       normalized.includes(phrase),
       `${label} should document the upstream lifecycle phrase: ${phrase}`
+    );
+  }
+}
+
+function assertDocumentsUpstreamLineage(label: string, normalized: string): void {
+  for (const phrase of UPSTREAM_LINEAGE_PHRASES) {
+    assert.ok(
+      normalized.includes(phrase),
+      `${label} should document the upstream lineage phrase: ${phrase}`
     );
   }
 }
@@ -273,6 +293,16 @@ test("operator-facing docs define the upstream-managed lifecycle policy", async 
     "skills/skill-suitcase/SKILL.md"
   ]) {
     assertDocumentsUpstreamLifecycle(file, await loadNormalized(file));
+  }
+});
+
+test("operator-facing docs describe upstream lineage reporting", async () => {
+  for (const file of [
+    "ARCHITECTURE.md",
+    "README.md",
+    "skills/skill-suitcase/SKILL.md"
+  ]) {
+    assertDocumentsUpstreamLineage(file, await loadNormalized(file));
   }
 });
 

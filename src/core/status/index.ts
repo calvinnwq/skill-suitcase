@@ -18,6 +18,11 @@ import {
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
+import {
+  loadUpstreamLock,
+  upstreamLineage,
+  type UpstreamLineage
+} from "../upstream/index.js";
 
 type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
 type StatusSummary = {
@@ -53,7 +58,15 @@ type StatusItem = {
   currentCommit: string | null;
   installedHash: string | null;
   currentHash: string | null;
+  lineage?: StatusLineage;
   variant?: string;
+};
+type StatusLineage = Omit<UpstreamLineage, "target"> & {
+  target: {
+    status: StatusValue;
+    receiptHash: string | null;
+    receiptCommit: string | null;
+  };
 };
 type StatusAssignment = {
   assignmentPath: string;
@@ -183,6 +196,7 @@ export async function status({
     };
   }
   const registryEntries = resolveTargetRegistryEntries(manifest, targetOverrides);
+  const upstreamLineageBySkill = await loadStatusLineage(sourceRoot);
   const exactTargetExists = target !== undefined &&
     target.trim().length > 0 &&
     registryEntries.some((entry) => entry.id === target);
@@ -363,6 +377,17 @@ export async function status({
         currentHash: check.currentHash,
         variant: planned.variant
       };
+      const upstream = upstreamLineageBySkill.get(planned.skill);
+      if (upstream !== undefined) {
+        resultStatus.lineage = {
+          ...upstream,
+          target: {
+            status: resultStatus.status,
+            receiptHash: resultStatus.installedHash,
+            receiptCommit: resultStatus.installedCommit
+          }
+        };
+      }
 
       if (!VALID_STATUSES.has(resultStatus.status)) {
         errors.push({
@@ -397,6 +422,19 @@ export async function status({
     summary,
     errors
   };
+}
+
+async function loadStatusLineage(sourceRoot: string): Promise<Map<string, Omit<UpstreamLineage, "target">>> {
+  const loaded = await loadUpstreamLock(sourceRoot).catch(() => null);
+  if (loaded === null || !loaded.ok) {
+    return new Map();
+  }
+  return new Map(
+    loaded.declarations.map((entry) => {
+      const { target: _target, ...lineage } = upstreamLineage(entry);
+      return [entry.skill, lineage];
+    })
+  );
 }
 
 type BlockedStatusInput = {

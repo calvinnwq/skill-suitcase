@@ -271,11 +271,17 @@ Lifecycle cases:
 
 | Case | Required behavior |
 | --- | --- |
-| Upstream unchanged | `upstream check` reports declarations and imported/catalog hashes. No target action is implied. |
+| Upstream unchanged | `upstream check` reports declarations and lineage metadata, including upstream package/version, imported hash, and current catalog hash. No target action is implied. |
 | Upstream changed | `upstream fetch --dry-run` shows a catalog diff. `upstream import --apply` may update only the selected catalog skill and upstream lock after selected source hygiene passes. Git review/commit happens before target sync. |
 | Local catalog edit to upstream-managed source | Treat this as catalog-hash drift from the last imported hash. Do not silently overwrite it with upstream. Either commit it as a deliberate catalog change, revert it, or intentionally fork/adopt the skill out of upstream-managed mode in a future explicit policy slice. |
 | Upstream removed or renamed | Fetch/import must report the missing upstream skill and preserve the existing catalog source and lock until an operator decides whether to keep, fork/adopt, rename, or delete the catalog skill. |
 | Target drift from an upstream-managed catalog skill | Use ordinary target status semantics. `track` exact matches, `pack`/`apply` missing or behind targets, and stop on dirty targets for `repair` or `import-target`. Do not call `npx skills` against the live target as a shortcut. |
+
+Status reports attach the same lineage object to upstream-managed skill entries
+and fill the target block from the selected target receipt state. That keeps the
+two drift axes separate while making the full chain visible in one JSON entry:
+upstream package/version, upstream repo/skill, imported hash, current catalog
+hash, target status, receipt hash, and receipt commit.
 
 Local patches to upstream-managed skills are intentionally conservative in v1:
 there is no implicit patch layer. If a provider-owned skill needs local changes,
