@@ -645,8 +645,19 @@ function parseDeclaration(skill: string, value: unknown): { ok: true; declaratio
   if (imported !== undefined) {
     if (!isRecord(imported)) {
       findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported must be an object.`, `skills.${skill}.imported`));
-    } else if (!isNonBlankString(imported.sha256)) {
-      findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.sha256 must be a non-empty string.`, `skills.${skill}.imported.sha256`));
+    } else {
+      if (!isNonBlankString(imported.sha256)) {
+        findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.sha256 must be a non-empty string.`, `skills.${skill}.imported.sha256`));
+      }
+      if (imported.packageVersion !== undefined && !isExactPackageVersion(imported.packageVersion)) {
+        findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.packageVersion must be an exact package version.`, `skills.${skill}.imported.packageVersion`));
+      }
+      if (imported.at !== undefined && !isIsoDateString(imported.at)) {
+        findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.at must be an ISO timestamp.`, `skills.${skill}.imported.at`));
+      }
+      if (imported.source !== undefined && !isNonBlankString(imported.source)) {
+        findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.source must be a non-empty string.`, `skills.${skill}.imported.source`));
+      }
     }
   }
 
@@ -1098,6 +1109,14 @@ function isPlainSegment(value: string): boolean {
 function isExactPackageVersion(value: unknown): value is string {
   return typeof value === "string" &&
     /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value);
+}
+
+function isIsoDateString(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.toISOString() === value;
 }
 
 function isSameOrInsidePath(candidatePath: string, rootPath: string): boolean {

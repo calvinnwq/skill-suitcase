@@ -38,6 +38,46 @@ test("upstream check reports declared skills without mutating targets", async (t
   assert.equal(await readFile(path.join(targetRoot, "sentinel.txt"), "utf8"), "untouched\n");
 });
 
+test("upstream check rejects malformed imported lineage metadata", async (t) => {
+  const { source } = await createCatalog(t);
+  await writeFile(
+    path.join(source, ".skill-suitcase", "upstream-lock.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.upstream-lock.v0",
+      skills: {
+        hyperframes: {
+          provider: "skills-sh",
+          packageVersion: "1.0.0",
+          upstream: {
+            repo: "heygen-com/hyperframes",
+            skill: "hyperframes"
+          },
+          imported: {
+            sha256: "old-hash",
+            packageVersion: "latest",
+            at: "",
+            source: 42
+          }
+        }
+      }
+    }, null, 2)}\n`
+  );
+
+  const result = await checkUpstream(source);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.errors.map((error) => error.code), [
+    "invalid_upstream_imported",
+    "invalid_upstream_imported",
+    "invalid_upstream_imported"
+  ]);
+  assert.deepEqual(result.errors.map((error) => error.path), [
+    "skills.hyperframes.imported.packageVersion",
+    "skills.hyperframes.imported.at",
+    "skills.hyperframes.imported.source"
+  ]);
+});
+
 test("upstream fetch dry-run compares fetched source without catalog or target writes", async (t) => {
   const { source, targetRoot } = await createCatalog(t);
   await writeUpstreamLock(source, null);
