@@ -146,9 +146,9 @@ skill-suitcase upstream fetch --source "$SRC" --skill <skill-name> --dry-run --j
 skill-suitcase upstream import --source "$SRC" --skill <skill-name> --apply --json
 ```
 
-`upstream import` writes only the selected catalog skill directory and
-`.skill-suitcase/upstream-lock.json`. It does not auto-commit and does not write
-to live Codex, Claude, OpenClaw, or other agent homes.
+`upstream import` writes only the selected catalog skill directory and `.skill-suitcase/upstream-lock.json`.
+It refuses malformed upstream lock metadata before fetching.
+It does not auto-commit and does not write to live Codex, Claude, OpenClaw, or other agent homes.
 
 Lifecycle policy:
 

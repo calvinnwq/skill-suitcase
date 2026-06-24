@@ -88,13 +88,14 @@ Rules:
    identity, group labels, imported hash, and last imported provenance.
 4. Treat the fetched upstream copy as proposed source, not as an install. Show a
    catalog diff before importing it.
-5. Import only into the catalog source tree, and only after the selected source
+5. Validate upstream lock metadata before provider execution, and abort malformed locks without fetching.
+6. Import only into the catalog source tree, and only after the selected source
    skill has no uncommitted edits or untracked files.
-6. Do not auto-commit. The import should produce ordinary repository diffs for
+7. Do not auto-commit. The import should produce ordinary repository diffs for
    review.
-7. New-machine setup still installs from the skills repo through Skill Suitcase,
+8. New-machine setup still installs from the skills repo through Skill Suitcase,
    not from `skills.sh` directly.
-8. After import, use normal `pack`, `apply`, `track`, `status`, and `diff`
+9. After import, use normal `pack`, `apply`, `track`, `status`, and `diff`
    flows to synchronize targets and write receipts.
 
 This lane is useful for upstream-managed skill families such as HyperFrames:
@@ -171,9 +172,9 @@ skill-suitcase upstream import --source "$SRC" --skill hyperframes --apply --jso
 ```
 
 `upstream fetch` and `upstream import` use an isolated temp workspace/home for
-the pinned package execution. `fetch` is read-only and returns a file-level
-catalog diff. `import` writes only to the catalog skill directory and the
-upstream lock file; it does not install, sync, or receipt any live target.
+the pinned package execution.
+`fetch` is read-only and returns a file-level catalog diff.
+`import` refuses malformed lock metadata before fetching, writes only to the catalog skill directory and the upstream lock file on success, and does not install, sync, or receipt any live target.
 
 ## Wrapper Contract For A Future Issue
 
