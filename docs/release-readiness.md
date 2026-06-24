@@ -154,7 +154,7 @@ The import writes only `skills/<name>` and
 `.skill-suitcase/upstream-lock.json`, never live agent homes.
 Keep upstream-to-catalog drift separate from catalog-to-target drift:
 
-- Upstream unchanged: `upstream check` reports declarations and hashes only.
+- Upstream unchanged: `upstream check` reports declaration and lineage metadata only.
 - Upstream changed: fetch, review, import the selected skill after approval,
   commit the catalog diff, then use normal target sync.
 - Local catalog edit: treat it as catalog-hash drift and commit, revert, or
@@ -162,6 +162,9 @@ Keep upstream-to-catalog drift separate from catalog-to-target drift:
 - Upstream removed or renamed: preserve the catalog source and upstream lock
   until an operator chooses keep, fork/adopt, rename, or delete.
 - Target drift: use ordinary `status`, receipts, and target workflows.
+  For upstream-managed skills, `status --json` should surface target status,
+  receipt hash, and receipt commit inside lineage metadata.
+  Target-scoped status should load lineage for reported skills only and should not hash unrelated upstream-managed catalog skills.
   Do not call `npx skills` against live homes as a shortcut.
 
 Trust only the exact pinned upstream package in the isolated temp workspace/home

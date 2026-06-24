@@ -64,12 +64,14 @@ catalog source, refreshes the target receipt, and leaves ordinary git changes
 for review.
 
 The `upstream` command family refreshes catalog source from pinned upstream
-providers. `upstream check` reports declared upstream-managed skills without
-mutation. `upstream fetch --dry-run` fetches one selected skill into an isolated
-temp workspace/home and reports the catalog diff. `upstream import --apply`
-repeats that pinned fetch, refuses dirty selected catalog source, writes only the
-selected catalog skill directory plus `.skill-suitcase/upstream-lock.json`, and
-leaves ordinary git changes for review.
+providers.
+`upstream check` reports declared upstream-managed skills and their lineage
+metadata without mutation.
+`upstream fetch --dry-run` fetches one selected skill into an isolated temp
+workspace/home and reports the catalog diff.
+`upstream import --apply` repeats that pinned fetch, refuses dirty selected
+catalog source, writes only the selected catalog skill directory plus
+`.skill-suitcase/upstream-lock.json`, and leaves ordinary git changes for review.
 
 ## Install
 
@@ -257,7 +259,13 @@ The lock file is catalog metadata, separate from target assignments and receipts
         "repo": "heygen-com/hyperframes",
         "skill": "hyperframes"
       },
-      "group": "hyperframes"
+      "group": "hyperframes",
+      "imported": {
+        "sha256": "previous-catalog-tree-hash",
+        "packageVersion": "1.5.11",
+        "at": "2026-06-24T01:00:00.000Z",
+        "source": "skills-sh:heygen-com/hyperframes:hyperframes"
+      }
     }
   }
 }
@@ -265,6 +273,13 @@ The lock file is catalog metadata, separate from target assignments and receipts
 
 `provider` must be `skills-sh`, `packageVersion` must be an exact pinned
 version, and optional `packageName` defaults to `skills`.
+The optional `imported` block records the last imported catalog tree hash, the
+package version that produced it, the import timestamp, and the provider source
+string.
+`upstream check --json` and `status --json` reuse this metadata in their
+`lineage` blocks so operators can audit upstream-to-catalog and catalog-to-target
+state without stitching reports together.
+Target-scoped `status --json` reports compute lineage only for reported skills and do not hash unrelated upstream-managed catalog skills.
 
 Check declared upstream skills without writing files:
 
@@ -525,8 +540,8 @@ It does not accept target flags because upstream refresh writes catalog source
 only, then ordinary `pack`, `apply`, `status`, and `diff` commands synchronize
 live targets from the reviewed catalog.
 
-`upstream check` is read-only and reports the declarations in
-`.skill-suitcase/upstream-lock.json`:
+`upstream check` is read-only and reports the declarations and lineage metadata
+in `.skill-suitcase/upstream-lock.json`:
 
 ```json
 {
@@ -544,7 +559,31 @@ live targets from the reviewed catalog.
       "upstreamSkill": "hyperframes",
       "group": "hyperframes",
       "importedHash": "previous-catalog-tree-hash",
+      "importedPackageVersion": "1.5.11",
+      "importedAt": "2026-06-24T01:00:00.000Z",
+      "importedSource": "skills-sh:heygen-com/hyperframes:hyperframes",
       "catalogHash": "current-catalog-tree-hash",
+      "lineage": {
+        "upstream": {
+          "provider": "skills-sh",
+          "packageName": "skills",
+          "packageVersion": "1.5.11",
+          "repo": "heygen-com/hyperframes",
+          "skill": "hyperframes",
+          "group": "hyperframes"
+        },
+        "imported": {
+          "hash": "previous-catalog-tree-hash",
+          "packageVersion": "1.5.11",
+          "at": "2026-06-24T01:00:00.000Z",
+          "source": "skills-sh:heygen-com/hyperframes:hyperframes"
+        },
+        "catalog": {
+          "hash": "current-catalog-tree-hash",
+          "drift": "catalog-hash-drift"
+        },
+        "target": null
+      },
       "packageAvailable": true,
       "refresh": "catalog-hash-drift",
       "errors": []
@@ -559,6 +598,10 @@ live targets from the reviewed catalog.
 `unchanged` when the imported hash matches the current catalog tree, and
 `catalog-hash-drift` when the catalog has changed after the last recorded
 import.
+
+`lineage` is the audit-friendly form of the same source data. In
+`upstream check`, `lineage.target` is always `null` because upstream refresh is
+catalog-only and never reads or writes live targets.
 
 `upstream fetch --skill <name> --dry-run` fetches a selected upstream skill into
 an isolated temp workspace/home, validates that the fetched directory remains
@@ -608,11 +651,16 @@ review:
 ```
 
 Upstream error codes include `unknown_upstream_skill`,
+`invalid_upstream_lock_json`, `invalid_upstream_lock_schema`,
+`invalid_upstream_skill_name`, `invalid_upstream_declaration`,
+`unsupported_upstream_provider`, `invalid_upstream_package_version`,
+`invalid_upstream_package_name`, `invalid_upstream_identity`,
+`invalid_upstream_group`, `invalid_upstream_imported`,
 `upstream_package_runner_missing`, `upstream_fetch_failed`,
 `upstream_fetch_missing_skill`, `upstream_fetch_outside_sandbox`,
 `upstream_fetch_missing_skill_file`, `source_hygiene_requires_git`,
-`source_hygiene_failed`, `dirty_catalog_source`,
-`invalid_upstream_package_version`, and `upstream_import_failed`.
+`source_hygiene_failed`, `dirty_catalog_source`, and
+`upstream_import_failed`.
 
 ## `plan` Output
 
@@ -890,10 +938,10 @@ It uses `path` for `openclaw-skills-root` and
           "assignment": "codex",
           "assignmentPath": "codex",
           "kind": "codex-home",
-          "skill": "office-hours",
+          "skill": "hyperframes",
           "status": "current",
           "target": "/tmp/codex/skills",
-          "targetPath": "/tmp/codex/skills/office-hours",
+          "targetPath": "/tmp/codex/skills/hyperframes",
           "reason": "installed skill matches source version and content hash",
           "installedVersion": "2026.06.10",
           "currentVersion": "2026.06.10",
@@ -901,6 +949,31 @@ It uses `path` for `openclaw-skills-root` and
           "currentCommit": "42fe414dc8770117bc0c5c3c8c7619d25627898a",
           "installedHash": "e1c..",
           "currentHash": "e1c..",
+          "lineage": {
+            "upstream": {
+              "provider": "skills-sh",
+              "packageName": "skills",
+              "packageVersion": "1.5.11",
+              "repo": "heygen-com/hyperframes",
+              "skill": "hyperframes",
+              "group": "hyperframes"
+            },
+            "imported": {
+              "hash": "e1c..",
+              "packageVersion": "1.5.11",
+              "at": "2026-06-24T01:00:00.000Z",
+              "source": "skills-sh:heygen-com/hyperframes:hyperframes"
+            },
+            "catalog": {
+              "hash": "e1c..",
+              "drift": "unchanged"
+            },
+            "target": {
+              "status": "current",
+              "receiptHash": "e1c..",
+              "receiptCommit": "deadbeef"
+            }
+          },
           "variant": "canonical"
         }
       ],
@@ -912,10 +985,10 @@ It uses `path` for `openclaw-skills-root` and
       "assignment": "codex",
       "assignmentPath": "codex",
       "kind": "codex-home",
-      "skill": "office-hours",
+      "skill": "hyperframes",
       "status": "current",
       "target": "/tmp/codex/skills",
-      "targetPath": "/tmp/codex/skills/office-hours",
+      "targetPath": "/tmp/codex/skills/hyperframes",
       "reason": "installed skill matches source version and content hash",
       "installedVersion": "2026.06.10",
       "currentVersion": "2026.06.10",
@@ -923,6 +996,12 @@ It uses `path` for `openclaw-skills-root` and
       "currentCommit": "42fe414dc8770117bc0c5c3c8c7619d25627898a",
       "installedHash": "e1c..",
       "currentHash": "e1c..",
+      "lineage": {
+        "upstream": { "provider": "skills-sh", "packageName": "skills", "packageVersion": "1.5.11", "repo": "heygen-com/hyperframes", "skill": "hyperframes", "group": "hyperframes" },
+        "imported": { "hash": "e1c..", "packageVersion": "1.5.11", "at": "2026-06-24T01:00:00.000Z", "source": "skills-sh:heygen-com/hyperframes:hyperframes" },
+        "catalog": { "hash": "e1c..", "drift": "unchanged" },
+        "target": { "status": "current", "receiptHash": "e1c..", "receiptCommit": "deadbeef" }
+      },
       "variant": "canonical"
     }
   ],
@@ -938,6 +1017,15 @@ It uses `path` for `openclaw-skills-root` and
   "errors": []
 }
 ```
+
+For upstream-managed skills, `status` attaches the same `lineage` object and
+fills `lineage.target` with the target receipt state.
+This makes the chain auditable in one status entry: pinned upstream
+package/version, upstream repo/skill, imported hash, current catalog hash and
+drift, target status, receipt hash, and receipt commit.
+`status` loads that lineage lazily for the planned or blocked skills in the selected report, so `status --target <target>` does not hash unrelated upstream-managed catalog skills.
+If the upstream lock is malformed or unreadable, `status` reports upstream-scoped
+errors, returns `ok: false`, and omits lineage until the lock metadata is valid.
 
 `status.status` values:
 

@@ -127,6 +127,12 @@ Optional upstream source refresh audit:
 skill-suitcase upstream check --source "$SRC" --json
 ```
 
+`upstream check --json` reports lineage metadata for upstream-managed skills,
+including the upstream package/version, upstream repo/skill, imported hash, and
+current catalog hash.
+`status --json` carries the same lineage and adds target status, receipt hash,
+and receipt commit when the target skill is upstream-managed.
+Target-scoped status reports should compute lineage only for reported skills and must not hash unrelated upstream-managed catalog skills.
 `validate --strict` also validates `.skill-suitcase/upstream-lock.json` when the
 catalog has one.
 
@@ -146,7 +152,7 @@ to live Codex, Claude, OpenClaw, or other agent homes.
 
 Lifecycle policy:
 
-- Upstream unchanged: `upstream check` reports only; no target action is implied.
+- Upstream unchanged: `upstream check` reports declaration and lineage metadata only, with no target action implied.
 - Upstream changed: review `upstream fetch --dry-run`, import only the selected
   skill after approval, commit the catalog diff, then use normal target sync.
 - Local catalog edit: treat it as catalog-hash drift from the last imported

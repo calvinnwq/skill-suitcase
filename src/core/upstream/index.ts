@@ -20,6 +20,9 @@ export type UpstreamSkillDeclaration = {
     skill: string;
   };
   group?: string;
+  /**
+   * Provenance for the catalog tree last imported from the pinned upstream source.
+   */
   imported?: {
     sha256: string;
     packageVersion?: string;
@@ -48,7 +51,38 @@ export type UpstreamDeclarationEntry = {
   upstreamSkill: string;
   group: string | null;
   importedHash: string | null;
+  importedPackageVersion: string | null;
+  importedAt: string | null;
+  importedSource: string | null;
   catalogHash: string | null;
+};
+
+/**
+ * Audit-friendly lineage for one upstream-managed catalog skill.
+ *
+ * `upstream check` leaves `target` as `null`; target-aware reports such as
+ * `status` fill that block from the selected target receipt state.
+ */
+export type UpstreamLineage = {
+  upstream: {
+    provider: typeof SKILLS_SH_PROVIDER;
+    packageName: string;
+    packageVersion: string;
+    repo: string;
+    skill: string;
+    group: string | null;
+  };
+  imported: {
+    hash: string;
+    packageVersion: string | null;
+    at: string | null;
+    source: string | null;
+  } | null;
+  catalog: {
+    hash: string | null;
+    drift: "unknown" | "catalog-hash-drift" | "unchanged";
+  };
+  target: null;
 };
 
 export type UpstreamLoadResult = {
@@ -66,8 +100,9 @@ export type UpstreamCheckResult = {
   source: string;
   lockPath: string;
   declarations: Array<UpstreamDeclarationEntry & {
+    lineage: UpstreamLineage;
     packageAvailable: boolean;
-    refresh: "unknown" | "catalog-hash-drift" | "unchanged";
+    refresh: UpstreamLineage["catalog"]["drift"];
     errors: UpstreamFinding[];
   }>;
   summary: {
@@ -141,7 +176,17 @@ type UpstreamCommandOptions = {
   now?: () => Date;
 };
 
-export async function loadUpstreamLock(source: string): Promise<UpstreamLoadResult> {
+type UpstreamLoadOptions = {
+  /**
+   * Limit declaration entry construction and catalog hashing to these skills.
+   *
+   * Lock parsing and declaration validation still cover the whole document so
+   * malformed upstream metadata remains visible.
+   */
+  skills?: ReadonlySet<string>;
+};
+
+export async function loadUpstreamLock(source: string, options: UpstreamLoadOptions = {}): Promise<UpstreamLoadResult> {
   const { sourceRoot } = await loadCatalog(source);
   const lockPath = path.join(sourceRoot, DEFAULT_UPSTREAM_LOCK_FILE);
   let parsed: unknown;
@@ -182,7 +227,7 @@ export async function loadUpstreamLock(source: string): Promise<UpstreamLoadResu
   }
 
   const lock = validation.lock;
-  const declarations = await buildDeclarationEntries(sourceRoot, lock);
+  const declarations = await buildDeclarationEntries(sourceRoot, lock, options.skills);
   return {
     ok: true,
     source: sourceRoot,
@@ -201,13 +246,10 @@ export async function checkUpstream(source: string): Promise<UpstreamCheckResult
     const entryErrors = packageAvailable ? [] : [
       finding("upstream_package_runner_missing", "Unable to run npm for pinned skills-sh package checks.", `upstream.skills.${entry.skill}`)
     ];
-    const refresh = entry.importedHash !== null && entry.catalogHash !== null && entry.importedHash !== entry.catalogHash
-      ? "catalog-hash-drift" as const
-      : entry.importedHash !== null && entry.catalogHash !== null
-        ? "unchanged" as const
-        : "unknown" as const;
+    const refresh = upstreamCatalogDrift(entry);
     return {
       ...entry,
+      lineage: upstreamLineage(entry),
       packageAvailable,
       refresh,
       errors: entryErrors
@@ -270,6 +312,42 @@ export async function fetchUpstreamSkillDryRun(
   } finally {
     await prepared.cleanup();
   }
+}
+
+export function upstreamCatalogDrift(entry: Pick<UpstreamDeclarationEntry, "importedHash" | "catalogHash">): UpstreamLineage["catalog"]["drift"] {
+  if (entry.importedHash !== null && entry.catalogHash !== null && entry.importedHash !== entry.catalogHash) {
+    return "catalog-hash-drift";
+  }
+  if (entry.importedHash !== null && entry.catalogHash !== null) {
+    return "unchanged";
+  }
+  return "unknown";
+}
+
+export function upstreamLineage(entry: UpstreamDeclarationEntry): UpstreamLineage {
+  return {
+    upstream: {
+      provider: entry.provider,
+      packageName: entry.packageName,
+      packageVersion: entry.packageVersion,
+      repo: entry.upstreamRepo,
+      skill: entry.upstreamSkill,
+      group: entry.group
+    },
+    imported: entry.importedHash === null
+      ? null
+      : {
+          hash: entry.importedHash,
+          packageVersion: entry.importedPackageVersion,
+          at: entry.importedAt,
+          source: entry.importedSource
+        },
+    catalog: {
+      hash: entry.catalogHash,
+      drift: upstreamCatalogDrift(entry)
+    },
+    target: null
+  };
 }
 
 export async function importUpstreamSkill(
@@ -586,8 +664,19 @@ function parseDeclaration(skill: string, value: unknown): { ok: true; declaratio
   if (imported !== undefined) {
     if (!isRecord(imported)) {
       findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported must be an object.`, `skills.${skill}.imported`));
-    } else if (!isNonBlankString(imported.sha256)) {
-      findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.sha256 must be a non-empty string.`, `skills.${skill}.imported.sha256`));
+    } else {
+      if (!isNonBlankString(imported.sha256)) {
+        findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.sha256 must be a non-empty string.`, `skills.${skill}.imported.sha256`));
+      }
+      if (imported.packageVersion !== undefined && !isExactPackageVersion(imported.packageVersion)) {
+        findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.packageVersion must be an exact package version.`, `skills.${skill}.imported.packageVersion`));
+      }
+      if (imported.at !== undefined && !isIsoDateString(imported.at)) {
+        findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.at must be an ISO timestamp.`, `skills.${skill}.imported.at`));
+      }
+      if (imported.source !== undefined && !isNonBlankString(imported.source)) {
+        findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.source must be a non-empty string.`, `skills.${skill}.imported.source`));
+      }
     }
   }
 
@@ -624,9 +713,16 @@ function parseDeclaration(skill: string, value: unknown): { ok: true; declaratio
   return { ok: true, declaration };
 }
 
-async function buildDeclarationEntries(sourceRoot: string, lock: UpstreamLockDocument): Promise<UpstreamDeclarationEntry[]> {
+async function buildDeclarationEntries(
+  sourceRoot: string,
+  lock: UpstreamLockDocument,
+  selectedSkills?: ReadonlySet<string>
+): Promise<UpstreamDeclarationEntry[]> {
   const entries: UpstreamDeclarationEntry[] = [];
   for (const [skill, declaration] of Object.entries(lock.skills).sort(([left], [right]) => left.localeCompare(right))) {
+    if (selectedSkills !== undefined && !selectedSkills.has(skill)) {
+      continue;
+    }
     entries.push(await declarationEntryForSkill(sourceRoot, skill, declaration));
   }
   return entries;
@@ -648,6 +744,9 @@ async function declarationEntryForSkill(
     upstreamSkill: declaration.upstream.skill,
     group: declaration.group ?? null,
     importedHash: declaration.imported?.sha256 ?? null,
+    importedPackageVersion: declaration.imported?.packageVersion ?? null,
+    importedAt: declaration.imported?.at ?? null,
+    importedSource: declaration.imported?.source ?? null,
     catalogHash
   };
 }
@@ -1036,6 +1135,14 @@ function isPlainSegment(value: string): boolean {
 function isExactPackageVersion(value: unknown): value is string {
   return typeof value === "string" &&
     /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value);
+}
+
+function isIsoDateString(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.toISOString() === value;
 }
 
 function isSameOrInsidePath(candidatePath: string, rootPath: string): boolean {

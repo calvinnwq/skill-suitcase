@@ -115,6 +115,12 @@ Lifecycle policy:
 - Target drift: use ordinary `status` semantics and receipts. Never call
   `npx skills` against live homes as a shortcut.
 
+For upstream-managed skills, `upstream check --json` and `status --json` expose
+lineage metadata so an operator can see the upstream package/version, upstream
+repo/skill, imported hash, current catalog hash and drift, target status,
+receipt hash, and receipt commit without stitching together multiple reports.
+Target-scoped status should load lineage for reported skills only and should not hash unrelated upstream-managed catalog skills.
+
 Trust boundary: trust only the exact pinned upstream package in the isolated
 temp workspace/home for catalog source refresh. Do not trust upstream tooling to
 choose target roots, write receipts, prove rollback, or mutate live agent homes.

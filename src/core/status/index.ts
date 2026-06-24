@@ -18,6 +18,11 @@ import {
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
+import {
+  loadUpstreamLock,
+  upstreamLineage,
+  type UpstreamLineage
+} from "../upstream/index.js";
 
 type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
 type StatusSummary = {
@@ -53,7 +58,15 @@ type StatusItem = {
   currentCommit: string | null;
   installedHash: string | null;
   currentHash: string | null;
+  lineage?: StatusLineage;
   variant?: string;
+};
+type StatusLineage = Omit<UpstreamLineage, "target"> & {
+  target: {
+    status: StatusValue;
+    receiptHash: string | null;
+    receiptCommit: string | null;
+  };
 };
 type StatusAssignment = {
   assignmentPath: string;
@@ -84,6 +97,10 @@ type StatusCheckResult = {
   currentCommit: string | null;
   installedHash: string | null;
   currentHash: string | null;
+  errors: StatusFinding[];
+};
+type StatusLineageResult = {
+  lineageBySkill: Map<string, Omit<UpstreamLineage, "target">>;
   errors: StatusFinding[];
 };
 type ReceiptReadingResult = {
@@ -183,6 +200,7 @@ export async function status({
     };
   }
   const registryEntries = resolveTargetRegistryEntries(manifest, targetOverrides);
+  const statusLineage = createStatusLineageLoader(sourceRoot, errors);
   const exactTargetExists = target !== undefined &&
     target.trim().length > 0 &&
     registryEntries.some((entry) => entry.id === target);
@@ -273,13 +291,22 @@ export async function status({
       continue;
     }
 
+    const upstreamLineageBySkill = await statusLineage.load([
+      ...assignmentPlan.blocked.map((item) => item.skill),
+      ...assignmentPlan.planned.map((item) => item.skill)
+    ]);
+
     for (const blocked of assignmentPlan.blocked) {
       const blockedStatus = blockedStatusFromPlan({
         blocked,
         assignmentName,
         assignmentPathId,
-      kind,
+        kind,
         installRoot
+      });
+      attachStatusLineage(blockedStatus, upstreamLineageBySkill.get(blocked.skill), {
+        receiptHash: null,
+        receiptCommit: null
       });
       const blockedError = {
         code: "blocked_skill",
@@ -363,6 +390,11 @@ export async function status({
         currentHash: check.currentHash,
         variant: planned.variant
       };
+      const upstream = upstreamLineageBySkill.get(planned.skill);
+      attachStatusLineage(resultStatus, upstream, {
+        receiptHash: installRecordResult.installRecord?.sourceHash ?? null,
+        receiptCommit: installRecordResult.installRecord?.sourceCommit ?? null
+      });
 
       if (!VALID_STATUSES.has(resultStatus.status)) {
         errors.push({
@@ -396,6 +428,106 @@ export async function status({
     statuses,
     summary,
     errors
+  };
+}
+
+function createStatusLineageLoader(sourceRoot: string, errors: StatusFinding[]): {
+  load: (skillNames: Iterable<string>) => Promise<Map<string, Omit<UpstreamLineage, "target">>>;
+} {
+  // Status can be target-scoped, so load upstream lineage only for skills that
+  // will appear in the selected report instead of hashing every declared
+  // upstream-managed catalog skill.
+  const lineageBySkill = new Map<string, Omit<UpstreamLineage, "target">>();
+  const loadedSkills = new Set<string>();
+  let loadFailed = false;
+
+  return {
+    async load(skillNames: Iterable<string>): Promise<Map<string, Omit<UpstreamLineage, "target">>> {
+      if (loadFailed) {
+        return lineageBySkill;
+      }
+
+      const missingSkills = [...new Set(skillNames)].filter((skill) => !loadedSkills.has(skill));
+      if (missingSkills.length === 0) {
+        return lineageBySkill;
+      }
+
+      const lineageResult = await loadStatusLineage(sourceRoot, new Set(missingSkills));
+      errors.push(...lineageResult.errors);
+      for (const [skill, lineage] of lineageResult.lineageBySkill) {
+        lineageBySkill.set(skill, lineage);
+      }
+      for (const skill of missingSkills) {
+        loadedSkills.add(skill);
+      }
+      if (lineageResult.errors.length > 0 && lineageResult.lineageBySkill.size === 0) {
+        loadFailed = true;
+      }
+
+      return lineageBySkill;
+    }
+  };
+}
+
+async function loadStatusLineage(sourceRoot: string, skillNames: ReadonlySet<string>): Promise<StatusLineageResult> {
+  let loaded: Awaited<ReturnType<typeof loadUpstreamLock>>;
+  try {
+    loaded = await loadUpstreamLock(sourceRoot, { skills: skillNames });
+  } catch (error) {
+    return {
+      lineageBySkill: new Map(),
+      errors: [
+        {
+          code: "upstream_lock_load_failed",
+          message: `Unable to load upstream lock lineage: ${errorMessage(error)}`,
+          scope: "upstream"
+        }
+      ]
+    };
+  }
+  const errors = loaded.findings.map((item): StatusFinding => {
+    const finding: StatusFinding = {
+      code: item.code,
+      message: item.message,
+      scope: "upstream"
+    };
+    if (item.path !== null) {
+      finding.path = item.path;
+    }
+    return finding;
+  });
+  if (!loaded.ok) {
+    return {
+      lineageBySkill: new Map(),
+      errors
+    };
+  }
+  return {
+    lineageBySkill: new Map(
+      loaded.declarations.map((entry) => {
+        const { target: _target, ...lineage } = upstreamLineage(entry);
+        return [entry.skill, lineage];
+      })
+    ),
+    errors
+  };
+}
+
+function attachStatusLineage(
+  status: StatusItem,
+  upstream: Omit<UpstreamLineage, "target"> | undefined,
+  target: Omit<StatusLineage["target"], "status">
+): void {
+  if (upstream === undefined) {
+    return;
+  }
+  status.lineage = {
+    ...upstream,
+    target: {
+      status: status.status,
+      receiptHash: target.receiptHash,
+      receiptCommit: target.receiptCommit
+    }
   };
 }
 

@@ -221,7 +221,8 @@ The v1 declaration file is `.skill-suitcase/upstream-lock.json`. It uses schema
 `calvinnwq.skills.upstream-lock.v0` and declares selected catalog skills under a
 `skills` object. Each `skills-sh` declaration pins `packageVersion`, records the
 upstream repo and skill name, can group related imports such as `hyperframes`,
-and stores the last imported catalog content hash under `imported.sha256`.
+and stores last-imported provenance under `imported.sha256`,
+`imported.packageVersion`, `imported.at`, and `imported.source`.
 This file is catalog source metadata only; it does not grant target write
 authority.
 
@@ -234,8 +235,8 @@ create and maintain ourselves.
 Source refresh commands should be explicit and staged:
 
 1. `upstream check --source <repo> --json` reports declared upstream-managed
-   skills, pinned package metadata, catalog hashes, and local package-runner
-   availability without writing files
+   skills, pinned package metadata, lineage metadata, catalog hashes, and local
+   package-runner availability without writing files
 2. `upstream fetch --source <repo> --skill <name> --dry-run --json` runs the
    pinned fetch in an isolated temp workspace/home and reports a file-level
    catalog diff
@@ -271,11 +272,18 @@ Lifecycle cases:
 
 | Case | Required behavior |
 | --- | --- |
-| Upstream unchanged | `upstream check` reports declarations and imported/catalog hashes. No target action is implied. |
+| Upstream unchanged | `upstream check` reports declarations and lineage metadata, including upstream package/version, imported hash, and current catalog hash. No target action is implied. |
 | Upstream changed | `upstream fetch --dry-run` shows a catalog diff. `upstream import --apply` may update only the selected catalog skill and upstream lock after selected source hygiene passes. Git review/commit happens before target sync. |
 | Local catalog edit to upstream-managed source | Treat this as catalog-hash drift from the last imported hash. Do not silently overwrite it with upstream. Either commit it as a deliberate catalog change, revert it, or intentionally fork/adopt the skill out of upstream-managed mode in a future explicit policy slice. |
 | Upstream removed or renamed | Fetch/import must report the missing upstream skill and preserve the existing catalog source and lock until an operator decides whether to keep, fork/adopt, rename, or delete the catalog skill. |
 | Target drift from an upstream-managed catalog skill | Use ordinary target status semantics. `track` exact matches, `pack`/`apply` missing or behind targets, and stop on dirty targets for `repair` or `import-target`. Do not call `npx skills` against the live target as a shortcut. |
+
+Status reports attach the same lineage object to upstream-managed skill entries
+and fill the target block from the selected target receipt state. That keeps the
+two drift axes separate while making the full chain visible in one JSON entry:
+upstream package/version, upstream repo/skill, imported hash, current catalog
+hash, target status, receipt hash, and receipt commit.
+Status lineage loading must stay scoped to the planned or blocked skills in the selected report so target-scoped status checks do not hash unrelated upstream-managed catalog skills.
 
 Local patches to upstream-managed skills are intentionally conservative in v1:
 there is no implicit patch layer. If a provider-owned skill needs local changes,
@@ -377,8 +385,9 @@ Keep the command verbs separate:
   into an agent home directory) into a repo-owned catalog skill. `--dry-run`
   runs a read-only plan; `--apply` runs the approval-gated live promotion.
 - `upstream` refreshes catalog source for declared upstream-managed skills.
-  `upstream check` is read-only and reports declaration health, pinned package
-  runner availability, and catalog hash drift. `upstream fetch --dry-run` runs
+  `upstream check` is read-only and reports declaration health, lineage
+  metadata, pinned package runner availability, and catalog hash drift.
+  `upstream fetch --dry-run` runs
   the pinned fetch in an isolated temp workspace/home and reports a file-level
   catalog diff. `upstream import --apply` refuses dirty selected catalog source,
   repeats the pinned fetch, copies only the selected skill into the catalog
