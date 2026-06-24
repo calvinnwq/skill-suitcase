@@ -101,6 +101,24 @@ Strict validation checks the upstream declaration and `SKILL.md` presence for
 these skills, but excludes upstream-managed skills from Skillify-10 contract
 scoring because that contract applies only to locally authored/managed skills.
 
+Lifecycle policy:
+
+- Upstream unchanged: report only; no target action is implied.
+- Upstream changed: `upstream fetch --dry-run`, review diff,
+  `upstream import --apply` for the selected skill, Git review/commit, then
+  ordinary target sync.
+- Local catalog edit: treat as catalog-hash drift. Commit/revert deliberately,
+  or fork/adopt out of upstream-managed mode in a future explicit flow; do not
+  silently overwrite it.
+- Upstream removed or renamed: report missing upstream source and preserve the
+  catalog until an operator decides keep, fork/adopt, rename, or delete.
+- Target drift: use ordinary `status` semantics and receipts. Never call
+  `npx skills` against live homes as a shortcut.
+
+Trust boundary: trust only the exact pinned upstream package in the isolated
+temp workspace/home for catalog source refresh. Do not trust upstream tooling to
+choose target roots, write receipts, prove rollback, or mutate live agent homes.
+
 ## Read-Only Audit
 
 Run the catalog gates first:

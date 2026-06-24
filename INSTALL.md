@@ -99,6 +99,7 @@ export SRC="$HOME/repos/skills"
 
 New-machine setup installs from this catalog through Skill Suitcase, not directly from `skills.sh` or `npx skills`.
 If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the repository diff, and then resume the normal Suitcase audit and sync flow.
+Keep upstream-to-catalog drift separate from catalog-to-target drift.
 
 ## 4. Read-Only Audit First
 
@@ -142,6 +143,28 @@ skill-suitcase upstream import --source "$SRC" --skill <skill-name> --apply --js
 `upstream import` writes only the selected catalog skill directory and
 `.skill-suitcase/upstream-lock.json`. It does not auto-commit and does not write
 to live Codex, Claude, OpenClaw, or other agent homes.
+
+Lifecycle policy:
+
+- Upstream unchanged: `upstream check` reports only; no target action is implied.
+- Upstream changed: review `upstream fetch --dry-run`, import only the selected
+  skill after approval, commit the catalog diff, then use normal target sync.
+- Local catalog edit: treat it as catalog-hash drift from the last imported
+  upstream hash.
+  Commit or revert deliberately, or fork/adopt the skill out of upstream-managed
+  mode in a future explicit flow.
+- Upstream removed or renamed: report the missing upstream source and preserve
+  the catalog source plus upstream lock until an operator chooses keep,
+  fork/adopt, rename, or delete.
+- Target drift: use ordinary `status` semantics and receipts.
+  `track` exact matches, `pack`/`apply` missing or behind skills, and stop on
+  dirty targets for `repair` or `import-target`.
+  Do not call `npx skills` against live homes as a shortcut.
+
+Trust only the exact pinned upstream package in the isolated temp workspace/home
+for catalog source refresh.
+Do not trust upstream tooling to choose target roots, write receipts, prove
+rollback, or mutate live agent homes.
 
 Inspect local Codex and Claude targets with overrides:
 

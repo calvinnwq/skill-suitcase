@@ -52,12 +52,19 @@ node dist/src/cli.js upstream fetch --source /path/to/skills-catalog --skill exi
 
 `upstream check` should report declared skills, pinned package metadata, package
 runner availability, and refresh status without writing files.
+If upstream is unchanged, no target action is implied.
 `upstream fetch` may execute the pinned provider in an isolated temp
 workspace/home, but it must not write the catalog or any live target root.
 Only run `upstream import --apply` against a disposable Git-backed catalog or an
 intentionally approved catalog source; it writes `skills/<name>` and
 `.skill-suitcase/upstream-lock.json` only, then leaves ordinary repository diffs
 for review.
+Treat local catalog edits as catalog-hash drift, preserve catalog source when an
+upstream skill is removed or renamed, and use ordinary target status workflows
+for target drift.
+Trust only the exact pinned provider in the isolated temp workspace/home.
+Do not trust upstream tooling to choose target roots, write receipts, prove
+rollback, or mutate live agent homes.
 
 For a Codex/Claude-only machine, smoke local target overrides and target-scoped
 status without requiring OpenClaw paths from the shared catalog to exist:

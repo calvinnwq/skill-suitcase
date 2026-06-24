@@ -215,11 +215,34 @@ const UPSTREAM_SOURCE_REFRESH_PHRASES = [
   "live agent homes"
 ];
 
+const UPSTREAM_LIFECYCLE_PHRASES = [
+  "upstream unchanged",
+  "upstream changed",
+  "local catalog edit",
+  "upstream removed or renamed",
+  "target drift",
+  "catalog-hash drift",
+  "fork/adopt",
+  "trust boundary",
+  "exact pinned",
+  "write receipts",
+  "prove rollback"
+];
+
 function assertDocumentsUpstreamSourceRefresh(label: string, normalized: string): void {
   for (const phrase of UPSTREAM_SOURCE_REFRESH_PHRASES) {
     assert.ok(
       normalized.includes(phrase),
       `${label} should document the upstream source-refresh phrase: ${phrase}`
+    );
+  }
+}
+
+function assertDocumentsUpstreamLifecycle(label: string, normalized: string): void {
+  for (const phrase of UPSTREAM_LIFECYCLE_PHRASES) {
+    assert.ok(
+      normalized.includes(phrase),
+      `${label} should document the upstream lifecycle phrase: ${phrase}`
     );
   }
 }
@@ -240,6 +263,17 @@ test("skills.sh delegation spike documents catalog-only source refresh lane", as
     normalized.includes("upstream check -> sandboxed fetch/diff -> catalog import -> git review -> pack/apply"),
     "skills.sh delegation spike should document the intended source-refresh flow"
   );
+});
+
+test("operator-facing docs define the upstream-managed lifecycle policy", async () => {
+  for (const file of [
+    "ARCHITECTURE.md",
+    "README.md",
+    "docs/skills-sh-delegation.md",
+    "skills/skill-suitcase/SKILL.md"
+  ]) {
+    assertDocumentsUpstreamLifecycle(file, await loadNormalized(file));
+  }
 });
 
 test("README points new-machine setup at Suitcase-managed catalog installs", async () => {

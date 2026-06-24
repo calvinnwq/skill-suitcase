@@ -42,6 +42,8 @@ Skill Suitcase owns the local management layer:
 - safe apply, track, reconcile, repair, promote, and import-target workflows
 - upstream source refresh into the catalog before ordinary target sync
 
+Upstream-to-catalog drift and catalog-to-target drift are separate decisions.
+
 External providers can be sources of skill content or compatibility data. They
 must not bypass Skill Suitcase receipts, review boundaries, or target safety
 checks.

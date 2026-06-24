@@ -152,6 +152,22 @@ node "$CLI" upstream import --source "$SRC" --skill existing-skill --apply --jso
 
 The import writes only `skills/<name>` and
 `.skill-suitcase/upstream-lock.json`, never live agent homes.
+Keep upstream-to-catalog drift separate from catalog-to-target drift:
+
+- Upstream unchanged: `upstream check` reports declarations and hashes only.
+- Upstream changed: fetch, review, import the selected skill after approval,
+  commit the catalog diff, then use normal target sync.
+- Local catalog edit: treat it as catalog-hash drift and commit, revert, or
+  fork/adopt deliberately.
+- Upstream removed or renamed: preserve the catalog source and upstream lock
+  until an operator chooses keep, fork/adopt, rename, or delete.
+- Target drift: use ordinary `status`, receipts, and target workflows.
+  Do not call `npx skills` against live homes as a shortcut.
+
+Trust only the exact pinned upstream package in the isolated temp workspace/home
+for catalog source refresh.
+Do not trust upstream tooling to choose target roots, write receipts, prove
+rollback, or mutate live agent homes.
 
 Live mutation requires explicit approval input and should start in disposable
 fixtures or a clearly approved target:
@@ -220,6 +236,8 @@ Before a public announcement or npm publish:
 - Support boundary explains Calvin-local paths versus portable config.
 - No docs imply `skills.sh` runtime delegation is part of the managed installer.
 - Docs that mention `skills.sh` source refresh distinguish catalog-only refresh from live agent-home installs.
+- Docs that mention upstream-managed refresh preserve the separate
+  upstream-to-catalog and catalog-to-target lifecycle policy.
 
 ## Current Decision
 

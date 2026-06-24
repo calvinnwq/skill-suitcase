@@ -251,6 +251,47 @@ not auto-commit upstream imports. Live `skills.sh` installer delegation is a
 separate future feature and must not be introduced as part of this
 source-refresh model.
 
+### Upstream Lifecycle Policy
+
+Upstream-managed skills have two separate drift axes:
+
+- upstream-to-catalog drift, handled by `upstream check`, `upstream fetch`, and
+  `upstream import`
+- catalog-to-target drift, handled by ordinary `status`, `diff`, `track`,
+  `pack`, `apply`, `repair`, `import-target`, and `rollback`
+
+Do not collapse these axes. A changed upstream package does not make any live
+target safe to update until the fetched source has been imported into the
+catalog, reviewed, committed, and then synchronized through the normal target
+workflow. A target receipt proves only the catalog version Skill Suitcase
+installed; upstream lock metadata proves only the provider source that last
+refreshed the catalog.
+
+Lifecycle cases:
+
+| Case | Required behavior |
+| --- | --- |
+| Upstream unchanged | `upstream check` reports declarations and imported/catalog hashes. No target action is implied. |
+| Upstream changed | `upstream fetch --dry-run` shows a catalog diff. `upstream import --apply` may update only the selected catalog skill and upstream lock after selected source hygiene passes. Git review/commit happens before target sync. |
+| Local catalog edit to upstream-managed source | Treat this as catalog-hash drift from the last imported hash. Do not silently overwrite it with upstream. Either commit it as a deliberate catalog change, revert it, or intentionally fork/adopt the skill out of upstream-managed mode in a future explicit policy slice. |
+| Upstream removed or renamed | Fetch/import must report the missing upstream skill and preserve the existing catalog source and lock until an operator decides whether to keep, fork/adopt, rename, or delete the catalog skill. |
+| Target drift from an upstream-managed catalog skill | Use ordinary target status semantics. `track` exact matches, `pack`/`apply` missing or behind targets, and stop on dirty targets for `repair` or `import-target`. Do not call `npx skills` against the live target as a shortcut. |
+
+Local patches to upstream-managed skills are intentionally conservative in v1:
+there is no implicit patch layer. If a provider-owned skill needs local changes,
+the default operator decision is to either keep the edit as a reviewed catalog
+change with catalog-hash drift visible, or fork/adopt the skill into
+locally-authored catalog ownership through a separately designed flow. Silent
+edits to upstream-managed source must not be hidden by strict validation because
+strict skips Skillify scoring, not source drift reporting.
+
+The trust boundary for `skills.sh` / `npx skills` is narrow. Skill Suitcase
+trusts only an exact pinned package version run inside an isolated temp
+workspace/home for source refresh, then validates the fetched directory is
+inside that sandbox and contains `SKILL.md`. It does not trust upstream tooling
+to choose live target roots, write receipts, prove rollback state, or mutate
+agent homes.
+
 ## Install Modes
 
 Skill Suitcase supports copy and native symlink installs. Install modes should
