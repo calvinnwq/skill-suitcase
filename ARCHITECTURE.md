@@ -283,6 +283,7 @@ and fill the target block from the selected target receipt state. That keeps the
 two drift axes separate while making the full chain visible in one JSON entry:
 upstream package/version, upstream repo/skill, imported hash, current catalog
 hash, target status, receipt hash, and receipt commit.
+Status lineage loading must stay scoped to the planned or blocked skills in the selected report so target-scoped status checks do not hash unrelated upstream-managed catalog skills.
 
 Local patches to upstream-managed skills are intentionally conservative in v1:
 there is no implicit patch layer. If a provider-owned skill needs local changes,

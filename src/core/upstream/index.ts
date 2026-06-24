@@ -177,6 +177,12 @@ type UpstreamCommandOptions = {
 };
 
 type UpstreamLoadOptions = {
+  /**
+   * Limit declaration entry construction and catalog hashing to these skills.
+   *
+   * Lock parsing and declaration validation still cover the whole document so
+   * malformed upstream metadata remains visible.
+   */
   skills?: ReadonlySet<string>;
 };
 

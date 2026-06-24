@@ -434,6 +434,9 @@ export async function status({
 function createStatusLineageLoader(sourceRoot: string, errors: StatusFinding[]): {
   load: (skillNames: Iterable<string>) => Promise<Map<string, Omit<UpstreamLineage, "target">>>;
 } {
+  // Status can be target-scoped, so load upstream lineage only for skills that
+  // will appear in the selected report instead of hashing every declared
+  // upstream-managed catalog skill.
   const lineageBySkill = new Map<string, Omit<UpstreamLineage, "target">>();
   const loadedSkills = new Set<string>();
   let loadFailed = false;

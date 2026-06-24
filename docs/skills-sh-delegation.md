@@ -129,6 +129,7 @@ upstream-managed skills.
 hash, current catalog hash, and catalog drift.
 `status` adds target status, receipt hash, and receipt commit from the selected
 target receipt.
+Target-scoped `status` should load lineage for reported skills only and should not hash unrelated upstream-managed catalog skills.
 
 The v1 lock file is `.skill-suitcase/upstream-lock.json`:
 

@@ -132,6 +132,7 @@ including the upstream package/version, upstream repo/skill, imported hash, and
 current catalog hash.
 `status --json` carries the same lineage and adds target status, receipt hash,
 and receipt commit when the target skill is upstream-managed.
+Target-scoped status reports should compute lineage only for reported skills and must not hash unrelated upstream-managed catalog skills.
 `validate --strict` also validates `.skill-suitcase/upstream-lock.json` when the
 catalog has one.
 

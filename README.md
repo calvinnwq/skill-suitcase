@@ -279,6 +279,7 @@ string.
 `upstream check --json` and `status --json` reuse this metadata in their
 `lineage` blocks so operators can audit upstream-to-catalog and catalog-to-target
 state without stitching reports together.
+Target-scoped `status --json` reports compute lineage only for reported skills and do not hash unrelated upstream-managed catalog skills.
 
 Check declared upstream skills without writing files:
 
@@ -937,10 +938,10 @@ It uses `path` for `openclaw-skills-root` and
           "assignment": "codex",
           "assignmentPath": "codex",
           "kind": "codex-home",
-          "skill": "office-hours",
+          "skill": "hyperframes",
           "status": "current",
           "target": "/tmp/codex/skills",
-          "targetPath": "/tmp/codex/skills/office-hours",
+          "targetPath": "/tmp/codex/skills/hyperframes",
           "reason": "installed skill matches source version and content hash",
           "installedVersion": "2026.06.10",
           "currentVersion": "2026.06.10",
@@ -984,10 +985,10 @@ It uses `path` for `openclaw-skills-root` and
       "assignment": "codex",
       "assignmentPath": "codex",
       "kind": "codex-home",
-      "skill": "office-hours",
+      "skill": "hyperframes",
       "status": "current",
       "target": "/tmp/codex/skills",
-      "targetPath": "/tmp/codex/skills/office-hours",
+      "targetPath": "/tmp/codex/skills/hyperframes",
       "reason": "installed skill matches source version and content hash",
       "installedVersion": "2026.06.10",
       "currentVersion": "2026.06.10",
@@ -1022,6 +1023,7 @@ fills `lineage.target` with the target receipt state.
 This makes the chain auditable in one status entry: pinned upstream
 package/version, upstream repo/skill, imported hash, current catalog hash and
 drift, target status, receipt hash, and receipt commit.
+`status` loads that lineage lazily for the planned or blocked skills in the selected report, so `status --target <target>` does not hash unrelated upstream-managed catalog skills.
 If the upstream lock is malformed or unreadable, `status` reports upstream-scoped
 errors, returns `ok: false`, and omits lineage until the lock metadata is valid.
 

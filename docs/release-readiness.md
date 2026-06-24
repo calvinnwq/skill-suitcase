@@ -164,6 +164,7 @@ Keep upstream-to-catalog drift separate from catalog-to-target drift:
 - Target drift: use ordinary `status`, receipts, and target workflows.
   For upstream-managed skills, `status --json` should surface target status,
   receipt hash, and receipt commit inside lineage metadata.
+  Target-scoped status should load lineage for reported skills only and should not hash unrelated upstream-managed catalog skills.
   Do not call `npx skills` against live homes as a shortcut.
 
 Trust only the exact pinned upstream package in the isolated temp workspace/home

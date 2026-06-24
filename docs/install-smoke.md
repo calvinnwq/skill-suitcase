@@ -67,6 +67,7 @@ for target drift.
 For upstream-managed skills, `status --json` should carry the same lineage and
 add target status, receipt hash, and receipt commit from the selected target
 receipt.
+Target-scoped status should load lineage for reported skills only and should not hash unrelated upstream-managed catalog skills.
 Trust only the exact pinned provider in the isolated temp workspace/home.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.
