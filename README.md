@@ -121,12 +121,12 @@ node dist/src/cli.js upstream import --source /Users/ngxcalvin/repos/skills --sk
 `import --json` is a read-only onboarding inspection for existing skills repos.
 It checks for `skill-suitcase.yaml`, the `skills/<name>/SKILL.md` layout, and
 catalog portability metadata such as assignments, assignment paths,
-compatibility, and variants. Findings are emitted as deterministic JSON with
-`warning` or `error` levels; warnings keep `ok: true`, while errors make the
-command exit with failure status. The command never creates install roots,
-runtime homes, receipts, or bundle artifacts. Directories under `skills/` that
-contain `.support-directory` are treated as support data and are not counted as
-installable skills.
+compatibility, variants, and manifest-owned logical groups. Findings are
+emitted as deterministic JSON with `warning` or `error` levels; warnings keep
+`ok: true`, while errors make the command exit with failure status. The command
+never creates install roots, runtime homes, receipts, or bundle artifacts.
+Directories under `skills/` that contain `.support-directory` are treated as
+support data and are not counted as installable skills.
 
 Targets currently exercised against fixture #1:
 
@@ -404,18 +404,33 @@ values, summary counts, a sorted `skills` inventory, and deterministic findings.
     "suitcases": 1,
     "assignments": 1,
     "assignmentPaths": 1,
+    "groups": 1,
     "compatibilityEntries": 1,
     "variantEntries": 1,
     "warnings": 0,
     "errors": 0,
     "findings": 0
   },
+  "groups": [
+    {
+      "name": "portable-core",
+      "title": "Portable Core",
+      "description": "Skills intended to travel across supported agent runtimes.",
+      "provider": null,
+      "upstream": null,
+      "skills": [],
+      "suitcases": ["core"],
+      "assignments": ["codex"],
+      "tags": ["portable"]
+    }
+  ],
   "skills": [
     {
       "name": "office-hours",
       "path": "/Users/ngxcalvin/repos/skills/skills/office-hours",
       "skillFile": "/Users/ngxcalvin/repos/skills/skills/office-hours/SKILL.md",
       "referencedBy": ["core"],
+      "groups": ["portable-core"],
       "compatibility": {
         "declared": true,
         "agents": ["codex"],
@@ -439,17 +454,47 @@ values, summary counts, a sorted `skills` inventory, and deterministic findings.
 ```
 
 Each finding has `level`, `code`, `message`, and `path`. Warning codes include
-`missing_assignment_paths`, `empty_suitcase`, `unused_compatibility`,
+`missing_assignment_paths`, `empty_suitcase`, `empty_group`,
+`unused_compatibility`,
 `missing_compatibility`, `missing_compatibility_agents`,
 `missing_compatibility_variant`, `missing_variant_metadata`,
 `missing_variant_agents`, and `unused_variants`. Error codes include
 `missing_manifest`, `unreadable_manifest`, `missing_skills_directory`,
 `unreadable_skills_directory`, `missing_suitcases`, `missing_assignments`,
-`empty_assignment`, `unknown_suitcase`, `invalid_assignment_path`,
+`empty_assignment`, `unknown_suitcase`, `invalid_group`,
+`unknown_group_skill`, `unknown_group_suitcase`, `unknown_group_assignment`,
+`invalid_assignment_path`,
 `unknown_assignment_path_target`, `invalid_skill_name`,
 `missing_skill_directory`, `missing_skill_file`, `missing_variant_source`,
 `invalid_variant_source`, `missing_variant_directory`, and
 `missing_variant_skill_file`.
+
+## Manifest Logical Groups
+
+`skill-suitcase.yaml` may declare a top-level `groups` map for product families,
+upstream suites, provider boundaries, or reporting buckets:
+
+```yaml
+groups:
+  portable-core:
+    title: Portable Core
+    description: Skills intended to travel across supported runtimes.
+    suitcases:
+      - core
+    assignments:
+      - codex
+      - claude
+    tags:
+      - portable
+```
+
+Groups are catalog metadata only. They do not change planning, packing,
+installation, receipts, or assignment semantics. A group can reference
+`skills`, `suitcases`, and `assignments`; `import --json` reports group
+summaries and per-skill group membership, while `validate --json` checks that
+referenced skills, suitcases, and assignments exist. Use groups when reports
+need to summarize related skills without relying on directory names, ad hoc
+descriptions, or target-specific assumptions.
 
 ## `validate` Strict Mode
 
@@ -1948,4 +1993,5 @@ to enforce the module boundaries described in [`ARCHITECTURE.md`](ARCHITECTURE.m
 
 The first milestone has no runtime package dependencies (only the TypeScript dev
 toolchain). The manifest reader is strict and intentionally scoped to the current
-`skill-suitcase.yaml` shape from `/Users/ngxcalvin/repos/skills`.
+`skill-suitcase.yaml` shape from `/Users/ngxcalvin/repos/skills`, including
+manifest-owned logical groups as reporting metadata.

@@ -31,11 +31,24 @@ type ImportVariantSummary = {
   skillFileExists: boolean;
 };
 
+type ImportGroupSummary = {
+  name: string;
+  title: string | null;
+  description: string | null;
+  provider: string | null;
+  upstream: string | null;
+  skills: string[];
+  suitcases: string[];
+  assignments: string[];
+  tags: string[];
+};
+
 type ImportSkillSummary = {
   name: string;
   path: string | null;
   skillFile: string | null;
   referencedBy: string[];
+  groups: string[];
   compatibility: ImportCompatibilitySummary;
   variants: ImportVariantSummary[];
 };
@@ -46,6 +59,7 @@ type ImportSummary = {
   suitcases: number;
   assignments: number;
   assignmentPaths: number;
+  groups: number;
   compatibilityEntries: number;
   variantEntries: number;
   warnings: number;
@@ -64,6 +78,7 @@ export type ImportResult = {
   source: string;
   manifestPath: string;
   summary: ImportSummary;
+  groups: ImportGroupSummary[];
   skills: ImportSkillSummary[];
   findings: ImportFinding[];
 };
@@ -88,12 +103,14 @@ export async function inspectImportSource({ source }: ImportArgs): Promise<Impor
   const discoveredSkills = await discoverSkillDirectories(sourceRoot, skillsRoot, findings);
   const referencedBySkill = referencedSkillsBySuitcase(manifest);
   const referencedSkills = [...referencedBySkill.keys()].sort();
+  const allSkillNames = sortedUnique([...discoveredSkills, ...referencedSkills]);
 
   if (manifestState.exists) {
-    validateManifestShape(manifest, referencedBySkill, findings);
+    validateManifestShape(manifest, referencedBySkill, referencedSkills, findings);
   }
 
-  const allSkillNames = sortedUnique([...discoveredSkills, ...referencedSkills]);
+  const groupMembership = groupsBySkill(manifest);
+  const groups = summarizeGroups(manifest);
   const skills: ImportSkillSummary[] = [];
   for (const skillName of allSkillNames) {
     skills.push(await inspectSkill({
@@ -101,6 +118,7 @@ export async function inspectImportSource({ source }: ImportArgs): Promise<Impor
       skillsRoot,
       skillName,
       referencedBy: referencedBySkill.get(skillName) ?? [],
+      groups: groupMembership.get(skillName) ?? [],
       manifest,
       shouldValidateMetadata: manifestState.exists,
       findings
@@ -124,12 +142,14 @@ export async function inspectImportSource({ source }: ImportArgs): Promise<Impor
       suitcases: Object.keys(manifest.suitcases).length,
       assignments: Object.keys(manifest.assignments).length,
       assignmentPaths: Object.keys(manifest.assignmentPaths).length,
+      groups: Object.keys(manifest.groups).length,
       compatibilityEntries: Object.keys(manifest.compatibility).length,
       variantEntries: countVariantEntries(manifest),
       warnings,
       errors,
       findings: findings.length
     },
+    groups,
     skills,
     findings
   };
@@ -217,6 +237,7 @@ async function discoverSkillDirectories(
 function validateManifestShape(
   manifest: Catalog,
   referencedBySkill: Map<string, string[]>,
+  knownSkillNames: string[],
   findings: ImportFinding[]
 ): void {
   if (Object.keys(manifest.suitcases).length === 0) {
@@ -270,6 +291,68 @@ function validateManifestShape(
           `suitcases.${suitcaseName}.skills`
         )
       );
+    }
+  }
+
+  const knownSkills = new Set(knownSkillNames);
+  for (const [groupName, group] of Object.entries(manifest.groups)) {
+    if (!isPlainPathSegment(groupName)) {
+      findings.push(
+        error(
+          "invalid_group",
+          `Group ${groupName} must be a plain manifest key.`,
+          `groups.${groupName}`
+        )
+      );
+    }
+
+    const skills = group.skills ?? [];
+    const suitcases = group.suitcases ?? [];
+    const assignments = group.assignments ?? [];
+    if (skills.length === 0 && suitcases.length === 0 && assignments.length === 0) {
+      findings.push(
+        warning(
+          "empty_group",
+          `Group ${groupName} does not reference any skills, suitcases, or assignments.`,
+          `groups.${groupName}`
+        )
+      );
+    }
+
+    for (const skillName of skills) {
+      if (!knownSkills.has(skillName)) {
+        findings.push(
+          error(
+            "unknown_group_skill",
+            `Group ${groupName} references unknown skill ${skillName}.`,
+            `groups.${groupName}.skills`
+          )
+        );
+      }
+    }
+
+    for (const suitcaseName of suitcases) {
+      if (!manifest.suitcases[suitcaseName]) {
+        findings.push(
+          error(
+            "unknown_group_suitcase",
+            `Group ${groupName} references unknown suitcase ${suitcaseName}.`,
+            `groups.${groupName}.suitcases`
+          )
+        );
+      }
+    }
+
+    for (const assignmentName of assignments) {
+      if (!manifest.assignments[assignmentName]) {
+        findings.push(
+          error(
+            "unknown_group_assignment",
+            `Group ${groupName} references unknown assignment ${assignmentName}.`,
+            `groups.${groupName}.assignments`
+          )
+        );
+      }
     }
   }
 
@@ -349,6 +432,7 @@ async function inspectSkill(args: {
   skillsRoot: string;
   skillName: string;
   referencedBy: string[];
+  groups: string[];
   manifest: Catalog;
   shouldValidateMetadata: boolean;
   findings: ImportFinding[];
@@ -369,6 +453,7 @@ async function inspectSkill(args: {
       path: null,
       skillFile: null,
       referencedBy: [...args.referencedBy].sort(),
+      groups: [...args.groups].sort(),
       compatibility: summarizeCompatibility(args.manifest, args.skillName),
       variants: await summarizeVariants(args.sourceRoot, args.manifest, args.skillName, args.findings)
     };
@@ -408,9 +493,26 @@ async function inspectSkill(args: {
     path: skillPath,
     skillFile,
     referencedBy: [...args.referencedBy].sort(),
+    groups: [...args.groups].sort(),
     compatibility: summarizeCompatibility(args.manifest, args.skillName),
     variants: await summarizeVariants(args.sourceRoot, args.manifest, args.skillName, args.findings)
   };
+}
+
+function summarizeGroups(manifest: Catalog): ImportGroupSummary[] {
+  return Object.entries(manifest.groups)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, group]) => ({
+      name,
+      title: normalizedString(group.title),
+      description: normalizedString(group.description),
+      provider: normalizedString(group.provider),
+      upstream: normalizedString(group.upstream),
+      skills: sortedUnique(group.skills ?? []),
+      suitcases: sortedUnique(group.suitcases ?? []),
+      assignments: sortedUnique(group.assignments ?? []),
+      tags: sortedUnique(group.tags ?? [])
+    }));
 }
 
 function validateCompatibilityMetadata(manifest: Catalog, skillName: string, findings: ImportFinding[]): void {
@@ -587,6 +689,59 @@ function referencedSkillsBySuitcase(manifest: Catalog): Map<string, string[]> {
   return referenced;
 }
 
+function groupsBySkill(manifest: Catalog): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+
+  for (const [groupName, group] of Object.entries(manifest.groups)) {
+    const directSkills = group.skills ?? [];
+    for (const skillName of directSkills) {
+      addMapValue(result, skillName, groupName);
+    }
+
+    for (const suitcaseName of group.suitcases ?? []) {
+      addSuitcaseGroupSkills(result, manifest, suitcaseName, groupName);
+    }
+
+    for (const assignmentName of group.assignments ?? []) {
+      const assignment = manifest.assignments[assignmentName];
+      if (!assignment) {
+        continue;
+      }
+      for (const suitcaseName of assignment.suitcases) {
+        addSuitcaseGroupSkills(result, manifest, suitcaseName, groupName);
+      }
+    }
+  }
+
+  for (const [skillName, groups] of result) {
+    result.set(skillName, sortedUnique(groups));
+  }
+
+  return result;
+}
+
+function addSuitcaseGroupSkills(
+  result: Map<string, string[]>,
+  manifest: Catalog,
+  suitcaseName: string,
+  groupName: string
+): void {
+  const suitcase = manifest.suitcases[suitcaseName];
+  if (!suitcase) {
+    return;
+  }
+
+  for (const skillName of suitcase.skills) {
+    addMapValue(result, skillName, groupName);
+  }
+}
+
+function addMapValue(map: Map<string, string[]>, key: string, value: string): void {
+  const values = map.get(key) ?? [];
+  values.push(value);
+  map.set(key, values);
+}
+
 function countVariantEntries(manifest: Catalog): number {
   return Object.values(manifest.variants).reduce(
     (count, variants) => count + Object.keys(variants).length,
@@ -626,6 +781,7 @@ function emptyManifest(): Catalog {
     suitcases: {},
     assignments: {},
     assignmentPaths: {},
+    groups: {},
     compatibility: {},
     variants: {}
   };

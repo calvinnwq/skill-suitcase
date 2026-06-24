@@ -14,6 +14,7 @@ test("validates the skills repo fixture", async () => {
   assert.equal(result.summary.suitcases, 2);
   assert.equal(result.summary.assignments, 4);
   assert.equal(result.summary.assignmentPaths, 4);
+  assert.equal(result.summary.groups, 3);
   assert.equal(result.summary.upstreamDeclarations, 0);
   assert.equal(result.summary.referencedSkills, 3);
   assert.deepEqual(result.findings, []);
@@ -43,6 +44,15 @@ assignmentPaths:
   broken:
     assignment: missing-assignment
 
+groups:
+  bad/group:
+    skills:
+      - missing-group-skill
+    suitcases:
+      - missing-group-suitcase
+    assignments:
+      - missing-group-assignment
+
 compatibility:
   stale-skill:
     agents:
@@ -54,11 +64,15 @@ compatibility:
   const codes = result.findings.map((finding) => finding.code);
 
   assert.equal(result.ok, false);
-  assert.equal(result.summary.findings, 5);
+  assert.equal(result.summary.findings, 9);
   assert.ok(codes.includes("unknown_suitcase"));
   assert.ok(codes.includes("missing_skill_file"));
   assert.ok(codes.includes("missing_skill_directory"));
   assert.ok(codes.includes("unknown_assignment_path_target"));
+  assert.ok(codes.includes("invalid_group"));
+  assert.ok(codes.includes("unknown_group_skill"));
+  assert.ok(codes.includes("unknown_group_suitcase"));
+  assert.ok(codes.includes("unknown_group_assignment"));
   assert.ok(codes.includes("unused_compatibility"));
 });
 

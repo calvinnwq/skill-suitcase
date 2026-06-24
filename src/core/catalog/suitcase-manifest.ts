@@ -1,5 +1,15 @@
 type ManifestSuitcase = { skills: string[] };
 type ManifestAssignment = { suitcases: string[] };
+type ManifestGroup = {
+  title?: string;
+  description?: string;
+  provider?: string;
+  upstream?: string;
+  skills?: string[];
+  suitcases?: string[];
+  assignments?: string[];
+  tags?: string[];
+};
 type ManifestVariant = {
   source?: string;
   agents?: string[];
@@ -16,11 +26,13 @@ type ParsedManifest = {
   suitcases: Record<string, ManifestSuitcase>;
   assignments: Record<string, ManifestAssignment>;
   assignmentPaths: Record<string, Record<string, string>>;
+  groups: Record<string, ManifestGroup>;
   compatibility: Record<string, ManifestCompatibility>;
   variants: Record<string, Record<string, ManifestVariant>>;
 };
 
-type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "compatibility" | "variants" | null;
+type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "groups" | "compatibility" | "variants" | null;
+type GroupField = "skills" | "suitcases" | "assignments" | "tags" | null;
 type CompatibilityField = "agents" | "evidence" | "blockedAgents" | null;
 type VariantField = "agents" | null;
 
@@ -29,6 +41,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
     suitcases: {},
     assignments: {},
     assignmentPaths: {},
+    groups: {},
     compatibility: {},
     variants: {}
   };
@@ -37,6 +50,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
   let section: ParsedSection = null;
   let currentName: string | null = null;
   let currentVariantName: string | null = null;
+  let currentGroupField: GroupField = null;
   let currentField: CompatibilityField = null;
   let currentVariantField: VariantField = null;
 
@@ -56,6 +70,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         sectionValue === "suitcases" ||
         sectionValue === "assignments" ||
         sectionValue === "assignmentPaths" ||
+        sectionValue === "groups" ||
         sectionValue === "compatibility" ||
         sectionValue === "variants"
       )
@@ -63,6 +78,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         : null;
       currentName = null;
       currentVariantName = null;
+      currentGroupField = null;
       currentField = null;
       currentVariantField = null;
       continue;
@@ -72,6 +88,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       section !== "suitcases" &&
       section !== "assignments" &&
       section !== "assignmentPaths" &&
+      section !== "groups" &&
       section !== "compatibility" &&
       section !== "variants"
     ) {
@@ -81,6 +98,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
     if (indent === 2 && trimmed.endsWith(":")) {
       currentName = trimmed.slice(0, -1);
       currentVariantName = null;
+      currentGroupField = null;
       currentField = null;
       currentVariantField = null;
 
@@ -90,6 +108,8 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         manifest.assignments[currentName] = { suitcases: [] };
       } else if (section === "assignmentPaths") {
         manifest.assignmentPaths[currentName] = {};
+      } else if (section === "groups") {
+        manifest.groups[currentName] = {};
       } else if (section === "compatibility") {
         manifest.compatibility[currentName] = {};
       } else {
@@ -124,6 +144,13 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       continue;
     }
 
+    if (section === "groups") {
+      const group = manifest.groups[name];
+      if (!group) continue;
+      currentGroupField = parseGroupLine(group, indent, trimmed, currentGroupField);
+      continue;
+    }
+
     if (section === "compatibility") {
       const compatibility = manifest.compatibility[name];
       if (!compatibility) continue;
@@ -152,6 +179,49 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
   }
 
   return manifest;
+}
+
+function parseGroupLine(
+  group: ManifestGroup,
+  indent: number,
+  trimmed: string,
+  currentGroupField: GroupField
+): GroupField {
+  if (indent === 4 && trimmed.startsWith("title:")) {
+    group.title = valueAfterColon(trimmed);
+    return null;
+  }
+
+  if (indent === 4 && trimmed.startsWith("description:")) {
+    group.description = valueAfterColon(trimmed);
+    return null;
+  }
+
+  if (indent === 4 && trimmed.startsWith("provider:")) {
+    group.provider = valueAfterColon(trimmed);
+    return null;
+  }
+
+  if (indent === 4 && trimmed.startsWith("upstream:")) {
+    group.upstream = valueAfterColon(trimmed);
+    return null;
+  }
+
+  if (
+    indent === 4 &&
+    (trimmed === "skills:" || trimmed === "suitcases:" || trimmed === "assignments:" || trimmed === "tags:")
+  ) {
+    const field = trimmed.slice(0, -1) as Exclude<GroupField, null>;
+    group[field] = [];
+    return field;
+  }
+
+  if (indent === 6 && trimmed.startsWith("- ") && currentGroupField !== null) {
+    group[currentGroupField]?.push(trimmed.slice(2));
+    return currentGroupField;
+  }
+
+  return currentGroupField;
 }
 
 function parseVariantLine(

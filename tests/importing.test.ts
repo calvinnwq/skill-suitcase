@@ -30,6 +30,7 @@ test("inspects the fixture catalog as an importable source", async () => {
     suitcases: 2,
     assignments: 4,
     assignmentPaths: 4,
+    groups: 3,
     compatibilityEntries: 3,
     variantEntries: 3,
     warnings: 0,
@@ -41,15 +42,100 @@ test("inspects the fixture catalog as an importable source", async () => {
     result.skills.map((skill) => skill.name),
     ["gnhf-postflight", "office-hours", "skillify"]
   );
+  assert.deepEqual(
+    result.groups.map((group) => ({
+      name: group.name,
+      provider: group.provider,
+      skills: group.skills,
+      suitcases: group.suitcases,
+      assignments: group.assignments,
+      tags: group.tags
+    })),
+    [
+      {
+        name: "codex-assigned",
+        provider: null,
+        skills: [],
+        suitcases: [],
+        assignments: ["codex"],
+        tags: ["assignment"]
+      },
+      {
+        name: "openclaw-builder-tools",
+        provider: "openclaw",
+        skills: ["gnhf-postflight", "skillify"],
+        suitcases: ["openclaw-builder"],
+        assignments: [],
+        tags: ["workflow"]
+      },
+      {
+        name: "portable-core",
+        provider: null,
+        skills: [],
+        suitcases: ["core"],
+        assignments: ["claude", "codex", "openclaw-codex"],
+        tags: ["portable"]
+      }
+    ]
+  );
 
   const gnhf = result.skills.find((skill) => skill.name === "gnhf-postflight");
   assert.ok(gnhf);
+  assert.deepEqual(gnhf.groups, ["openclaw-builder-tools"]);
   assert.equal(gnhf.compatibility.declared, true);
   assert.deepEqual(gnhf.compatibility.agents, ["openclaw"]);
   assert.deepEqual(
     gnhf.variants.map((variant) => variant.name),
     ["canonical", "claude", "codex"]
   );
+
+  const officeHours = result.skills.find((skill) => skill.name === "office-hours");
+  assert.ok(officeHours);
+  assert.deepEqual(officeHours.groups, ["codex-assigned", "portable-core"]);
+});
+
+test("expands assignment-backed logical groups into skill memberships", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-import-assignment-groups-"));
+  await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });
+  await writeFile(path.join(source, "skills", "office-hours", "SKILL.md"), "# Office Hours\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  codex:
+    kind: codex-home
+    assignment: codex
+    codexHome: /tmp/codex
+    skillsPath: /tmp/codex/skills
+
+groups:
+  assignment-backed:
+    assignments:
+      - codex
+
+compatibility:
+  office-hours:
+    agents:
+      - codex
+    variant: canonical
+`
+  );
+
+  const result = await inspectImportSource({ source });
+  const officeHours = result.skills.find((skill) => skill.name === "office-hours");
+
+  assert.equal(result.ok, true);
+  assert.ok(officeHours);
+  assert.deepEqual(officeHours.groups, ["assignment-backed"]);
 });
 
 test("reports missing manifest and layout issues as deterministic errors", async () => {
@@ -262,6 +348,63 @@ compatibility:
       ["error", "invalid_assignment_path", "assignmentPaths.missing-kind.kind"],
       ["error", "invalid_assignment_path", "assignmentPaths.unsupported-kind.kind"],
       ["error", "invalid_assignment_path", "assignmentPaths.missing-required-field.skillsPath"]
+    ]
+  );
+});
+
+test("reports invalid logical group metadata deterministically", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-import-bad-groups-"));
+  await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });
+  await writeFile(path.join(source, "skills", "office-hours", "SKILL.md"), "# Office Hours\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  codex:
+    kind: codex-home
+    assignment: codex
+    codexHome: /tmp/codex
+    skillsPath: /tmp/codex/skills
+
+groups:
+  bad/group:
+    skills:
+      - missing-skill
+    suitcases:
+      - missing-suitcase
+    assignments:
+      - missing-assignment
+  empty-group:
+    title: Empty Group
+
+compatibility:
+  office-hours:
+    agents:
+      - codex
+    variant: canonical
+`
+  );
+
+  const result = await inspectImportSource({ source });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(
+    result.findings.map((finding) => [finding.level, finding.code, finding.path]),
+    [
+      ["error", "invalid_group", "groups.bad/group"],
+      ["error", "unknown_group_skill", "groups.bad/group.skills"],
+      ["error", "unknown_group_suitcase", "groups.bad/group.suitcases"],
+      ["error", "unknown_group_assignment", "groups.bad/group.assignments"],
+      ["warning", "empty_group", "groups.empty-group"]
     ]
   );
 });

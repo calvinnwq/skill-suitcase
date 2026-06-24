@@ -15,6 +15,9 @@ test("parses the skills repo suitcase manifest shape", async () => {
   const openclawBuilder = manifest.suitcases["openclaw-builder"];
   const openclawAssignment = manifest.assignments.openclaw;
   const codexGlobal = manifest.assignmentPaths["codex"];
+  const portableCore = manifest.groups["portable-core"];
+  const openclawBuilderTools = manifest.groups["openclaw-builder-tools"];
+  const codexAssigned = manifest.groups["codex-assigned"];
   const gnhfCompatibility = manifest.compatibility["gnhf-postflight"];
   const gnhfVariants = manifest.variants["gnhf-postflight"];
 
@@ -22,6 +25,9 @@ test("parses the skills repo suitcase manifest shape", async () => {
   assert.ok(openclawBuilder);
   assert.ok(openclawAssignment);
   assert.ok(codexGlobal);
+  assert.ok(portableCore);
+  assert.ok(openclawBuilderTools);
+  assert.ok(codexAssigned);
   assert.ok(gnhfCompatibility);
   assert.ok(gnhfCompatibility.blockedAgents);
   assert.ok(gnhfVariants);
@@ -36,6 +42,17 @@ test("parses the skills repo suitcase manifest shape", async () => {
     "openclaw-builder"
   ]);
   assert.equal(codexGlobal.assignment, "codex");
+  assert.equal(portableCore.title, "Portable Core");
+  assert.equal(portableCore.description, "Skills that are intended to travel across supported agent runtimes.");
+  assert.deepEqual(portableCore.suitcases, ["core"]);
+  assert.deepEqual(portableCore.assignments, ["codex", "claude", "openclaw-codex"]);
+  assert.deepEqual(portableCore.tags, ["portable"]);
+  assert.equal(openclawBuilderTools.provider, "openclaw");
+  assert.deepEqual(openclawBuilderTools.skills, ["skillify", "gnhf-postflight"]);
+  assert.deepEqual(openclawBuilderTools.suitcases, ["openclaw-builder"]);
+  assert.equal(codexAssigned.title, "Codex Assigned");
+  assert.deepEqual(codexAssigned.assignments, ["codex"]);
+  assert.deepEqual(codexAssigned.tags, ["assignment"]);
   assert.equal(
     gnhfCompatibility.blockedAgents!.codex,
     "Live Codex copy is a slimmer platform variant and must not be overwritten by the OpenClaw canonical bundle."
