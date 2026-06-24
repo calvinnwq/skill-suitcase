@@ -3213,6 +3213,59 @@ test("status keeps a correct symlink current even after the source content chang
   assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
 });
 
+test("status lineage reports symlink receipt hash from receipt provenance", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-lineage-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-lineage-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(path.join(sourceRoot, ".skill-suitcase"), { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"old\");\n");
+  const receiptHash = await hashDirectory(sourceSkill);
+  await symlink(sourceSkill, path.join(installRoot, "office-hours"), "dir");
+  await writeSymlinkReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "2026.06.10",
+    sourceCommit: "abc123",
+    sourceHash: receiptHash
+  });
+  await writeFile(
+    path.join(sourceRoot, ".skill-suitcase", "upstream-lock.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.upstream-lock.v0",
+      skills: {
+        "office-hours": {
+          provider: "skills-sh",
+          packageVersion: "1.5.13",
+          upstream: {
+            repo: "calvinnwq/office-hours",
+            skill: "office-hours"
+          },
+          imported: {
+            sha256: receiptHash
+          }
+        }
+      }
+    }, null, 2)}\n`
+  );
+  await writeSymlinkManifest(sourceRoot, installRoot);
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"new\");\n");
+
+  const result = await status({ source: sourceRoot });
+  const item = firstItem(result.statuses, "result.statuses");
+
+  assert.equal(result.ok, true);
+  assert.equal(item.status, "current");
+  assert.notEqual(item.installedHash, receiptHash);
+  assert.equal(item.lineage?.target.receiptHash, receiptHash);
+  assert.equal(item.lineage?.target.receiptCommit, "abc123");
+});
+
 test("status reports a broken symlink install as dirty", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-broken-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-broken-install-"));

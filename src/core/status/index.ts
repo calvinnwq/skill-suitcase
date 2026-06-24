@@ -301,7 +301,10 @@ export async function status({
         kind,
         installRoot
       });
-      attachStatusLineage(blockedStatus, upstreamLineageBySkill.get(blocked.skill));
+      attachStatusLineage(blockedStatus, upstreamLineageBySkill.get(blocked.skill), {
+        receiptHash: null,
+        receiptCommit: null
+      });
       const blockedError = {
         code: "blocked_skill",
         message: `Skill ${blocked.skill} is blocked for ${assignmentName}: ${blocked.reason}`,
@@ -385,7 +388,10 @@ export async function status({
         variant: planned.variant
       };
       const upstream = upstreamLineageBySkill.get(planned.skill);
-      attachStatusLineage(resultStatus, upstream);
+      attachStatusLineage(resultStatus, upstream, {
+        receiptHash: installRecordResult.installRecord?.sourceHash ?? null,
+        receiptCommit: installRecordResult.installRecord?.sourceCommit ?? null
+      });
 
       if (!VALID_STATUSES.has(resultStatus.status)) {
         errors.push({
@@ -466,7 +472,11 @@ async function loadStatusLineage(sourceRoot: string): Promise<StatusLineageResul
   };
 }
 
-function attachStatusLineage(status: StatusItem, upstream: Omit<UpstreamLineage, "target"> | undefined): void {
+function attachStatusLineage(
+  status: StatusItem,
+  upstream: Omit<UpstreamLineage, "target"> | undefined,
+  target: Omit<StatusLineage["target"], "status">
+): void {
   if (upstream === undefined) {
     return;
   }
@@ -474,8 +484,8 @@ function attachStatusLineage(status: StatusItem, upstream: Omit<UpstreamLineage,
     ...upstream,
     target: {
       status: status.status,
-      receiptHash: status.installedHash,
-      receiptCommit: status.installedCommit
+      receiptHash: target.receiptHash,
+      receiptCommit: target.receiptCommit
     }
   };
 }
