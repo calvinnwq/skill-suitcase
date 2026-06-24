@@ -101,6 +101,28 @@ This lane is useful for upstream-managed skill families such as HyperFrames:
 `skills.sh` can provide a fresh source copy, while Skill Suitcase remains the
 catalog, receipt, status, dirty-detection, and rollback authority.
 
+## Upstream-Managed Lifecycle
+
+Keep upstream-to-catalog drift separate from catalog-to-target drift.
+`upstream check`, `upstream fetch`, and `upstream import` answer whether the
+catalog should change. `status`, `diff`, `track`, `pack`, `apply`, `repair`,
+`import-target`, and `rollback` answer whether a target should change.
+
+Lifecycle cases:
+
+| Case | Policy |
+| --- | --- |
+| Upstream unchanged | Report declaration health and imported/catalog hashes. Do not imply target work. |
+| Upstream changed | Fetch into the sandbox, show a catalog diff, import only the selected skill after source hygiene passes, then review/commit before target sync. |
+| Local catalog edit | Treat it as catalog-hash drift. Do not silently overwrite it with upstream. Commit/revert deliberately, or fork/adopt it into locally-authored catalog ownership in a future explicit flow. |
+| Upstream removed or renamed | Report the missing upstream skill and preserve the current catalog source plus lock until an operator chooses keep, fork/adopt, rename, or delete. |
+| Target drift | Use ordinary target status semantics and receipts. Never call `npx skills` against live homes as a shortcut. |
+
+The trust boundary stays narrow: exact pinned package, isolated temp
+workspace/home, fetched path inside the sandbox, required `SKILL.md`, and
+catalog-only writes. Upstream tooling is not trusted to choose target roots,
+write receipts, prove rollback state, or mutate live agent homes.
+
 The v1 lock file is `.skill-suitcase/upstream-lock.json`:
 
 ```json

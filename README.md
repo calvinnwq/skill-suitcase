@@ -292,6 +292,29 @@ write to Codex, Claude, OpenClaw, or other live target roots. After reviewing
 and committing the repo diff, use the normal `pack`/`apply`/`status` target sync
 commands.
 
+Lifecycle policy:
+
+- Upstream unchanged: `upstream check` is enough. It implies no target action.
+- Upstream changed: run `upstream fetch --dry-run`, review the catalog diff, run
+  `upstream import --apply` only for the selected skill, commit the repo diff,
+  then use normal target sync.
+- Local catalog edit: treat it as catalog-hash drift from the last imported
+  upstream hash. Do not silently overwrite it; commit/revert deliberately, or
+  fork/adopt the skill out of upstream-managed mode in a future explicit flow.
+- Upstream removed or renamed: report the missing upstream skill and preserve
+  the current catalog source plus upstream lock until an operator decides
+  whether to keep, fork/adopt, rename, or delete it.
+- Target drift: use ordinary `status` semantics. `track` exact matches,
+  `pack`/`apply` missing or behind skills, and stop on dirty targets for
+  `repair` or `import-target`. Do not use `npx skills` against live target roots
+  as a shortcut.
+
+Trust boundary: Skill Suitcase only runs an exact pinned upstream package inside
+an isolated temp workspace/home for source refresh, then validates the fetched
+skill stays inside that sandbox and contains `SKILL.md`. Upstream tooling is not
+trusted to choose live target roots, write receipts, prove rollback state, or
+mutate agent homes.
+
 If matching skills already exist, adopt them without rewriting files:
 
 ```bash
