@@ -64,6 +64,11 @@ Native Skill Suitcase install/repair path:
 
 The native path is therefore safer for managed installs. Delegation is not bad;
 it is just not ready to become part of the authoritative write path.
+Provider-backed compatibility targets such as OpenCode and Pi remain read-only
+in Skill Suitcase, including when a catalog adds a custom manifest
+`assignmentPaths` review root for them.
+Broad materialization flows must return `read_only_target` for those roots
+instead of converting provider-owned homes into managed install targets.
 
 ## Source Refresh Lane
 
