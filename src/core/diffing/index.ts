@@ -10,6 +10,7 @@ import {
 import { type PlanResult, plan } from "../planning/index.js";
 import type { Catalog } from "../catalog/index.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
+import { sourcePolicyDecision } from "../source-policy.js";
 
 type DiffSourceFileRead =
   | {
@@ -190,7 +191,8 @@ export async function diff(
   for (const plannedSkill of result.planned) {
     const { entries: relativeEntries, errors: compareErrors } = await comparePlannedSkill(
       plannedSkill,
-      installRoot
+      installRoot,
+      manifest.sourcePolicy
     );
     result.errors.push(...compareErrors);
     result.entries.push(...relativeEntries);
@@ -242,11 +244,12 @@ function blockedEntryFromPlan(blockedEntry: PlanItem): DiffEntry {
 
 async function comparePlannedSkill(
   plannedSkill: PlanItem,
-  installRoot: string
+  installRoot: string,
+  sourcePolicy: Catalog["sourcePolicy"]
 ): Promise<{ entries: DiffEntry[]; errors: DiffResultError[] }> {
   const sourceRoot = plannedSkill.sourcePath;
   const targetRoot = path.join(installRoot, plannedSkill.skill);
-  const sourceListing = await collectSourceEntries(sourceRoot, plannedSkill.skill);
+  const sourceListing = await collectSourceEntries(sourceRoot, plannedSkill.skill, sourcePolicy);
   if (!sourceListing.ok) {
     return { entries: [], errors: sourceListing.errors };
   }
@@ -363,20 +366,35 @@ async function collectExtraEntries(
 
 async function collectSourceEntries(
   root: string,
-  skill: string
+  skill: string,
+  sourcePolicy: Catalog["sourcePolicy"]
 ): Promise<{ ok: boolean; entries: string[]; errors: DiffResultError[] }> {
   try {
     const files = await listFiles(root);
     const entries: string[] = [];
+    const errors: DiffResultError[] = [];
 
     for (const entry of files) {
       const info = await stat(entry);
       if (info.isFile()) {
+        const relativePath = path.relative(root, entry);
+        const policyDecision = sourcePolicyDecision(relativePath, sourcePolicy);
+        if (policyDecision.action === "deny") {
+          errors.push({
+            code: "source_denied_path",
+            message: `Refusing to materialize ${skill}: source policy denies path ${relativePath}.`,
+            skill
+          });
+          continue;
+        }
+        if (policyDecision.action === "exclude") {
+          continue;
+        }
         entries.push(entry);
       }
     }
 
-    return { ok: true, entries, errors: [] };
+    return { ok: errors.length === 0, entries, errors };
   } catch (error) {
     if (!(error instanceof Error)) {
       return {

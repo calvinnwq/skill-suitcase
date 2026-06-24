@@ -409,6 +409,44 @@ compatibility:
   );
 });
 
+test("reports invalid source policy metadata deterministically", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-import-source-policy-"));
+  await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });
+  await writeFile(path.join(source, "skills", "office-hours", "SKILL.md"), "# Office Hours\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+sourcePolicy:
+  exclude:
+    - ../outside
+  deny:
+    - secrets/../token
+`
+  );
+
+  const result = await inspectImportSource({ source });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(
+    result.findings
+      .filter((finding) => finding.path?.startsWith("sourcePolicy"))
+      .map((finding) => [finding.level, finding.code, finding.path]),
+    [
+      ["error", "invalid_source_policy_pattern", "sourcePolicy.exclude.0"],
+      ["error", "invalid_source_policy_pattern", "sourcePolicy.deny.0"]
+    ]
+  );
+});
+
 test("warns when blocked platform compatibility lacks variant source metadata", async () => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-import-missing-variants-"));
   await mkdir(path.join(source, "skills", "gnhf-postflight"), { recursive: true });

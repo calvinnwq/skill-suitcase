@@ -356,6 +356,8 @@ function validateManifestShape(
     }
   }
 
+  validateSourcePolicyMetadata(manifest.sourcePolicy, findings);
+
   for (const [pathName, assignmentPath] of Object.entries(manifest.assignmentPaths)) {
     const assignment = normalizedString(assignmentPath.assignment);
     const kind = normalizedString(assignmentPath.kind);
@@ -513,6 +515,37 @@ function summarizeGroups(manifest: Catalog): ImportGroupSummary[] {
       assignments: sortedUnique(group.assignments ?? []),
       tags: sortedUnique(group.tags ?? [])
     }));
+}
+
+function validateSourcePolicyMetadata(
+  sourcePolicy: Catalog["sourcePolicy"],
+  findings: ImportFinding[]
+): void {
+  for (const field of ["exclude", "deny"] as const) {
+    for (const [index, pattern] of (sourcePolicy[field] ?? []).entries()) {
+      const pathName = `sourcePolicy.${field}.${index}`;
+      if (pattern.trim().length === 0) {
+        findings.push(error(
+          "empty_source_policy_pattern",
+          `sourcePolicy.${field} contains an empty pattern.`,
+          pathName
+        ));
+        continue;
+      }
+
+      if (hasParentTraversalSegment(pattern)) {
+        findings.push(error(
+          "invalid_source_policy_pattern",
+          `sourcePolicy.${field} pattern ${pattern} must not contain parent traversal segments.`,
+          pathName
+        ));
+      }
+    }
+  }
+}
+
+function hasParentTraversalSegment(value: string): boolean {
+  return value.split(/[\\/]+/).some((segment) => segment === "..");
 }
 
 function validateCompatibilityMetadata(manifest: Catalog, skillName: string, findings: ImportFinding[]): void {
@@ -782,6 +815,7 @@ function emptyManifest(): Catalog {
     assignments: {},
     assignmentPaths: {},
     groups: {},
+    sourcePolicy: {},
     compatibility: {},
     variants: {}
   };

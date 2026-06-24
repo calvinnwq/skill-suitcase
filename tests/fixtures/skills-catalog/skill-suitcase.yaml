@@ -79,6 +79,13 @@ groups:
     tags:
       - assignment
 
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+    - "**/dist/**"
+  deny:
+    - "**/secrets/**"
+
 compatibility:
   office-hours:
     agents:

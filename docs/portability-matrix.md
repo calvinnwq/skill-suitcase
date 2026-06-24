@@ -65,6 +65,12 @@ For Git-backed catalogs, pack and apply materialization refuse untracked,
 non-ignored files inside the selected variant source path. Track or remove those
 files before generating a pack so the snapshot only contains reviewed source
 state.
+Manifest `sourcePolicy.exclude` patterns intentionally omit generated/cache
+paths from packs, plan locks, diffs, and apply writes. Manifest
+`sourcePolicy.deny` and built-in secret-like deny patterns refuse unsafe source
+content before materialization with `source_denied_path` or
+`diff_source_denied_path` so excluded files do not become receipts and denied
+files do not reach target homes.
 
 ## Regression Fixture
 

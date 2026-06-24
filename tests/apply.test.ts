@@ -524,6 +524,40 @@ test("apply refuses artifact installs when selected source has untracked files",
   await assert.rejects(() => lstat(path.join(targetRoot, "office-hours", "untracked.js")));
 });
 
+test("apply refuses artifact installs when selected source has denied paths", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-denied-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-denied-target-"));
+  const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-denied-artifact-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(artifactRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, ".env"), "TOKEN=secret\n");
+  git(sourceRoot, "init");
+  git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md", "skills/office-hours/.env");
+
+  const manifestPath = await writeArtifactManifest(artifactRoot, {
+    sourceRoot,
+    target: "openclaw",
+    plannedSkills: ["office-hours"]
+  });
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    artifact: manifestPath
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "diff_source_denied_path");
+  assert.match(result.errors[0]?.message ?? "", /\.env/);
+  await assert.rejects(() => lstat(path.join(targetRoot, "office-hours", ".env")));
+});
+
 test("apply refuses lock installs when selected source becomes untracked after lock creation", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-lock-untracked-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-lock-untracked-target-"));

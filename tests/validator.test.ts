@@ -76,6 +76,40 @@ compatibility:
   assert.ok(codes.includes("unused_compatibility"));
 });
 
+test("reports invalid source policy metadata", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-invalid-source-policy-"));
+  await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });
+  await writeFile(path.join(source, "skills", "office-hours", "SKILL.md"), "# Office Hours\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+sourcePolicy:
+  exclude:
+    - ../outside
+  deny:
+    - secrets/../token
+`
+  );
+
+  const result = await validate({ source });
+  const policyFindings = result.findings.filter((finding) => finding.path?.startsWith("sourcePolicy"));
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(
+    policyFindings.map((finding) => finding.code),
+    ["invalid_source_policy_pattern", "invalid_source_policy_pattern"]
+  );
+});
+
 test("validates upstream lock metadata when present", async () => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upstream-valid-"));
   await mkdir(path.join(source, "skills", "hyperframes"), { recursive: true });

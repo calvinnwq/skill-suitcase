@@ -337,6 +337,23 @@ test("operator-facing docs describe manifest logical groups as reporting metadat
   assert.ok(skill.includes("do not change install or receipt semantics"), "operator skill should keep groups reporting-only");
 });
 
+test("operator-facing docs describe manifest source policy materialization boundaries", async () => {
+  for (const file of [
+    "ARCHITECTURE.md",
+    "README.md",
+    "docs/install-smoke.md",
+    "docs/portability-matrix.md",
+    "skills/skill-suitcase/SKILL.md"
+  ]) {
+    const normalized = await loadNormalized(file);
+    assert.ok(normalized.includes("sourcepolicy"), `${file} should document manifest sourcePolicy`);
+    assert.ok(normalized.includes("exclude"), `${file} should document sourcePolicy exclude patterns`);
+    assert.ok(normalized.includes("deny"), `${file} should document sourcePolicy deny patterns`);
+    assert.ok(normalized.includes("generated") || normalized.includes("cache"), `${file} should mention generated/cache paths`);
+    assert.ok(normalized.includes("source_denied_path") || normalized.includes("diff_source_denied_path"), `${file} should document denied-path error codes`);
+  }
+});
+
 test("README points new-machine setup at Suitcase-managed catalog installs", async () => {
   const normalized = await loadNormalized("README.md");
   assert.ok(normalized.includes("catalog-only upstream lane"), "README should mention the catalog-only upstream lane");

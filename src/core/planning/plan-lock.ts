@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { loadCatalog } from "../catalog/index.js";
+import { loadCatalog, type Catalog } from "../catalog/index.js";
 import { plan, type PlanResult } from "./index.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
+import { sourcePolicyDecision } from "../source-policy.js";
 
 export const PLAN_LOCK_SCHEMA = "calvinnwq.skills.plan-lock.v0";
 
@@ -58,7 +59,7 @@ export async function buildPlanLock({
   assignmentPath,
   sourceCommit
 }: PlanLockInput): Promise<PlanLockRecord> {
-  const { sourceRoot } = await loadCatalog(source);
+  const { sourceRoot, manifest } = await loadCatalog(source);
   const planResult: PlanResult = await plan({ source: sourceRoot, target });
 
   if (!planResult.ok) {
@@ -69,7 +70,8 @@ export async function buildPlanLock({
 
   const hygiene = checkSelectedSourceHygiene({
     sourceRoot,
-    plannedSkills: planResult.planned
+    plannedSkills: planResult.planned,
+    sourcePolicy: manifest.sourcePolicy
   });
   if (!hygiene.ok) {
     throw new Error(`Cannot create lock for unclean source: ${hygiene.errors[0]?.message}`);
@@ -77,7 +79,7 @@ export async function buildPlanLock({
 
   const normalizedAssignmentPath = normalizeValue(assignmentPath);
   const commit = await resolveSourceCommit(sourceCommit, sourceRoot);
-  const fileHashes = await collectPlanFileHashes(planResult.planned);
+  const fileHashes = await collectPlanFileHashes(planResult.planned, manifest.sourcePolicy);
   const planEntries = planResult.planned.map((item) => stableObject(plannedEntry(item)) as PlanEntry);
   const selectedSkills = [...new Set(planResult.planned.map((item) => item.skill))].sort();
 
@@ -182,7 +184,10 @@ export async function assessPlanLock({
   };
 }
 
-async function collectPlanFileHashes(plannedSkills: PlanResult["planned"]): Promise<PlanLock["fileHashes"]> {
+async function collectPlanFileHashes(
+  plannedSkills: PlanResult["planned"],
+  sourcePolicy: Catalog["sourcePolicy"]
+): Promise<PlanLock["fileHashes"]> {
   const hashes: PlanLock["fileHashes"] = {};
 
   for (const item of plannedSkills) {
@@ -190,6 +195,14 @@ async function collectPlanFileHashes(plannedSkills: PlanResult["planned"]): Prom
     const fileHashList: Record<string, string> = {};
 
     for (const relativePath of skillFiles) {
+      const policyDecision = sourcePolicyDecision(relativePath, sourcePolicy);
+      if (policyDecision.action === "deny") {
+        throw new Error(`Cannot create lock for denied source path: ${item.skill}/${relativePath}`);
+      }
+      if (policyDecision.action === "exclude") {
+        continue;
+      }
+
       const filePath = path.join(item.sourcePath, relativePath);
       const bytes = await readFile(filePath);
       fileHashList[relativePath] = createHash("sha256").update(bytes).digest("hex");

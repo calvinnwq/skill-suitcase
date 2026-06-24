@@ -496,6 +496,29 @@ referenced skills, suitcases, and assignments exist. Use groups when reports
 need to summarize related skills without relying on directory names, ad hoc
 descriptions, or target-specific assumptions.
 
+## Manifest Source Policy
+
+`skill-suitcase.yaml` may declare a top-level `sourcePolicy` for pack-time
+materialization boundaries:
+
+```yaml
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+    - "**/dist/**"
+  deny:
+    - "**/secrets/**"
+```
+
+`exclude` patterns are intentionally omitted from `pack`, plan-lock hashes, and
+the source side of `diff`/`apply`. Use them for generated artifacts or cache
+directories that should stay in the repo but never ship to agent homes. `deny`
+patterns are hard refusals: if a selected skill contains a matching path, pack,
+plan-lock creation, and apply return `source_denied_path` (or
+`diff_source_denied_path` when surfaced through apply's diff layer) with the
+skill and relative path. Built-in secret-like denials cover `.env`, `.npmrc`,
+`.pypirc`, private key files, and common SSH key names.
+
 ## `validate` Strict Mode
 
 `validate --source <skills-repo> --json` runs fast catalog-health checks only, including manifest relationships, logical-group references, per-skill `SKILL.md` presence, and upstream lock metadata when `.skill-suitcase/upstream-lock.json` exists.
@@ -837,9 +860,11 @@ cannot turn a provider-managed home into a Suitcase-owned install root.
 When the source is a Git checkout, `pack` refuses to materialize any selected
 source skill that contains untracked, non-ignored files. Track or remove those
 files before packing. Ignored files and untracked files outside the selected
-source skills do not block the pack. Hygiene failures surface in `errors` as
-`source_untracked_files`, `source_path_outside_repo`, or
-`source_hygiene_failed`.
+source skills do not block the pack. Files matching manifest `sourcePolicy`
+`exclude` patterns are omitted from packs and plan locks; files matching
+`sourcePolicy.deny` or built-in secret-like deny patterns block materialization.
+Hygiene failures surface in `errors` as `source_untracked_files`,
+`source_denied_path`, `source_path_outside_repo`, or `source_hygiene_failed`.
 
 ```json
 {
@@ -1184,6 +1209,9 @@ On failure (`ok: false`), the `errors` array contains one or more objects with
 - `read_only_target` - the resolved target provider is modeled read-only
 - `source_untracked_files` — a selected source skill contains untracked,
   non-ignored files; track or remove them before packing/applying
+- `source_denied_path` / `diff_source_denied_path` — a selected source skill
+  contains a path denied by manifest `sourcePolicy.deny` or a built-in
+  secret-like deny pattern; remove the path or adjust the reviewed policy
 - `source_path_outside_repo` / `source_hygiene_failed` — source hygiene could
   not prove that the selected source skill is inside the Git checkout and clean
 - `diff_*` — a target-resolution error propagated from the diff layer;

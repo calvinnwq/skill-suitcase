@@ -10,6 +10,10 @@ type ManifestGroup = {
   assignments?: string[];
   tags?: string[];
 };
+type ManifestSourcePolicy = {
+  exclude?: string[];
+  deny?: string[];
+};
 type ManifestVariant = {
   source?: string;
   agents?: string[];
@@ -27,12 +31,14 @@ type ParsedManifest = {
   assignments: Record<string, ManifestAssignment>;
   assignmentPaths: Record<string, Record<string, string>>;
   groups: Record<string, ManifestGroup>;
+  sourcePolicy: ManifestSourcePolicy;
   compatibility: Record<string, ManifestCompatibility>;
   variants: Record<string, Record<string, ManifestVariant>>;
 };
 
-type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "groups" | "compatibility" | "variants" | null;
+type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "groups" | "sourcePolicy" | "compatibility" | "variants" | null;
 type GroupField = "skills" | "suitcases" | "assignments" | "tags" | null;
+type SourcePolicyField = "exclude" | "deny" | null;
 type CompatibilityField = "agents" | "evidence" | "blockedAgents" | null;
 type VariantField = "agents" | null;
 
@@ -42,6 +48,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
     assignments: {},
     assignmentPaths: {},
     groups: {},
+    sourcePolicy: {},
     compatibility: {},
     variants: {}
   };
@@ -51,6 +58,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
   let currentName: string | null = null;
   let currentVariantName: string | null = null;
   let currentGroupField: GroupField = null;
+  let currentSourcePolicyField: SourcePolicyField = null;
   let currentField: CompatibilityField = null;
   let currentVariantField: VariantField = null;
 
@@ -71,6 +79,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         sectionValue === "assignments" ||
         sectionValue === "assignmentPaths" ||
         sectionValue === "groups" ||
+        sectionValue === "sourcePolicy" ||
         sectionValue === "compatibility" ||
         sectionValue === "variants"
       )
@@ -79,6 +88,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       currentName = null;
       currentVariantName = null;
       currentGroupField = null;
+      currentSourcePolicyField = null;
       currentField = null;
       currentVariantField = null;
       continue;
@@ -89,9 +99,15 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       section !== "assignments" &&
       section !== "assignmentPaths" &&
       section !== "groups" &&
+      section !== "sourcePolicy" &&
       section !== "compatibility" &&
       section !== "variants"
     ) {
+      continue;
+    }
+
+    if (section === "sourcePolicy") {
+      currentSourcePolicyField = parseSourcePolicyLine(manifest.sourcePolicy, indent, trimmed, currentSourcePolicyField);
       continue;
     }
 
@@ -99,6 +115,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       currentName = trimmed.slice(0, -1);
       currentVariantName = null;
       currentGroupField = null;
+      currentSourcePolicyField = null;
       currentField = null;
       currentVariantField = null;
 
@@ -179,6 +196,26 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
   }
 
   return manifest;
+}
+
+function parseSourcePolicyLine(
+  sourcePolicy: ManifestSourcePolicy,
+  indent: number,
+  trimmed: string,
+  currentSourcePolicyField: SourcePolicyField
+): SourcePolicyField {
+  if (indent === 2 && (trimmed === "exclude:" || trimmed === "deny:")) {
+    const field = trimmed.slice(0, -1) as Exclude<SourcePolicyField, null>;
+    sourcePolicy[field] = [];
+    return field;
+  }
+
+  if (indent === 4 && trimmed.startsWith("- ") && currentSourcePolicyField !== null) {
+    sourcePolicy[currentSourcePolicyField]?.push(unquoteValue(trimmed.slice(2)));
+    return currentSourcePolicyField;
+  }
+
+  return currentSourcePolicyField;
 }
 
 function parseGroupLine(
@@ -360,4 +397,15 @@ function parseCompatibilityLine(
 
 function valueAfterColon(line: string): string {
   return line.slice(line.indexOf(":") + 1).trim();
+}
+
+function unquoteValue(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
 }

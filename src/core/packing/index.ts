@@ -10,6 +10,7 @@ import {
 import { plan } from "../planning/index.js";
 import { type PlanResult } from "../planning/index.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
+import { sourcePolicyDecision } from "../source-policy.js";
 
 const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_MANIFEST = "skill-suitcase-bundle.json";
@@ -163,13 +164,16 @@ export async function pack({
   if (planResult.ok) {
     const hygiene = checkSelectedSourceHygiene({
       sourceRoot,
-      plannedSkills: planResult.planned
+      plannedSkills: planResult.planned,
+      sourcePolicy: manifest.sourcePolicy
     });
     if (!hygiene.ok) {
       errors.push(...hygiene.errors);
     } else {
       for (const plannedSkill of planResult.planned) {
-        files.push(...(await collectSkillFiles(plannedSkill)));
+        const collected = await collectSkillFiles(plannedSkill, manifest.sourcePolicy);
+        errors.push(...collected.errors);
+        files.push(...collected.files);
       }
     }
   }
@@ -499,25 +503,43 @@ function isInsideOrEqual(candidate: string, root: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-async function collectSkillFiles(plannedSkill: PlanLike): Promise<PackedFile[]> {
+async function collectSkillFiles(
+  plannedSkill: PlanLike,
+  sourcePolicy: LoadedCatalog["manifest"]["sourcePolicy"]
+): Promise<{ files: PackedFile[]; errors: ErrorLike[] }> {
   const sourceRoot = plannedSkill.sourcePath;
   const filePaths = await listFiles(sourceRoot);
   const files: PackedFile[] = [];
+  const errors: ErrorLike[] = [];
 
   for (const filePath of filePaths) {
+    const relativePath = path.relative(sourceRoot, filePath);
+    const policyDecision = sourcePolicyDecision(relativePath, sourcePolicy);
+    if (policyDecision.action === "deny") {
+      errors.push({
+        code: "source_denied_path",
+        message: `Refusing to materialize ${plannedSkill.skill}: source policy denies path ${relativePath}.`,
+        skill: plannedSkill.skill
+      });
+      continue;
+    }
+    if (policyDecision.action === "exclude") {
+      continue;
+    }
+
     const bytes = await readFile(filePath);
     files.push({
       skill: plannedSkill.skill,
-      relativePath: path.relative(sourceRoot, filePath),
+      relativePath,
       sourcePath: filePath,
-      bundlePath: path.join("skills", plannedSkill.skill, path.relative(sourceRoot, filePath)),
+      bundlePath: path.join("skills", plannedSkill.skill, relativePath),
       bytes: bytes.length,
       sha256: createHash("sha256").update(bytes).digest("hex")
     });
   }
 
   files.sort((left, right) => left.bundlePath.localeCompare(right.bundlePath));
-  return files;
+  return { files, errors };
 }
 
 async function listFiles(root: string): Promise<string[]> {

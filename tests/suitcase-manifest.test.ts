@@ -53,6 +53,8 @@ test("parses the skills repo suitcase manifest shape", async () => {
   assert.equal(codexAssigned.title, "Codex Assigned");
   assert.deepEqual(codexAssigned.assignments, ["codex"]);
   assert.deepEqual(codexAssigned.tags, ["assignment"]);
+  assert.deepEqual(manifest.sourcePolicy.exclude, ["**/.cache/**", "**/dist/**"]);
+  assert.deepEqual(manifest.sourcePolicy.deny, ["**/secrets/**"]);
   assert.equal(
     gnhfCompatibility.blockedAgents!.codex,
     "Live Codex copy is a slimmer platform variant and must not be overwritten by the OpenClaw canonical bundle."
