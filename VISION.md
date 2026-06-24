@@ -11,7 +11,8 @@ release work, but the normal product experience should be mediated by agents.
 
 - `skill-suitcase` is the main product and tool.
 - A renamable skills repository is the source-of-truth warehouse for owned
-  skills, variants, assignments, upstream metadata, and install policy.
+  skills, variants, logical groups, assignments, upstream metadata, and install
+  policy.
 - The CLI should be usable by any agent runtime, including Claude, Codex,
   OpenClaw, Hermes, and future runtimes.
 - Runtime integrations should adapt to the CLI contract instead of becoming
@@ -36,6 +37,7 @@ structured enough for agents to inspect, diff, approve, and recover reliably.
 Skill Suitcase owns the local management layer:
 
 - catalog import and validation
+- manifest logical-group reporting
 - target discovery and assignment resolution
 - plans, diffs, bundles, and lock/hash proof
 - receipts, status, rollback, and dirty-drift classification

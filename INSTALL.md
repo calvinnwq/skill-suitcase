@@ -135,6 +135,8 @@ and receipt commit when the target skill is upstream-managed.
 Target-scoped status reports should compute lineage only for reported skills and must not hash unrelated upstream-managed catalog skills.
 `validate --strict` also validates `.skill-suitcase/upstream-lock.json` when the
 catalog has one.
+`import --json` and `validate --json` also report manifest logical groups as catalog metadata.
+Broken group references are catalog metadata problems, not implicit install targets.
 
 If the catalog declares an upstream-managed skill and you are explicitly
 refreshing source, fetch one named skill into an isolated temp workspace/home and

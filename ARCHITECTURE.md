@@ -142,7 +142,8 @@ targets, not canonical source directories.
 
 The durable state model belongs to Skill Suitcase:
 
-- manifests describe approved skills, variants, assignments, and target paths
+- manifests describe approved skills, variants, logical groups, assignments,
+  and target paths
 - plans and diffs explain what would change before any mutation
 - source hygiene gates ensure materialization boundaries only snapshot or install
   selected Git-backed source skills after untracked, non-ignored files are
@@ -155,6 +156,13 @@ The durable state model belongs to Skill Suitcase:
 
 External installers or registries may provide useful compatibility data, but
 they must not bypass this model.
+
+Manifest-owned logical groups are reporting metadata. They may name product
+families, upstream suites, provider boundaries, or other operator-facing buckets
+by referencing skills, suitcases, and assignments already declared in the
+catalog. Groups must validate deterministically, but they must not alter
+planning, packing, installation, receipt ownership, or target assignment
+semantics unless a later feature explicitly wires that behavior.
 
 ## Target Registry Providers
 

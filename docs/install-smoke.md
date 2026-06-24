@@ -41,6 +41,11 @@ node dist/src/cli.js pack --source /path/to/skills-catalog --target openclaw --d
 node dist/src/cli.js status --source /path/to/skills-catalog --json
 ```
 
+If the catalog declares manifest `groups`, smoke them through `import --json`
+and `validate --strict --json` as reporting metadata only. Groups should
+summarize related skills, suitcases, or assignments without changing target
+planning or install semantics.
+
 For Git-backed catalogs, `pack` refuses selected source skills with untracked,
 non-ignored files. Commit, stage, or remove scratch files inside selected skills
 before expecting the pack smoke to pass.

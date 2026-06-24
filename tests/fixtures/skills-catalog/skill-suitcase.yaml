@@ -46,6 +46,39 @@ assignmentPaths:
     path: /tmp/claude/skills
     assignment: claude
 
+groups:
+  portable-core:
+    title: Portable Core
+    description: Skills that are intended to travel across supported agent runtimes.
+    suitcases:
+      - core
+    assignments:
+      - codex
+      - claude
+      - openclaw-codex
+    tags:
+      - portable
+
+  openclaw-builder-tools:
+    title: OpenClaw Builder Tools
+    description: OpenClaw-native workflow and maintenance skills.
+    provider: openclaw
+    skills:
+      - skillify
+      - gnhf-postflight
+    suitcases:
+      - openclaw-builder
+    tags:
+      - workflow
+
+  codex-assigned:
+    title: Codex Assigned
+    description: Skills included through the Codex assignment.
+    assignments:
+      - codex
+    tags:
+      - assignment
+
 compatibility:
   office-hours:
     agents:

@@ -25,6 +25,9 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
   Never run it directly against live Codex, Claude, OpenClaw, or other agent homes for setup or sync.
 - Prefer provider/source matrix rows and `targets --json` discovery over
   hardcoding every current and future runtime variant.
+- Treat manifest `groups` as reporting metadata for product families, upstream
+  suites, and provider boundaries. They help summarize related skills but do not
+  change install or receipt semantics.
 - Use `track` only for exact existing matches.
 - Use `reconcile --dry-run` before `reconcile --apply`, and only for selected
   catalog-owned skills.
@@ -139,6 +142,10 @@ Run the catalog gates first:
 "$CLI" targets --source "$SRC" --json
 "$CLI" status --source "$SRC" --json
 ```
+
+`import --json` and `validate --json` should report or validate manifest-owned
+logical groups. Broken group references are catalog metadata problems; do not
+turn a group into an implicit install target.
 
 ## Source And Target Matrix
 

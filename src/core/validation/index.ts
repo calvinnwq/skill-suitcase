@@ -17,6 +17,7 @@ type ValidationSummary = {
   suitcases: number;
   assignments: number;
   assignmentPaths: number;
+  groups: number;
   upstreamDeclarations: number;
   referencedSkills: number;
   contractsEvaluated: number;
@@ -93,6 +94,68 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
     }
   }
 
+  for (const [groupName, group] of Object.entries(manifest.groups)) {
+    if (!isPlainPathSegment(groupName)) {
+      findings.push(
+        error(
+          "invalid_group",
+          `Group ${groupName} must be a plain manifest key.`,
+          `groups.${groupName}`
+        )
+      );
+    }
+
+    const skills = group.skills ?? [];
+    const suitcases = group.suitcases ?? [];
+    const assignments = group.assignments ?? [];
+
+    if (skills.length === 0 && suitcases.length === 0 && assignments.length === 0) {
+      findings.push(
+        warning(
+          "empty_group",
+          `Group ${groupName} does not reference any skills, suitcases, or assignments.`,
+          `groups.${groupName}`
+        )
+      );
+    }
+
+    for (const skillName of skills) {
+      if (!referencedSkills.has(skillName)) {
+        findings.push(
+          error(
+            "unknown_group_skill",
+            `Group ${groupName} references unknown skill ${skillName}.`,
+            `groups.${groupName}.skills`
+          )
+        );
+      }
+    }
+
+    for (const suitcaseName of suitcases) {
+      if (!manifest.suitcases[suitcaseName]) {
+        findings.push(
+          error(
+            "unknown_group_suitcase",
+            `Group ${groupName} references unknown suitcase ${suitcaseName}.`,
+            `groups.${groupName}.suitcases`
+          )
+        );
+      }
+    }
+
+    for (const assignmentName of assignments) {
+      if (!manifest.assignments[assignmentName]) {
+        findings.push(
+          error(
+            "unknown_group_assignment",
+            `Group ${groupName} references unknown assignment ${assignmentName}.`,
+            `groups.${groupName}.assignments`
+          )
+        );
+      }
+    }
+  }
+
   for (const skillName of Object.keys(manifest.compatibility)) {
     if (!referencedSkills.has(skillName)) {
       findings.push(
@@ -150,6 +213,7 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
       suitcases: Object.keys(manifest.suitcases).length,
       assignments: Object.keys(manifest.assignments).length,
       assignmentPaths: Object.keys(manifest.assignmentPaths).length,
+      groups: Object.keys(manifest.groups).length,
       upstreamDeclarations: upstream.declarations.length,
       referencedSkills: referencedSkills.size,
       contractsEvaluated: contracts.length,
@@ -273,6 +337,17 @@ async function isFile(targetPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function isPlainPathSegment(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 &&
+    trimmed === value &&
+    trimmed !== "." &&
+    trimmed !== ".." &&
+    !trimmed.includes("/") &&
+    !trimmed.includes("\\") &&
+    !path.isAbsolute(trimmed);
 }
 
 function error(code: string, message: string, pathName: string | null = null): Finding {

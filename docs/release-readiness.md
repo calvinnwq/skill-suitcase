@@ -177,6 +177,10 @@ compatibility surfaces, including when a catalog declares custom
 `pack`, `apply`, `track`, `reconcile`, `repair`, and `import-target` should
 return `read_only_target` for those roots instead of adopting them as
 Suitcase-owned install targets.
+Manifest-owned logical groups are release-safe reporting metadata when
+`import --json` and `validate --json` can prove their referenced skills,
+suitcases, and assignments exist. They must not change target planning or
+install semantics.
 
 Live mutation requires explicit approval input and should start in disposable
 fixtures or a clearly approved target:

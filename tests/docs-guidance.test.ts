@@ -321,6 +321,22 @@ test("operator-facing docs describe provider-managed read-only boundaries", asyn
   assert.ok(skill.includes("custom manifest assignment paths"), "operator skill should call out custom manifest provider paths");
 });
 
+test("operator-facing docs describe manifest logical groups as reporting metadata", async () => {
+  const architecture = await loadNormalized("ARCHITECTURE.md");
+  assert.ok(architecture.includes("manifest-owned logical groups"), "ARCHITECTURE.md should name manifest-owned logical groups");
+  assert.ok(architecture.includes("reporting metadata"), "ARCHITECTURE.md should keep groups reporting-only");
+  assert.ok(architecture.includes("must not alter planning, packing, installation"), "ARCHITECTURE.md should prevent implicit install semantics");
+
+  const readme = await loadNormalized("README.md");
+  assert.ok(readme.includes("## manifest logical groups"), "README should document manifest logical groups");
+  assert.ok(readme.includes("groups are catalog metadata only"), "README should keep groups catalog-only");
+  assert.ok(readme.includes("do not change planning, packing, installation"), "README should prevent implicit behavior changes");
+
+  const skill = await loadNormalized("skills/skill-suitcase/SKILL.md");
+  assert.ok(skill.includes("manifest `groups`"), "operator skill should mention manifest groups");
+  assert.ok(skill.includes("do not change install or receipt semantics"), "operator skill should keep groups reporting-only");
+});
+
 test("README points new-machine setup at Suitcase-managed catalog installs", async () => {
   const normalized = await loadNormalized("README.md");
   assert.ok(normalized.includes("catalog-only upstream lane"), "README should mention the catalog-only upstream lane");
