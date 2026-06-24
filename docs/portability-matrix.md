@@ -46,6 +46,9 @@ sources that are missing, lack `SKILL.md`, or resolve outside the source repo.
 
 Upstream source refresh operates on the canonical `skills/<name>` directory for
 a declared upstream-managed skill.
+It is an upstream-to-catalog refresh only; catalog-to-target drift still follows
+ordinary target status, pack, apply, track, repair, import-target, and rollback
+semantics for each runtime.
 If an upstream refresh should affect platform-specific variants, model and
 review that variant source separately instead of expecting `upstream import` to
 rewrite `variants/<agent>/<name>`.
