@@ -169,6 +169,57 @@ test("approved reconcile replaces target from catalog, records backup rollback m
   assert.equal(statusAfterRollback.summary.unknown, 1);
 });
 
+test("reconcile apply omits sourcePolicy excluded catalog paths", async (t) => {
+  const { sourceRoot, targetRoot, sourceSkill, targetSkill } = await createReconcileFixture(t);
+  await mkdir(path.join(sourceSkill, ".cache"), { recursive: true });
+  await writeFile(path.join(sourceSkill, ".cache", "generated.json"), "{}\n");
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - skill-cleaner
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${targetRoot}
+
+compatibility:
+  skill-cleaner:
+    agents:
+      - openclaw
+    variant: canonical
+
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`);
+
+  const result = await reconcile({
+    source: sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+
+  assert.equal(result.ok, true);
+  await assert.rejects(() => stat(path.join(targetSkill, ".cache")), /ENOENT/);
+  const receipt = JSON.parse(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8")) as Receipt;
+  const record = singleRecord(receipt, "skill-cleaner");
+  assert.deepEqual(
+    (record.installedFiles as Array<{ path: string }>).map((file) => file.path).sort(),
+    ["SKILL.md", "runtime.js"]
+  );
+  const postStatus = await status({ source: sourceRoot, target: "openclaw" });
+  assert.equal(postStatus.ok, true);
+  assert.equal(postStatus.summary.current, 1);
+});
+
 test("reconcile rollback removes directories created from catalog source", async (t) => {
   const { sourceRoot, targetRoot, sourceSkill, targetSkill } = await createReconcileFixture(t);
   await mkdir(path.join(sourceSkill, "scripts"), { recursive: true });

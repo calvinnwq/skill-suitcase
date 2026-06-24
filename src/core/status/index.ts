@@ -23,7 +23,7 @@ import {
   upstreamLineage,
   type UpstreamLineage
 } from "../upstream/index.js";
-import { collectSourcePolicyDeniedPaths, sourcePolicyDecision, type SourcePolicy } from "../source-policy.js";
+import { collectSourcePolicyDeniedPaths, sourcePolicyDecision, sourcePolicyPrunesDirectory, type SourcePolicy } from "../source-policy.js";
 
 type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
 type StatusSummary = {
@@ -812,7 +812,7 @@ async function statusSkill({
   let targetDiffers = false;
   if (!installedHash) {
     try {
-      targetDiffers = await targetDiffersFromSource(sourceSkillPath, targetPath);
+      targetDiffers = await targetDiffersFromSource(sourceSkillPath, targetPath, sourcePolicy);
     } catch (error) {
       return {
         status: "unknown",
@@ -1500,7 +1500,11 @@ function selectInstallRecord({
     ]
   };
 }
-async function targetDiffersFromSource(source: string, target: string): Promise<boolean> {
+async function targetDiffersFromSource(
+  source: string,
+  target: string,
+  sourcePolicy?: SourcePolicy | undefined
+): Promise<boolean> {
   try {
     const targetStats = await lstat(target);
     if (targetStats.isSymbolicLink()) {
@@ -1518,7 +1522,7 @@ async function targetDiffersFromSource(source: string, target: string): Promise<
     return true;
   }
 
-  const sourceEntries = await listFiles(source);
+  const sourceEntries = await listFiles(source, "", sourcePolicy);
   const targetEntries = await listFiles(target);
 
   if (!arraysEqual(sourceEntries, targetEntries)) {
@@ -1648,6 +1652,9 @@ async function listFiles(root: string, prefix = "", sourcePolicy?: SourcePolicy 
 
     const entryPath = path.join(root, entry.name);
     if (entry.isDirectory()) {
+      if (sourcePolicy !== undefined && sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
+        continue;
+      }
       files.push(...(await listFiles(entryPath, relativePath, sourcePolicy)));
       continue;
     }

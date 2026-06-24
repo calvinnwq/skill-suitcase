@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { TargetOverrides } from "../catalog/index.js";
+import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
 import {
   RECEIPT_FILE,
@@ -11,6 +11,12 @@ import {
   upsertAndWriteReceipt
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
+import {
+  collectSourcePolicyDeniedPaths,
+  sourcePolicyDecision,
+  sourcePolicyPrunesDirectory,
+  type SourcePolicy
+} from "../source-policy.js";
 import { status } from "../status/index.js";
 
 type ReconcileInput = {
@@ -481,6 +487,8 @@ async function executeReconcile(input: ReconcileInput, plan: ReconcileBaseResult
   const backups: ReconciledBackup[] = [];
   let reconciledFiles = 0;
   let receiptPathWritten: string | null = null;
+  const { manifest } = await loadCatalog(input.source, { targetOverrides: input.targetOverrides });
+  const sourcePolicy = manifest.sourcePolicy;
 
   for (const candidate of plan.candidates) {
     const backupPath = path.join(path.dirname(candidate.targetPath), `.${candidate.skill}.suitcase-pre-reconcile-${uniqueSuffix()}`);
@@ -490,9 +498,10 @@ async function executeReconcile(input: ReconcileInput, plan: ReconcileBaseResult
     let installed = false;
 
     try {
-      await copyTree(candidate.sourcePath, tmpPath);
+      await assertSourcePolicyAllowsSource(candidate.sourcePath, sourcePolicy);
+      await copyTree(candidate.sourcePath, tmpPath, sourcePolicy);
       copied = true;
-      if (!(await treesMatch(candidate.sourcePath, tmpPath))) {
+      if (!(await treesMatch(candidate.sourcePath, tmpPath, sourcePolicy))) {
         throw new Error(`Temporary reconcile copy for ${candidate.skill} does not match catalog source.`);
       }
       await rename(candidate.targetPath, backupPath);
@@ -523,7 +532,7 @@ async function executeReconcile(input: ReconcileInput, plan: ReconcileBaseResult
         },
         sourcePath: candidate.sourcePath,
         targetPath: candidate.targetPath,
-        sourceHash: await hashDirectory(candidate.sourcePath),
+        sourceHash: await hashDirectory(candidate.sourcePath, sourcePolicy),
         installedFiles,
         priorState: {
           status: candidate.status,
@@ -1023,20 +1032,38 @@ async function validateDirectoryEntries(
   return { ok: true };
 }
 
-async function copyTree(sourcePath: string, targetPath: string): Promise<void> {
+async function copyTree(
+  sourcePath: string,
+  targetPath: string,
+  sourcePolicy?: SourcePolicy | undefined,
+  sourceRoot = sourcePath
+): Promise<void> {
   if (isSameOrInsidePath(targetPath, sourcePath)) {
     throw new Error(`Refusing to copy ${sourcePath} into nested destination ${targetPath}.`);
   }
   await mkdir(targetPath, { recursive: true });
   const entries = await readdir(sourcePath, { withFileTypes: true });
   for (const entry of entries) {
+    const from = path.join(sourcePath, entry.name);
+    const relativePath = path.relative(sourceRoot, from);
+    const policyDecision = sourcePolicy === undefined
+      ? { action: "include" as const, pattern: null }
+      : sourcePolicyDecision(relativePath, sourcePolicy);
+    if (policyDecision.action === "deny") {
+      throw new Error(`source policy denies path ${relativePath}`);
+    }
+    if (policyDecision.action === "exclude") {
+      continue;
+    }
     if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
       continue;
     }
-    const from = path.join(sourcePath, entry.name);
     const to = path.join(targetPath, entry.name);
     if (entry.isDirectory()) {
-      await copyTree(from, to);
+      if (sourcePolicy !== undefined && sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
+        continue;
+      }
+      await copyTree(from, to, sourcePolicy, sourceRoot);
       continue;
     }
     if (entry.isFile()) {
@@ -1045,10 +1072,10 @@ async function copyTree(sourcePath: string, targetPath: string): Promise<void> {
   }
 }
 
-async function treesMatch(left: string, right: string): Promise<boolean> {
+async function treesMatch(left: string, right: string, sourcePolicy?: SourcePolicy | undefined): Promise<boolean> {
   const [leftFiles, rightFiles] = await Promise.all([
-    buildInstalledFiles(left),
-    buildInstalledFiles(right)
+    buildFileHashes(left, sourcePolicy),
+    buildFileHashes(right)
   ]);
   if (leftFiles.length !== rightFiles.length) {
     return false;
@@ -1061,6 +1088,16 @@ async function treesMatch(left: string, right: string): Promise<boolean> {
     }
   }
   return true;
+}
+
+async function assertSourcePolicyAllowsSource(root: string, sourcePolicy?: SourcePolicy | undefined): Promise<void> {
+  if (sourcePolicy === undefined) {
+    return;
+  }
+  const deniedPaths = await collectSourcePolicyDeniedPaths(root, sourcePolicy);
+  if (deniedPaths.length > 0) {
+    throw new Error(`source policy denies paths (${deniedPaths.join(", ")})`);
+  }
 }
 
 async function buildRollbackFiles({
@@ -1151,8 +1188,9 @@ async function readRollbackFileState(filePath: string): Promise<RollbackFileStat
   }
 }
 
-async function hashDirectory(root: string): Promise<string> {
-  const files = await listFiles(root);
+async function hashDirectory(root: string, sourcePolicy?: SourcePolicy | undefined): Promise<string> {
+  await assertSourcePolicyAllowsSource(root, sourcePolicy);
+  const files = await listFiles(root, "", sourcePolicy);
   const digest = createHash("sha256");
   for (const relativePath of files) {
     const bytes = await readFile(path.join(root, relativePath));
@@ -1164,22 +1202,52 @@ async function hashDirectory(root: string): Promise<string> {
   return digest.digest("hex");
 }
 
-async function listFiles(root: string): Promise<string[]> {
+async function buildFileHashes(root: string, sourcePolicy?: SourcePolicy | undefined): Promise<Array<{ path: string; hash: string }>> {
+  const files = await listFiles(root, "", sourcePolicy);
+  const records = [];
+  for (const relativePath of files) {
+    const bytes = await readFile(path.join(root, relativePath));
+    records.push({
+      path: relativePath,
+      hash: createHash("sha256").update(bytes).digest("hex")
+    });
+  }
+  return records.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function listFiles(
+  root: string,
+  prefix = "",
+  sourcePolicy?: SourcePolicy | undefined
+): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files: string[] = [];
 
   for (const entry of entries) {
+    const relativePath = prefix.length > 0 ? path.join(prefix, entry.name) : entry.name;
+    const policyDecision = sourcePolicy === undefined
+      ? { action: "include" as const, pattern: null }
+      : sourcePolicyDecision(relativePath, sourcePolicy);
+    if (policyDecision.action === "deny") {
+      throw new Error(`source policy denies path ${relativePath}`);
+    }
+    if (policyDecision.action === "exclude") {
+      continue;
+    }
     if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
       continue;
     }
 
     const entryPath = path.join(root, entry.name);
     if (entry.isDirectory()) {
-      files.push(...(await listFiles(entryPath)).map((item) => path.join(entry.name, item)));
+      if (sourcePolicy !== undefined && sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
+        continue;
+      }
+      files.push(...(await listFiles(entryPath, relativePath, sourcePolicy)));
       continue;
     }
     if (entry.isFile()) {
-      files.push(entry.name);
+      files.push(relativePath);
     }
   }
 
