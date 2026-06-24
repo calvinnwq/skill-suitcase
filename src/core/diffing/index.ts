@@ -10,7 +10,7 @@ import {
 import { type PlanResult, plan } from "../planning/index.js";
 import type { Catalog } from "../catalog/index.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
-import { sourcePolicyDecision } from "../source-policy.js";
+import { sourcePolicyDecision, sourcePolicyPrunesDirectory } from "../source-policy.js";
 
 type DiffSourceFileRead =
   | {
@@ -370,7 +370,7 @@ async function collectSourceEntries(
   sourcePolicy: Catalog["sourcePolicy"]
 ): Promise<{ ok: boolean; entries: string[]; errors: DiffResultError[] }> {
   try {
-    const files = await listFiles(root);
+    const files = await listFiles(root, root, sourcePolicy);
     const entries: string[] = [];
     const errors: DiffResultError[] = [];
 
@@ -432,15 +432,19 @@ async function collectTargetEntries(targetPath: string): Promise<string[]> {
   }
 }
 
-async function listFiles(root: string): Promise<string[]> {
+async function listFiles(root: string, baseRoot = root, sourcePolicy?: Catalog["sourcePolicy"]): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files: string[] = [];
 
   for (const entry of entries) {
     const entryPath = path.join(root, entry.name);
+    const relativePath = path.relative(baseRoot, entryPath);
 
     if (entry.isDirectory()) {
-      files.push(...(await listFiles(entryPath)));
+      if (sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
+        continue;
+      }
+      files.push(...(await listFiles(entryPath, baseRoot, sourcePolicy)));
       continue;
     }
 

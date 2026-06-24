@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -322,12 +322,17 @@ assignments:
 
 test("pack excludes manifest sourcePolicy paths without materializing them", async (t) => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-source-policy-exclude-"));
-  t.after(() => rm(source, { recursive: true, force: true }));
 
   const skillRoot = path.join(source, "skills", "office-hours");
-  await mkdir(path.join(skillRoot, ".cache"), { recursive: true });
+  const cacheRoot = path.join(skillRoot, ".cache");
+  t.after(async () => {
+    await chmod(cacheRoot, 0o700).catch(() => undefined);
+    await rm(source, { recursive: true, force: true });
+  });
+  await mkdir(cacheRoot, { recursive: true });
   await writeFile(path.join(skillRoot, "SKILL.md"), "# Office Hours\n");
-  await writeFile(path.join(skillRoot, ".cache", "generated.json"), "{}\n");
+  await writeFile(path.join(cacheRoot, "generated.json"), "{}\n");
+  await chmod(cacheRoot, 0o000);
   await writeFile(
     path.join(source, "skill-suitcase.yaml"),
     `suitcases:

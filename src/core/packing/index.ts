@@ -10,7 +10,7 @@ import {
 import { plan } from "../planning/index.js";
 import { type PlanResult } from "../planning/index.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
-import { sourcePolicyDecision } from "../source-policy.js";
+import { sourcePolicyDecision, sourcePolicyPrunesDirectory } from "../source-policy.js";
 
 const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_MANIFEST = "skill-suitcase-bundle.json";
@@ -508,7 +508,7 @@ async function collectSkillFiles(
   sourcePolicy: LoadedCatalog["manifest"]["sourcePolicy"]
 ): Promise<{ files: PackedFile[]; errors: ErrorLike[] }> {
   const sourceRoot = plannedSkill.sourcePath;
-  const filePaths = await listFiles(sourceRoot);
+  const filePaths = await listFiles(sourceRoot, sourceRoot, sourcePolicy);
   const files: PackedFile[] = [];
   const errors: ErrorLike[] = [];
 
@@ -542,15 +542,23 @@ async function collectSkillFiles(
   return { files, errors };
 }
 
-async function listFiles(root: string): Promise<string[]> {
+async function listFiles(
+  root: string,
+  baseRoot = root,
+  sourcePolicy?: LoadedCatalog["manifest"]["sourcePolicy"]
+): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files: string[] = [];
 
   for (const entry of entries) {
     const entryPath = path.join(root, entry.name);
+    const relativePath = path.relative(baseRoot, entryPath);
 
     if (entry.isDirectory()) {
-      files.push(...(await listFiles(entryPath)));
+      if (sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
+        continue;
+      }
+      files.push(...(await listFiles(entryPath, baseRoot, sourcePolicy)));
       continue;
     }
 

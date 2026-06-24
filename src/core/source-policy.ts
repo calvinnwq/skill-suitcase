@@ -47,6 +47,21 @@ export function sourcePolicyDecision(relativePath: string, policy: SourcePolicy 
   return { action: "include", pattern: null };
 }
 
+export function sourcePolicyPrunesDirectory(relativePath: string, policy: SourcePolicy | undefined): boolean {
+  const normalizedPath = normalizePath(relativePath).replace(/\/+$/, "");
+  if (normalizedPath.length === 0) {
+    return false;
+  }
+
+  return normalizePatterns(policy?.exclude).some((pattern) => {
+    if (!pattern.endsWith("/**")) {
+      return false;
+    }
+
+    return matchesPattern(normalizedPath, pattern.slice(0, -3));
+  });
+}
+
 export function normalizePatterns(patterns: string[] | undefined): string[] {
   if (!Array.isArray(patterns)) {
     return [];

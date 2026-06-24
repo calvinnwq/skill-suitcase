@@ -5,7 +5,7 @@ import path from "node:path";
 import { loadCatalog, type Catalog } from "../catalog/index.js";
 import { plan, type PlanResult } from "./index.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
-import { sourcePolicyDecision } from "../source-policy.js";
+import { sourcePolicyDecision, sourcePolicyPrunesDirectory } from "../source-policy.js";
 
 export const PLAN_LOCK_SCHEMA = "calvinnwq.skills.plan-lock.v0";
 
@@ -191,7 +191,7 @@ async function collectPlanFileHashes(
   const hashes: PlanLock["fileHashes"] = {};
 
   for (const item of plannedSkills) {
-    const skillFiles = await listFiles(item.sourcePath);
+    const skillFiles = await listFiles(item.sourcePath, "", sourcePolicy);
     const fileHashList: Record<string, string> = {};
 
     for (const relativePath of skillFiles) {
@@ -316,7 +316,7 @@ function objectHashesEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(stableObject(left)) === JSON.stringify(stableObject(right));
 }
 
-async function listFiles(root: string, prefix = ""): Promise<string[]> {
+async function listFiles(root: string, prefix = "", sourcePolicy?: Catalog["sourcePolicy"]): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files: string[] = [];
 
@@ -327,9 +327,12 @@ async function listFiles(root: string, prefix = ""): Promise<string[]> {
       if (entry.name === "__pycache__") {
         continue;
       }
+      if (sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
+        continue;
+      }
 
       const childPath = path.join(root, entry.name);
-      const childEntries = await listFiles(childPath, relativePath);
+      const childEntries = await listFiles(childPath, relativePath, sourcePolicy);
       files.push(...childEntries);
       continue;
     }

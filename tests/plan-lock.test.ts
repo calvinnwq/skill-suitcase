@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -383,6 +383,49 @@ sourcePolicy:
     }),
     /source policy denies paths \(\.cache\/generated\.json\)/
   );
+});
+
+test("buildPlanLock prunes excluded sourcePolicy directories before reading them", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-plan-lock-excluded-unreadable-"));
+
+  const skillRoot = path.join(sourceRoot, "skills", "office-hours");
+  const cacheRoot = path.join(skillRoot, ".cache");
+  t.after(async () => {
+    await chmod(cacheRoot, 0o700).catch(() => undefined);
+    await rm(sourceRoot, { recursive: true, force: true });
+  });
+  await mkdir(cacheRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "---\nname: office-hours\n---\n");
+  await writeFile(path.join(cacheRoot, "generated.json"), "{}\n");
+  await chmod(cacheRoot, 0o000);
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+  git(sourceRoot, "init");
+  git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md");
+
+  const lock = await buildPlanLock({
+    source: sourceRoot,
+    target: "openclaw",
+    assignmentPath: "openclaw",
+    sourceCommit: "deadbeef"
+  });
+
+  assert.deepEqual(Object.keys(lock.fileHashes["office-hours"] ?? {}), ["SKILL.md"]);
 });
 
 test("assessPlanLock returns valid when the lock matches the current plan state", async (t) => {
