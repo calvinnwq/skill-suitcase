@@ -18,6 +18,31 @@ async function loadNormalized(file: string): Promise<string> {
   return normalize(await readFile(file, "utf8"));
 }
 
+const PRODUCT_VISION_PHRASES = [
+  "agent-first skill package manager",
+  "`skill-suitcase` cli is the product backbone",
+  "source-of-truth warehouse",
+  "claude, codex, openclaw, hermes",
+  "`npx skills`",
+  "upstream source refresh",
+  "openclaw is a first-class integration",
+  "not the whole product boundary"
+];
+
+test("VISION documents the Skill Suitcase product north star", async () => {
+  const normalized = await loadNormalized("VISION.md");
+  for (const phrase of PRODUCT_VISION_PHRASES) {
+    assert.ok(normalized.includes(phrase), `VISION.md should document the product vision phrase: ${phrase}`);
+  }
+});
+
+test("README and architecture point to VISION for product direction", async () => {
+  const readme = await readFile("README.md", "utf8");
+  const architecture = await readFile("ARCHITECTURE.md", "utf8");
+  assert.ok(readme.includes("](VISION.md)"), "README should link to VISION.md");
+  assert.ok(architecture.includes("](VISION.md)"), "ARCHITECTURE.md should link to VISION.md");
+});
+
 /**
  * The shared dirty-repair guidance every operator-facing doc must carry. Each
  * entry is matched against whitespace-normalized, lowercased file content so

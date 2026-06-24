@@ -4,6 +4,9 @@ This is the source of truth for how Skill Suitcase's TypeScript CLI should be
 structured as it grows. It applies the shared TypeScript CLI refactor pattern
 from Linear `NGX-420` to this repo.
 
+The product north star lives in [`VISION.md`](VISION.md). Keep this file focused
+on the implementation boundaries that make that vision reliable.
+
 ## End State
 
 Skill Suitcase should converge on this shape:

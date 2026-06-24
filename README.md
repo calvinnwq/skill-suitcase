@@ -1,6 +1,10 @@
 # Skill Suitcase
 
 Skill Suitcase is a CLI for planning portable skill installs from a catalog repo.
+See [`VISION.md`](VISION.md) for the product north star: an agent-first skill
+package manager where the CLI is the backbone, a renamable skills repository is
+the source-of-truth warehouse, and runtime integrations consume the same
+contract.
 
 Read-only commands (`plan`, `diff`, `pack --dry-run`, `import`, `validate`,
 `targets`, `status`, `upstream check`, and `upstream fetch`) read a catalog
