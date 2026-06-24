@@ -22,6 +22,7 @@ import {
 import { readSkillVersion } from "../skill-metadata.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
 import { status } from "../status/index.js";
+import { collectSourcePolicyExcludedPaths, type SourcePolicy } from "../source-policy.js";
 
 type ApplyInput = {
   source: string;
@@ -397,7 +398,8 @@ export async function apply({
       targetStatuses,
       preApplySummary,
       targetOverrides,
-      target
+      target,
+      sourcePolicy: manifest.sourcePolicy
     });
   }
 
@@ -710,7 +712,8 @@ async function applySymlinkInstalls({
   targetStatuses,
   preApplySummary,
   targetOverrides,
-  target
+  target,
+  sourcePolicy
 }: {
   diffResult: DiffForApply;
   context: ApprovalContext;
@@ -720,6 +723,7 @@ async function applySymlinkInstalls({
   preApplySummary: ApplyStatusSummary;
   targetOverrides: TargetOverrides | undefined;
   target: string;
+  sourcePolicy: SourcePolicy | undefined;
 }): Promise<ApplyResult> {
   const sourceRoot = diffResult.source;
   const assignment = diffResult.assignment ?? target;
@@ -760,6 +764,15 @@ async function applySymlinkInstalls({
       errors.push({
         code: "symlink_source_escape",
         message: `Refusing to symlink ${planned.skill}: source ${sourcePath} escapes the approved source root ${sourceRoot}.`
+      });
+      continue;
+    }
+
+    const excludedPaths = await collectSourcePolicyExcludedPaths(sourcePath, sourcePolicy);
+    if (excludedPaths.length > 0) {
+      errors.push({
+        code: "symlink_source_policy_exclude",
+        message: `Refusing to symlink ${planned.skill}: source policy excludes paths (${excludedPaths.join(", ")}), which symlink mode would expose.`
       });
       continue;
     }

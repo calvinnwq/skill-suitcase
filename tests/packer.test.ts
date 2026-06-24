@@ -397,6 +397,43 @@ sourcePolicy:
   assert.match(denied.message, /secrets\/token\.txt/);
 });
 
+test("pack refuses denied source paths inside excluded trees", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-source-policy-exclude-deny-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(path.join(skillRoot, ".cache"), { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "# Office Hours\n");
+  await writeFile(path.join(skillRoot, ".cache", ".env"), "TOKEN=secret\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+  git(source, "init");
+  git(source, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md", "skills/office-hours/.cache/.env");
+
+  const result = await pack({ source, target: "openclaw", dryRun: true });
+
+  assert.equal(result.ok, false);
+  const denied = result.errors.find((error) => error.code === "source_denied_path");
+  assert.ok(denied);
+  assert.equal(denied.skill, "office-hours");
+  assert.match(denied.message, /\.cache\/\.env/);
+});
+
 test("pack allows existing output directories and refuses artifact-id overwrite", async (t) => {
   const output = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-existing-output-"));
   await mkdir(path.join(output, "seed"), { recursive: true });

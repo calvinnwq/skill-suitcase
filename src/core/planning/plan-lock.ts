@@ -5,7 +5,11 @@ import path from "node:path";
 import { loadCatalog, type Catalog } from "../catalog/index.js";
 import { plan, type PlanResult } from "./index.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
-import { sourcePolicyDecision, sourcePolicyPrunesDirectory } from "../source-policy.js";
+import {
+  collectSourcePolicyDeniedPaths,
+  sourcePolicyDecision,
+  sourcePolicyPrunesDirectory
+} from "../source-policy.js";
 
 export const PLAN_LOCK_SCHEMA = "calvinnwq.skills.plan-lock.v0";
 
@@ -191,6 +195,12 @@ async function collectPlanFileHashes(
   const hashes: PlanLock["fileHashes"] = {};
 
   for (const item of plannedSkills) {
+    const deniedPaths = await collectSourcePolicyDeniedPaths(item.sourcePath, sourcePolicy);
+    if (deniedPaths.length > 0) {
+      throw new Error(
+        `Cannot create lock for unclean source: Refusing to materialize ${item.skill}: source policy denies paths (${deniedPaths.join(", ")}).`
+      );
+    }
     const skillFiles = await listFiles(item.sourcePath, "", sourcePolicy);
     const fileHashList: Record<string, string> = {};
 

@@ -1547,6 +1547,69 @@ assignmentPaths:
   assert.equal(firstItem(result.statuses, "result.statuses").status, "behind");
 });
 
+test("status currentHash ignores sourcePolicy excluded files", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-source-policy-src-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-source-policy-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  const targetSkill = path.join(installRoot, "office-hours");
+  await mkdir(path.join(sourceSkill, ".cache"), { recursive: true });
+  await mkdir(targetSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 1.0.0\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log('runtime');\n");
+  await writeFile(path.join(sourceSkill, ".cache", "generated.json"), "{}\n");
+  await writeFile(path.join(targetSkill, "SKILL.md"), "---\nname: office-hours\nversion: 1.0.0\n---\n");
+  await writeFile(path.join(targetSkill, "runtime.js"), "console.log('runtime');\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+
+compatibility:
+  office-hours:
+    agents:
+      - openclaw
+
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+  const installedHash = await hashDirectory(targetSkill);
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "office-hours",
+    version: "1.0.0",
+    sourceHash: installedHash,
+    installedFiles: await buildInstalledFiles(targetSkill)
+  });
+
+  const result = await status({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 1);
+  assert.equal(result.summary.behind, 0);
+  const item = firstItem(result.statuses, "result.statuses");
+  assert.equal(item.status, "current");
+  assert.equal(item.currentHash, installedHash);
+});
+
 test("status keeps installs current when the target matches installedFiles despite preserved extras", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-extras-current-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-extras-current-install-"));

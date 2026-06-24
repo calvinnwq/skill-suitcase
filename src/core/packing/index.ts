@@ -10,7 +10,11 @@ import {
 import { plan } from "../planning/index.js";
 import { type PlanResult } from "../planning/index.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
-import { sourcePolicyDecision, sourcePolicyPrunesDirectory } from "../source-policy.js";
+import {
+  collectSourcePolicyDeniedPaths,
+  sourcePolicyDecision,
+  sourcePolicyPrunesDirectory
+} from "../source-policy.js";
 
 const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_MANIFEST = "skill-suitcase-bundle.json";
@@ -508,14 +512,18 @@ async function collectSkillFiles(
   sourcePolicy: LoadedCatalog["manifest"]["sourcePolicy"]
 ): Promise<{ files: PackedFile[]; errors: ErrorLike[] }> {
   const sourceRoot = plannedSkill.sourcePath;
-  const filePaths = await listFiles(sourceRoot, sourceRoot, sourcePolicy);
   const files: PackedFile[] = [];
-  const errors: ErrorLike[] = [];
+  const deniedPaths = new Set(await collectSourcePolicyDeniedPaths(sourceRoot, sourcePolicy));
+  const errors: ErrorLike[] = collectDeniedPathErrors(plannedSkill.skill, [...deniedPaths]);
+  const filePaths = await listFiles(sourceRoot, sourceRoot, sourcePolicy);
 
   for (const filePath of filePaths) {
     const relativePath = path.relative(sourceRoot, filePath);
     const policyDecision = sourcePolicyDecision(relativePath, sourcePolicy);
     if (policyDecision.action === "deny") {
+      if (deniedPaths.has(relativePath)) {
+        continue;
+      }
       errors.push({
         code: "source_denied_path",
         message: `Refusing to materialize ${plannedSkill.skill}: source policy denies path ${relativePath}.`,
@@ -540,6 +548,14 @@ async function collectSkillFiles(
 
   files.sort((left, right) => left.bundlePath.localeCompare(right.bundlePath));
   return { files, errors };
+}
+
+function collectDeniedPathErrors(skill: string, deniedPaths: string[]): ErrorLike[] {
+  return deniedPaths.map((relativePath) => ({
+    code: "source_denied_path",
+    message: `Refusing to materialize ${skill}: source policy denies path ${relativePath}.`,
+    skill
+  }));
 }
 
 async function listFiles(

@@ -23,6 +23,7 @@ import {
   upstreamLineage,
   type UpstreamLineage
 } from "../upstream/index.js";
+import { collectSourcePolicyDeniedPaths, sourcePolicyDecision, type SourcePolicy } from "../source-policy.js";
 
 type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
 type StatusSummary = {
@@ -361,7 +362,8 @@ export async function status({
         sourceSkillPath: planned.sourcePath,
         installRoot,
         skillName: planned.skill,
-        installRecord: installRecordResult.installRecord
+        installRecord: installRecordResult.installRecord,
+        sourcePolicy: manifest.sourcePolicy
       });
       if (check.errors.length > 0) {
         assignmentResult.errors.push(...check.errors);
@@ -574,20 +576,22 @@ async function statusSkill({
   sourceSkillPath,
   installRoot,
   skillName,
-  installRecord
+  installRecord,
+  sourcePolicy
 }: {
   sourceRoot: string;
   sourceSkillPath: string;
   installRoot: string;
   skillName: string;
   installRecord: InstallRecord | null;
+  sourcePolicy: SourcePolicy | undefined;
 }): Promise<StatusCheckResult> {
   const targetPath = path.join(installRoot, skillName);
   let sourceVersion: string | null;
   let sourceHashValue = "";
   try {
     sourceVersion = await readSkillVersion(sourceSkillPath);
-    sourceHashValue = await hashDirectory(sourceSkillPath);
+    sourceHashValue = await hashDirectory(sourceSkillPath, sourcePolicy);
   } catch (error) {
     const currentCommit = await readRepoCommit(sourceRoot);
     return {
@@ -1605,8 +1609,14 @@ function buffersEqual(left: Buffer, right: Buffer): boolean {
   return left.compare(right) === 0;
 }
 
-async function hashDirectory(root: string): Promise<string> {
-  const files = await listFiles(root);
+async function hashDirectory(root: string, sourcePolicy?: SourcePolicy | undefined): Promise<string> {
+  if (sourcePolicy !== undefined) {
+    const deniedPaths = await collectSourcePolicyDeniedPaths(root, sourcePolicy);
+    if (deniedPaths.length > 0) {
+      throw new Error(`source policy denies paths (${deniedPaths.join(", ")})`);
+    }
+  }
+  const files = await listFiles(root, "", sourcePolicy);
   const digest = createHash("sha256");
 
   for (const relativePath of files) {
@@ -1620,22 +1630,29 @@ async function hashDirectory(root: string): Promise<string> {
   return digest.digest("hex");
 }
 
-async function listFiles(root: string): Promise<string[]> {
+async function listFiles(root: string, prefix = "", sourcePolicy?: SourcePolicy | undefined): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files = [];
 
   for (const entry of entries) {
-    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
+    const relativePath = prefix.length > 0 ? path.join(prefix, entry.name) : entry.name;
+    const policyDecision = sourcePolicy === undefined
+      ? { action: "include" as const, pattern: null }
+      : sourcePolicyDecision(relativePath, sourcePolicy);
+    if (policyDecision.action === "exclude" || entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
       continue;
+    }
+    if (policyDecision.action === "deny") {
+      throw new Error(`source policy denies path ${relativePath}`);
     }
 
     const entryPath = path.join(root, entry.name);
     if (entry.isDirectory()) {
-      files.push(...(await listFiles(entryPath)).map((item) => path.join(entry.name, item)));
+      files.push(...(await listFiles(entryPath, relativePath, sourcePolicy)));
       continue;
     }
     if (entry.isFile()) {
-      files.push(entry.name);
+      files.push(relativePath);
     }
   }
 

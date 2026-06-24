@@ -3711,6 +3711,52 @@ test("apply --mode symlink rejects source paths whose realpath escapes the sourc
   await assert.rejects(lstat(path.join(targetRoot, "office-hours")));
 });
 
+test("apply --mode symlink refuses sourcePolicy excluded paths", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-source-policy-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-source-policy-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `${await readFile(path.join(sourceRoot, "skill-suitcase.yaml"), "utf8")}
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(path.join(sourceSkill, ".cache"), { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, ".cache", "generated.js"), "console.log('generated');\n");
+  git(sourceRoot, "init");
+  git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-source-policy-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath,
+    mode: "symlink"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "symlink_source_policy_exclude"), true);
+  await assert.rejects(lstat(path.join(targetRoot, "office-hours")));
+});
+
 function git(cwd: string, ...args: string[]): void {
   const result = spawnSync("git", args, {
     cwd,

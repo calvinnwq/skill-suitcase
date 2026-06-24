@@ -10,7 +10,11 @@ import {
 import { type PlanResult, plan } from "../planning/index.js";
 import type { Catalog } from "../catalog/index.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
-import { sourcePolicyDecision, sourcePolicyPrunesDirectory } from "../source-policy.js";
+import {
+  collectSourcePolicyDeniedPaths,
+  sourcePolicyDecision,
+  sourcePolicyPrunesDirectory
+} from "../source-policy.js";
 
 type DiffSourceFileRead =
   | {
@@ -370,9 +374,14 @@ async function collectSourceEntries(
   sourcePolicy: Catalog["sourcePolicy"]
 ): Promise<{ ok: boolean; entries: string[]; errors: DiffResultError[] }> {
   try {
+    const deniedPaths = new Set(await collectSourcePolicyDeniedPaths(root, sourcePolicy));
     const files = await listFiles(root, root, sourcePolicy);
     const entries: string[] = [];
-    const errors: DiffResultError[] = [];
+    const errors: DiffResultError[] = [...deniedPaths].map((relativePath) => ({
+      code: "source_denied_path",
+      message: `Refusing to materialize ${skill}: source policy denies path ${relativePath}.`,
+      skill
+    }));
 
     for (const entry of files) {
       const info = await stat(entry);
@@ -380,6 +389,9 @@ async function collectSourceEntries(
         const relativePath = path.relative(root, entry);
         const policyDecision = sourcePolicyDecision(relativePath, sourcePolicy);
         if (policyDecision.action === "deny") {
+          if (deniedPaths.has(relativePath)) {
+            continue;
+          }
           errors.push({
             code: "source_denied_path",
             message: `Refusing to materialize ${skill}: source policy denies path ${relativePath}.`,
