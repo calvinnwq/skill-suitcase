@@ -300,8 +300,8 @@ Import the selected fetched source into the catalog only:
 node "$CLI" upstream import --source "$SRC" --skill hyperframes --apply --json
 ```
 
-`upstream import` refuses dirty or untracked selected catalog source before it
-fetches. It updates the catalog skill directory and
+`upstream import` refuses malformed upstream locks and dirty or untracked selected catalog source before it fetches.
+It updates the catalog skill directory and
 `.skill-suitcase/upstream-lock.json`, but it does not auto-commit and does not
 write to Codex, Claude, OpenClaw, or other live target roots. After reviewing
 and committing the repo diff, use the normal `pack`/`apply`/`status` target sync
@@ -627,11 +627,9 @@ without writing the catalog or targets:
 
 `upstream import --skill <name> --apply` first checks the selected catalog skill
 directory and upstream lock path with Git.
-It refuses non-Git catalogs, uncommitted local edits, untracked selected source
-files, and unpinned upstream package versions before fetching.
-On success it copies the fetched skill into `skills/<name>`, updates
-`.skill-suitcase/upstream-lock.json`, and reports ordinary repository diffs for
-review:
+It refuses malformed upstream locks, non-Git catalogs, uncommitted local edits, untracked selected source files, and unpinned upstream package versions before fetching.
+If validation or fetch output is invalid, it preserves the existing catalog skill, upstream lock, and live targets.
+On success it copies the fetched skill into `skills/<name>`, updates `.skill-suitcase/upstream-lock.json`, and reports ordinary repository diffs for review:
 
 ```json
 {

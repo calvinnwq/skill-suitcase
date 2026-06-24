@@ -246,8 +246,9 @@ Source refresh commands should be explicit and staged:
 4. ordinary Git review/commit
 5. ordinary Skill Suitcase target sync from the catalog
 
-Catalog imports must refuse uncommitted local edits or untracked files in the
-selected skill source. They should create ordinary repository diffs; in v1, do
+Catalog imports must refuse malformed upstream lock metadata before provider execution.
+They must also refuse uncommitted local edits or untracked files in the selected skill source.
+They should create ordinary repository diffs; in v1, do
 not auto-commit upstream imports. Live `skills.sh` installer delegation is a
 separate future feature and must not be introduced as part of this
 source-refresh model.
@@ -389,7 +390,7 @@ Keep the command verbs separate:
   metadata, pinned package runner availability, and catalog hash drift.
   `upstream fetch --dry-run` runs
   the pinned fetch in an isolated temp workspace/home and reports a file-level
-  catalog diff. `upstream import --apply` refuses dirty selected catalog source,
+  catalog diff. `upstream import --apply` refuses malformed upstream locks and dirty selected catalog source before provider execution,
   repeats the pinned fetch, copies only the selected skill into the catalog
   source tree, updates `.skill-suitcase/upstream-lock.json`, and leaves ordinary
   repository diffs for review. It must not write live target homes, receipts, or

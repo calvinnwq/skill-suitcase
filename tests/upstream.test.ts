@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
+import { pack } from "../src/packer.js";
+import { status } from "../src/status.js";
+import { track } from "../src/track.js";
 import {
   checkUpstream,
   fetchUpstreamSkillDryRun,
@@ -130,6 +134,108 @@ test("upstream import applies only catalog diffs and updates metadata", async (t
   assert.equal(lock.skills.hyperframes?.imported?.packageVersion, "1.0.0");
   assert.equal(lock.skills.hyperframes?.imported?.at, "2026-06-23T08:30:00.000Z");
   assert.equal(lock.skills.hyperframes?.imported?.source, "skills-sh:heygen-com/hyperframes:hyperframes");
+});
+
+test("upstream update simulation flows from detected diff to normal target sync plan", async (t) => {
+  const { source, targetRoot } = await createCatalog(t);
+  const sourceSkill = path.join(source, "skills", "hyperframes");
+  const targetSkill = path.join(targetRoot, "hyperframes");
+  const oldCatalogHash = await hashDirectory(sourceSkill);
+  await writeUpstreamLock(source, oldCatalogHash);
+  await cp(sourceSkill, targetSkill, { recursive: true });
+  await commitCatalog(source);
+
+  const tracked = await track({ source, target: "codex", skills: ["hyperframes"] });
+  if (!tracked.ok) {
+    throw new Error(JSON.stringify(tracked, null, 2));
+  }
+  assert.deepEqual(tracked.tracked.skills, ["hyperframes"]);
+  const beforeStatus = await status({ source, target: "codex" });
+  assert.equal(beforeStatus.summary.current, 1, "precondition: target receipt starts current");
+
+  const fetcher: UpstreamFetcher = async ({ workspace }) => ({
+    ok: true,
+    skillPath: await createFetchedSkill(t, workspace)
+  });
+
+  const dryRun = await fetchUpstreamSkillDryRun(source, "hyperframes", { fetcher });
+  assert.equal(dryRun.ok, true);
+  assert.deepEqual(dryRun.summary, {
+    create: 1,
+    update: 1,
+    delete: 1,
+    unchanged: 1
+  });
+  assert.deepEqual(
+    dryRun.diff
+      .filter((entry) => entry.action !== "unchanged")
+      .map((entry) => `${entry.action}:${entry.relativePath}`),
+    ["update:SKILL.md", "create:new-only.txt", "delete:old-only.txt"]
+  );
+  assert.equal(await hashDirectory(sourceSkill), oldCatalogHash, "dry-run must not mutate the catalog");
+
+  const imported = await importUpstreamSkill(source, "hyperframes", {
+    fetcher,
+    now: () => new Date("2026-06-24T06:00:00.000Z")
+  });
+  assert.equal(imported.ok, true);
+  assert.notEqual(imported.metadata.importedHash, oldCatalogHash);
+  assert.equal(await readFile(path.join(targetSkill, "SKILL.md"), "utf8"), "# HyperFrames\nold\n");
+  await commitCatalog(source);
+
+  const afterStatus = await status({ source, target: "codex" });
+  assert.equal(afterStatus.summary.behind, 1);
+  const [behind] = afterStatus.statuses;
+  assert.equal(behind?.skill, "hyperframes");
+  assert.equal(behind?.status, "behind");
+  assert.equal(behind?.lineage?.imported?.hash, imported.metadata.importedHash);
+  assert.equal(behind?.lineage?.target.receiptHash, oldCatalogHash);
+
+  const packPlan = await pack({ source, target: "codex", dryRun: true });
+  assert.equal(packPlan.ok, true);
+  assert.deepEqual(packPlan.planned.map((entry) => entry.skill), ["hyperframes"]);
+  assert.equal(packPlan.summary.skills, 1);
+  assert.equal(packPlan.files.some((file) => file.skill === "hyperframes" && file.relativePath === "new-only.txt"), true);
+});
+
+test("upstream import blocks missing renamed upstream output and preserves catalog", async (t) => {
+  const { source, targetRoot } = await createCatalog(t);
+  const sourceSkill = path.join(source, "skills", "hyperframes");
+  await writeUpstreamLock(source, await hashDirectory(sourceSkill));
+  await commitCatalog(source);
+  const beforeSkill = await snapshotTree(sourceSkill);
+  const beforeLock = await readFile(path.join(source, ".skill-suitcase", "upstream-lock.json"), "utf8");
+  const fetcher: UpstreamFetcher = async ({ workspace }) => {
+    const renamedRoot = await mkdtemp(path.join(workspace, "renamed-upstream-skill-"));
+    await writeFile(path.join(renamedRoot, "README.md"), "# Renamed elsewhere\n");
+    return { ok: true, skillPath: renamedRoot };
+  };
+
+  const result = await importUpstreamSkill(source, "hyperframes", { fetcher });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "upstream_fetch_missing_skill_file");
+  assert.deepEqual(await snapshotTree(sourceSkill), beforeSkill);
+  assert.equal(await readFile(path.join(source, ".skill-suitcase", "upstream-lock.json"), "utf8"), beforeLock);
+  assert.equal(await readFile(path.join(targetRoot, "sentinel.txt"), "utf8"), "untouched\n");
+});
+
+test("upstream import refuses malformed upstream lock before fetching", async (t) => {
+  const { source, targetRoot } = await createCatalog(t);
+  await writeFile(path.join(source, ".skill-suitcase", "upstream-lock.json"), "{ not json\n");
+  await commitCatalog(source);
+  let fetched = false;
+  const fetcher: UpstreamFetcher = async ({ workspace }) => {
+    fetched = true;
+    return { ok: true, skillPath: await createFetchedSkill(t, workspace) };
+  };
+
+  const result = await importUpstreamSkill(source, "hyperframes", { fetcher });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "invalid_upstream_lock_json");
+  assert.equal(fetched, false);
+  assert.equal(await readFile(path.join(targetRoot, "sentinel.txt"), "utf8"), "untouched\n");
 });
 
 test("upstream import refuses non-git catalog source before fetching", async (t) => {
@@ -267,8 +373,9 @@ assignments:
 
 assignmentPaths:
   codex:
-    kind: codex-skills-root
+    kind: codex-home
     assignment: codex
+    codexHome: ${path.dirname(targetRoot)}
     skillsPath: ${targetRoot}
 `
   );
@@ -314,6 +421,50 @@ async function createFetchedSkill(t: TestContext, parent: string): Promise<strin
   await writeFile(path.join(root, "same.txt"), "same\n");
   await writeFile(path.join(root, "new-only.txt"), "new\n");
   return root;
+}
+
+async function hashDirectory(root: string): Promise<string> {
+  const files = await collectFilePaths(root);
+  const digest = createHash("sha256");
+
+  for (const relativePath of files) {
+    const filePath = path.join(root, relativePath);
+    const bytes = await readFile(filePath);
+    digest.update(relativePath);
+    digest.update("\0");
+    digest.update(bytes);
+    digest.update("\0");
+  }
+
+  return digest.digest("hex");
+}
+
+async function snapshotTree(root: string): Promise<Record<string, string>> {
+  const snapshot: Record<string, string> = {};
+  const files = await collectFilePaths(root);
+  for (const relativePath of files) {
+    snapshot[relativePath] = await readFile(path.join(root, relativePath), "utf8");
+  }
+  return snapshot;
+}
+
+async function collectFilePaths(root: string, prefix = ""): Promise<string[]> {
+  const entries = await readdir(path.join(root, prefix), { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const relativePath = path.join(prefix, entry.name);
+    const absolutePath = path.join(root, relativePath);
+    if (entry.isDirectory()) {
+      files.push(...(await collectFilePaths(root, relativePath)));
+      continue;
+    }
+    if (entry.isFile() && (await stat(absolutePath)).isFile()) {
+      files.push(relativePath);
+    }
+  }
+
+  return files.sort();
 }
 
 async function commitCatalog(source: string): Promise<void> {

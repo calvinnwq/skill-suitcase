@@ -150,8 +150,8 @@ node "$CLI" upstream fetch --source "$SRC" --skill existing-skill --dry-run --js
 node "$CLI" upstream import --source "$SRC" --skill existing-skill --apply --json
 ```
 
-The import writes only `skills/<name>` and
-`.skill-suitcase/upstream-lock.json`, never live agent homes.
+The import must refuse malformed upstream lock metadata before fetching.
+On success it writes only `skills/<name>` and `.skill-suitcase/upstream-lock.json`, never live agent homes.
 Keep upstream-to-catalog drift separate from catalog-to-target drift:
 
 - Upstream unchanged: `upstream check` reports declaration and lineage metadata only.

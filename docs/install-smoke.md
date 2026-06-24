@@ -57,10 +57,8 @@ imported hash, current catalog hash, and catalog drift.
 If upstream is unchanged, no target action is implied.
 `upstream fetch` may execute the pinned provider in an isolated temp
 workspace/home, but it must not write the catalog or any live target root.
-Only run `upstream import --apply` against a disposable Git-backed catalog or an
-intentionally approved catalog source; it writes `skills/<name>` and
-`.skill-suitcase/upstream-lock.json` only, then leaves ordinary repository diffs
-for review.
+Only run `upstream import --apply` against a disposable Git-backed catalog or an intentionally approved catalog source.
+It must refuse malformed upstream lock metadata before fetching, write `skills/<name>` and `.skill-suitcase/upstream-lock.json` only on success, then leave ordinary repository diffs for review.
 Treat local catalog edits as catalog-hash drift, preserve catalog source when an
 upstream skill is removed or renamed, and use ordinary target status workflows
 for target drift.
