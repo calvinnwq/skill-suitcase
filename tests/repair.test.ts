@@ -459,6 +459,50 @@ sourcePolicy:
   assert.equal(postStatus.summary.current, 1);
 });
 
+test("repair source validation prunes sourcePolicy excluded paths", async (t) => {
+  const fixture = await createTrackedFixture(t);
+  await mkdir(path.join(fixture.sourceSkill, ".cache"), { recursive: true });
+  await writeFile(path.join(fixture.sourceSkill, ".cache", "generated.json"), "{}\n");
+  await symlink(path.join(fixture.sourceSkill, "SKILL.md"), path.join(fixture.sourceSkill, ".cache", "generated-link"));
+  await writeFile(path.join(fixture.sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - skill-cleaner
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${fixture.targetRoot}
+
+compatibility:
+  skill-cleaner:
+    agents:
+      - openclaw
+    variant: canonical
+
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`);
+  await dirtyTheTarget(fixture);
+
+  const result = await repair({
+    source: fixture.sourceRoot,
+    target: "openclaw",
+    skills: ["skill-cleaner"],
+    apply: true
+  });
+
+  assert.equal(result.ok, true);
+  await assert.rejects(() => stat(path.join(fixture.targetSkill, ".cache")), /ENOENT/);
+});
+
 test("repair apply rollback restores the pre-repair dirty target via receipt metadata", async (t) => {
   const fixture = await createTrackedFixture(t);
   await dirtyTheTarget(fixture);

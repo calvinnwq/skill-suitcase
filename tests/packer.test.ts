@@ -359,6 +359,40 @@ sourcePolicy:
   assert.deepEqual(result.files.map((file) => file.relativePath), ["SKILL.md"]);
 });
 
+test("pack prunes directory-level sourcePolicy excludes", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-source-policy-dir-exclude-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(path.join(skillRoot, "dist"), { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "# Office Hours\n");
+  await writeFile(path.join(skillRoot, "dist", "generated.js"), "console.log('generated');\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+sourcePolicy:
+  exclude:
+    - dist
+`
+  );
+  git(source, "init");
+  git(source, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md", "skills/office-hours/dist/generated.js");
+
+  const result = await pack({ source, target: "openclaw", dryRun: true });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.files.map((file) => file.relativePath), ["SKILL.md"]);
+});
+
 test("pack refuses manifest-denied source paths", async (t) => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-source-policy-deny-"));
   t.after(() => rm(source, { recursive: true, force: true }));

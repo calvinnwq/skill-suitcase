@@ -56,6 +56,10 @@ export function sourcePolicyPrunesDirectory(relativePath: string, policy: Source
     return false;
   }
 
+  if (sourcePolicyDecision(normalizedPath, policy).action === "exclude") {
+    return true;
+  }
+
   return normalizePatterns(policy?.exclude).some((pattern) => {
     if (!pattern.endsWith("/**")) {
       return false;

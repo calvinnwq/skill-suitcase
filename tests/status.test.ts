@@ -1677,9 +1677,11 @@ test("status legacy fallback ignores sourcePolicy excluded files", async (t) => 
   const targetSkill = path.join(installRoot, "office-hours");
   await mkdir(path.join(sourceSkill, ".cache"), { recursive: true });
   await mkdir(targetSkill, { recursive: true });
+  await mkdir(path.join(targetSkill, ".cache"), { recursive: true });
   await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 1.0.0\n---\n");
   await writeFile(path.join(sourceSkill, ".cache", "generated.json"), "{}\n");
   await writeFile(path.join(targetSkill, "SKILL.md"), "---\nname: office-hours\nversion: 1.0.0\n---\n");
+  await writeFile(path.join(targetSkill, ".cache", "generated.json"), "{}\n");
   await writeReceipt({
     installRoot,
     sourceRoot,

@@ -303,6 +303,9 @@ async function planReconcile(input: ReconcileInput, selectedSkills: string[]): P
     });
   }
 
+  const { manifest } = await loadCatalog(input.source, { targetOverrides: input.targetOverrides });
+  const sourcePolicy = manifest.sourcePolicy;
+
   const statusInput: Parameters<typeof status>[0] = {
     source: diffResult.source,
     target: input.target
@@ -411,7 +414,8 @@ async function planReconcile(input: ReconcileInput, selectedSkills: string[]): P
       symlinkCode: "unsupported_source_tree",
       unreadableCode: "source_unreadable",
       missingCode: "missing_source",
-      label: "Source"
+      label: "Source",
+      sourcePolicy
     });
     if (!sourceValidation.ok) {
       errors.push({
@@ -921,6 +925,7 @@ async function validateDirectoryTree(
     missingCode: string;
     label: string;
     rejectEmptyDirectories?: boolean;
+    sourcePolicy?: SourcePolicy | undefined;
   }
 ): Promise<DirectoryTreeValidationResult> {
   let info: Stats;
@@ -971,6 +976,7 @@ async function validateDirectoryEntries(
     missingCode: string;
     label: string;
     rejectEmptyDirectories?: boolean;
+    sourcePolicy?: SourcePolicy | undefined;
   }
 ): Promise<DirectoryTreeValidationResult> {
   let entries: Dirent[];
@@ -1000,6 +1006,23 @@ async function validateDirectoryEntries(
 
   for (const entry of entries) {
     const entryPath = path.join(currentPath, entry.name);
+    const relativePath = path.relative(rootPath, entryPath);
+    const policyDecision = codes.sourcePolicy === undefined
+      ? { action: "include" as const, pattern: null }
+      : sourcePolicyDecision(relativePath, codes.sourcePolicy);
+    if (policyDecision.action === "exclude") {
+      continue;
+    }
+    if (policyDecision.action === "deny") {
+      return {
+        ok: false,
+        error: reconcileError({
+          code: codes.symlinkCode,
+          message: `${codes.label} tree ${rootPath} contains a source-policy denied path at ${entryPath} and cannot be reconciled safely.`,
+          path: entryPath
+        })
+      };
+    }
     if (entry.isSymbolicLink()) {
       return {
         ok: false,
@@ -1011,6 +1034,9 @@ async function validateDirectoryEntries(
       };
     }
     if (entry.isDirectory()) {
+      if (codes.sourcePolicy !== undefined && sourcePolicyPrunesDirectory(relativePath, codes.sourcePolicy)) {
+        continue;
+      }
       const nested = await validateDirectoryEntries(rootPath, entryPath, codes);
       if (!nested.ok) {
         return nested;

@@ -1523,7 +1523,7 @@ async function targetDiffersFromSource(
   }
 
   const sourceEntries = await listFiles(source, "", sourcePolicy);
-  const targetEntries = await listFiles(target);
+  const targetEntries = await listFiles(target, "", sourcePolicy, "include");
 
   if (!arraysEqual(sourceEntries, targetEntries)) {
     return true;
@@ -1634,7 +1634,12 @@ async function hashDirectory(root: string, sourcePolicy?: SourcePolicy | undefin
   return digest.digest("hex");
 }
 
-async function listFiles(root: string, prefix = "", sourcePolicy?: SourcePolicy | undefined): Promise<string[]> {
+async function listFiles(
+  root: string,
+  prefix = "",
+  sourcePolicy?: SourcePolicy | undefined,
+  denyAction: "throw" | "include" = "throw"
+): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files = [];
 
@@ -1646,7 +1651,7 @@ async function listFiles(root: string, prefix = "", sourcePolicy?: SourcePolicy 
     if (policyDecision.action === "exclude" || entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
       continue;
     }
-    if (policyDecision.action === "deny") {
+    if (policyDecision.action === "deny" && denyAction === "throw") {
       throw new Error(`source policy denies path ${relativePath}`);
     }
 
@@ -1655,7 +1660,7 @@ async function listFiles(root: string, prefix = "", sourcePolicy?: SourcePolicy 
       if (sourcePolicy !== undefined && sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
         continue;
       }
-      files.push(...(await listFiles(entryPath, relativePath, sourcePolicy)));
+      files.push(...(await listFiles(entryPath, relativePath, sourcePolicy, denyAction)));
       continue;
     }
     if (entry.isFile()) {
