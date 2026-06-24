@@ -50,8 +50,10 @@ node dist/src/cli.js upstream check --source /path/to/skills-catalog --json
 node dist/src/cli.js upstream fetch --source /path/to/skills-catalog --skill existing-skill --dry-run --json
 ```
 
-`upstream check` should report declared skills, pinned package metadata, package
-runner availability, and refresh status without writing files.
+`upstream check` should report declared skills, pinned package metadata, lineage
+metadata, package runner availability, and refresh status without writing files.
+The lineage block should include upstream package/version, upstream repo/skill,
+imported hash, current catalog hash, and catalog drift.
 If upstream is unchanged, no target action is implied.
 `upstream fetch` may execute the pinned provider in an isolated temp
 workspace/home, but it must not write the catalog or any live target root.
@@ -62,6 +64,9 @@ for review.
 Treat local catalog edits as catalog-hash drift, preserve catalog source when an
 upstream skill is removed or renamed, and use ordinary target status workflows
 for target drift.
+For upstream-managed skills, `status --json` should carry the same lineage and
+add target status, receipt hash, and receipt commit from the selected target
+receipt.
 Trust only the exact pinned provider in the isolated temp workspace/home.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.

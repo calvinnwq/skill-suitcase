@@ -20,6 +20,9 @@ export type UpstreamSkillDeclaration = {
     skill: string;
   };
   group?: string;
+  /**
+   * Provenance for the catalog tree last imported from the pinned upstream source.
+   */
   imported?: {
     sha256: string;
     packageVersion?: string;
@@ -54,6 +57,12 @@ export type UpstreamDeclarationEntry = {
   catalogHash: string | null;
 };
 
+/**
+ * Audit-friendly lineage for one upstream-managed catalog skill.
+ *
+ * `upstream check` leaves `target` as `null`; target-aware reports such as
+ * `status` fill that block from the selected target receipt state.
+ */
 export type UpstreamLineage = {
   upstream: {
     provider: typeof SKILLS_SH_PROVIDER;

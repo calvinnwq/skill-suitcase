@@ -112,7 +112,7 @@ Lifecycle cases:
 
 | Case | Policy |
 | --- | --- |
-| Upstream unchanged | Report declaration health and imported/catalog hashes. Do not imply target work. |
+| Upstream unchanged | Report declaration health and lineage metadata, including upstream package/version, imported hash, and current catalog hash, without implying target work. |
 | Upstream changed | Fetch into the sandbox, show a catalog diff, import only the selected skill after source hygiene passes, then review/commit before target sync. |
 | Local catalog edit | Treat it as catalog-hash drift. Do not silently overwrite it with upstream. Commit/revert deliberately, or fork/adopt it into locally-authored catalog ownership in a future explicit flow. |
 | Upstream removed or renamed | Report the missing upstream skill and preserve the current catalog source plus lock until an operator chooses keep, fork/adopt, rename, or delete. |
@@ -122,6 +122,13 @@ The trust boundary stays narrow: exact pinned package, isolated temp
 workspace/home, fetched path inside the sandbox, required `SKILL.md`, and
 catalog-only writes. Upstream tooling is not trusted to choose target roots,
 write receipts, prove rollback state, or mutate live agent homes.
+
+`upstream check --json` and `status --json` expose lineage metadata for
+upstream-managed skills.
+`upstream check` reports upstream package/version, upstream repo/skill, imported
+hash, current catalog hash, and catalog drift.
+`status` adds target status, receipt hash, and receipt commit from the selected
+target receipt.
 
 The v1 lock file is `.skill-suitcase/upstream-lock.json`:
 

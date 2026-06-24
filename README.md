@@ -64,12 +64,14 @@ catalog source, refreshes the target receipt, and leaves ordinary git changes
 for review.
 
 The `upstream` command family refreshes catalog source from pinned upstream
-providers. `upstream check` reports declared upstream-managed skills without
-mutation. `upstream fetch --dry-run` fetches one selected skill into an isolated
-temp workspace/home and reports the catalog diff. `upstream import --apply`
-repeats that pinned fetch, refuses dirty selected catalog source, writes only the
-selected catalog skill directory plus `.skill-suitcase/upstream-lock.json`, and
-leaves ordinary git changes for review.
+providers.
+`upstream check` reports declared upstream-managed skills and their lineage
+metadata without mutation.
+`upstream fetch --dry-run` fetches one selected skill into an isolated temp
+workspace/home and reports the catalog diff.
+`upstream import --apply` repeats that pinned fetch, refuses dirty selected
+catalog source, writes only the selected catalog skill directory plus
+`.skill-suitcase/upstream-lock.json`, and leaves ordinary git changes for review.
 
 ## Install
 
@@ -257,7 +259,13 @@ The lock file is catalog metadata, separate from target assignments and receipts
         "repo": "heygen-com/hyperframes",
         "skill": "hyperframes"
       },
-      "group": "hyperframes"
+      "group": "hyperframes",
+      "imported": {
+        "sha256": "previous-catalog-tree-hash",
+        "packageVersion": "1.5.11",
+        "at": "2026-06-24T01:00:00.000Z",
+        "source": "skills-sh:heygen-com/hyperframes:hyperframes"
+      }
     }
   }
 }
@@ -265,6 +273,12 @@ The lock file is catalog metadata, separate from target assignments and receipts
 
 `provider` must be `skills-sh`, `packageVersion` must be an exact pinned
 version, and optional `packageName` defaults to `skills`.
+The optional `imported` block records the last imported catalog tree hash, the
+package version that produced it, the import timestamp, and the provider source
+string.
+`upstream check --json` and `status --json` reuse this metadata in their
+`lineage` blocks so operators can audit upstream-to-catalog and catalog-to-target
+state without stitching reports together.
 
 Check declared upstream skills without writing files:
 
@@ -525,8 +539,8 @@ It does not accept target flags because upstream refresh writes catalog source
 only, then ordinary `pack`, `apply`, `status`, and `diff` commands synchronize
 live targets from the reviewed catalog.
 
-`upstream check` is read-only and reports the declarations in
-`.skill-suitcase/upstream-lock.json`:
+`upstream check` is read-only and reports the declarations and lineage metadata
+in `.skill-suitcase/upstream-lock.json`:
 
 ```json
 {
@@ -636,11 +650,16 @@ review:
 ```
 
 Upstream error codes include `unknown_upstream_skill`,
+`invalid_upstream_lock_json`, `invalid_upstream_lock_schema`,
+`invalid_upstream_skill_name`, `invalid_upstream_declaration`,
+`unsupported_upstream_provider`, `invalid_upstream_package_version`,
+`invalid_upstream_package_name`, `invalid_upstream_identity`,
+`invalid_upstream_group`, `invalid_upstream_imported`,
 `upstream_package_runner_missing`, `upstream_fetch_failed`,
 `upstream_fetch_missing_skill`, `upstream_fetch_outside_sandbox`,
 `upstream_fetch_missing_skill_file`, `source_hygiene_requires_git`,
-`source_hygiene_failed`, `dirty_catalog_source`,
-`invalid_upstream_package_version`, and `upstream_import_failed`.
+`source_hygiene_failed`, `dirty_catalog_source`, and
+`upstream_import_failed`.
 
 ## `plan` Output
 
@@ -999,10 +1018,12 @@ It uses `path` for `openclaw-skills-root` and
 ```
 
 For upstream-managed skills, `status` attaches the same `lineage` object and
-fills `lineage.target` with the target receipt state. This makes the chain
-auditable in one status entry: pinned upstream package/version, upstream
-repo/skill, imported hash, current catalog hash and drift, target status,
-receipt hash, and receipt commit.
+fills `lineage.target` with the target receipt state.
+This makes the chain auditable in one status entry: pinned upstream
+package/version, upstream repo/skill, imported hash, current catalog hash and
+drift, target status, receipt hash, and receipt commit.
+If the upstream lock is malformed or unreadable, `status` reports upstream-scoped
+errors, returns `ok: false`, and omits lineage until the lock metadata is valid.
 
 `status.status` values:
 

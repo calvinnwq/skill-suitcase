@@ -117,8 +117,8 @@ Lifecycle policy:
 
 For upstream-managed skills, `upstream check --json` and `status --json` expose
 lineage metadata so an operator can see the upstream package/version, upstream
-repo/skill, imported hash, current catalog hash, target status, receipt hash,
-and receipt commit without stitching together multiple reports.
+repo/skill, imported hash, current catalog hash and drift, target status,
+receipt hash, and receipt commit without stitching together multiple reports.
 
 Trust boundary: trust only the exact pinned upstream package in the isolated
 temp workspace/home for catalog source refresh. Do not trust upstream tooling to

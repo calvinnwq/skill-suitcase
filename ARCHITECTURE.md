@@ -221,7 +221,8 @@ The v1 declaration file is `.skill-suitcase/upstream-lock.json`. It uses schema
 `calvinnwq.skills.upstream-lock.v0` and declares selected catalog skills under a
 `skills` object. Each `skills-sh` declaration pins `packageVersion`, records the
 upstream repo and skill name, can group related imports such as `hyperframes`,
-and stores the last imported catalog content hash under `imported.sha256`.
+and stores last-imported provenance under `imported.sha256`,
+`imported.packageVersion`, `imported.at`, and `imported.source`.
 This file is catalog source metadata only; it does not grant target write
 authority.
 
@@ -234,8 +235,8 @@ create and maintain ourselves.
 Source refresh commands should be explicit and staged:
 
 1. `upstream check --source <repo> --json` reports declared upstream-managed
-   skills, pinned package metadata, catalog hashes, and local package-runner
-   availability without writing files
+   skills, pinned package metadata, lineage metadata, catalog hashes, and local
+   package-runner availability without writing files
 2. `upstream fetch --source <repo> --skill <name> --dry-run --json` runs the
    pinned fetch in an isolated temp workspace/home and reports a file-level
    catalog diff
@@ -383,8 +384,9 @@ Keep the command verbs separate:
   into an agent home directory) into a repo-owned catalog skill. `--dry-run`
   runs a read-only plan; `--apply` runs the approval-gated live promotion.
 - `upstream` refreshes catalog source for declared upstream-managed skills.
-  `upstream check` is read-only and reports declaration health, pinned package
-  runner availability, and catalog hash drift. `upstream fetch --dry-run` runs
+  `upstream check` is read-only and reports declaration health, lineage
+  metadata, pinned package runner availability, and catalog hash drift.
+  `upstream fetch --dry-run` runs
   the pinned fetch in an isolated temp workspace/home and reports a file-level
   catalog diff. `upstream import --apply` refuses dirty selected catalog source,
   repeats the pinned fetch, copies only the selected skill into the catalog
