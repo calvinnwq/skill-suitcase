@@ -176,7 +176,11 @@ type UpstreamCommandOptions = {
   now?: () => Date;
 };
 
-export async function loadUpstreamLock(source: string): Promise<UpstreamLoadResult> {
+type UpstreamLoadOptions = {
+  skills?: ReadonlySet<string>;
+};
+
+export async function loadUpstreamLock(source: string, options: UpstreamLoadOptions = {}): Promise<UpstreamLoadResult> {
   const { sourceRoot } = await loadCatalog(source);
   const lockPath = path.join(sourceRoot, DEFAULT_UPSTREAM_LOCK_FILE);
   let parsed: unknown;
@@ -217,7 +221,7 @@ export async function loadUpstreamLock(source: string): Promise<UpstreamLoadResu
   }
 
   const lock = validation.lock;
-  const declarations = await buildDeclarationEntries(sourceRoot, lock);
+  const declarations = await buildDeclarationEntries(sourceRoot, lock, options.skills);
   return {
     ok: true,
     source: sourceRoot,
@@ -703,9 +707,16 @@ function parseDeclaration(skill: string, value: unknown): { ok: true; declaratio
   return { ok: true, declaration };
 }
 
-async function buildDeclarationEntries(sourceRoot: string, lock: UpstreamLockDocument): Promise<UpstreamDeclarationEntry[]> {
+async function buildDeclarationEntries(
+  sourceRoot: string,
+  lock: UpstreamLockDocument,
+  selectedSkills?: ReadonlySet<string>
+): Promise<UpstreamDeclarationEntry[]> {
   const entries: UpstreamDeclarationEntry[] = [];
   for (const [skill, declaration] of Object.entries(lock.skills).sort(([left], [right]) => left.localeCompare(right))) {
+    if (selectedSkills !== undefined && !selectedSkills.has(skill)) {
+      continue;
+    }
     entries.push(await declarationEntryForSkill(sourceRoot, skill, declaration));
   }
   return entries;

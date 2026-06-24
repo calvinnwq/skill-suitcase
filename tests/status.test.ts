@@ -214,6 +214,96 @@ compatibility:
   });
 });
 
+test("status filters upstream lineage hashing to reported skills", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-upstream-filter-source-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-upstream-filter-target-"));
+  const unreadableSkill = path.join(sourceRoot, "skills", "unused-upstream");
+  t.after(async () => {
+    await chmod(unreadableSkill, 0o700).catch(() => {});
+    await rm(sourceRoot, { recursive: true, force: true });
+    await rm(installRoot, { recursive: true, force: true });
+  });
+
+  const sourceSkill = path.join(sourceRoot, "skills", "hyperframes");
+  const targetSkill = path.join(installRoot, "hyperframes");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(unreadableSkill, { recursive: true });
+  await mkdir(path.join(sourceRoot, ".skill-suitcase"), { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: hyperframes\nversion: 1.0.0\n---\n");
+  await writeFile(path.join(unreadableSkill, "SKILL.md"), "---\nname: unused-upstream\nversion: 1.0.0\n---\n");
+  await cp(sourceSkill, targetSkill, { recursive: true });
+  const sourceHash = await hashDirectory(sourceSkill);
+  await chmod(unreadableSkill, 0);
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "hyperframes",
+    version: "1.0.0",
+    sourceHash,
+    installedFiles: await buildInstalledFiles(targetSkill)
+  });
+  await writeFile(
+    path.join(sourceRoot, ".skill-suitcase", "upstream-lock.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.upstream-lock.v0",
+      skills: {
+        hyperframes: {
+          provider: "skills-sh",
+          packageVersion: "1.5.13",
+          upstream: {
+            repo: "heygen-com/hyperframes",
+            skill: "hyperframes"
+          },
+          imported: {
+            sha256: sourceHash
+          }
+        },
+        "unused-upstream": {
+          provider: "skills-sh",
+          packageVersion: "1.5.13",
+          upstream: {
+            repo: "example/unused-upstream",
+            skill: "unused-upstream"
+          },
+          imported: {
+            sha256: "unused-hash"
+          }
+        }
+      }
+    }, null, 2)}\n`
+  );
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  video-authoring:
+    skills:
+      - hyperframes
+
+assignments:
+  codex:
+    suitcases:
+      - video-authoring
+
+assignmentPaths:
+  codex:
+    kind: codex-home
+    assignment: codex
+    skillsPath: ${installRoot}
+
+compatibility:
+  hyperframes:
+    agents:
+      - codex
+`);
+
+  const result = await status({ source: sourceRoot, target: "codex" });
+  const item = firstItem(result.statuses, "statuses");
+
+  assert.equal(result.ok, true);
+  assert.equal(item.skill, "hyperframes");
+  assert.equal(item.status, "current");
+  assert.equal(item.lineage?.imported?.hash, sourceHash);
+  assert.equal(result.errors.some((entry) => entry.code === "upstream_lock_load_failed"), false);
+});
+
 test("status attaches upstream lineage for blocked upstream-managed skills", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-blocked-upstream-source-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-blocked-upstream-target-"));

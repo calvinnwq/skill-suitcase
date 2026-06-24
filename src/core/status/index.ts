@@ -200,9 +200,7 @@ export async function status({
     };
   }
   const registryEntries = resolveTargetRegistryEntries(manifest, targetOverrides);
-  const lineageResult = await loadStatusLineage(sourceRoot);
-  const upstreamLineageBySkill = lineageResult.lineageBySkill;
-  errors.push(...lineageResult.errors);
+  const statusLineage = createStatusLineageLoader(sourceRoot, errors);
   const exactTargetExists = target !== undefined &&
     target.trim().length > 0 &&
     registryEntries.some((entry) => entry.id === target);
@@ -292,6 +290,11 @@ export async function status({
       assignments.push(assignmentResult);
       continue;
     }
+
+    const upstreamLineageBySkill = await statusLineage.load([
+      ...assignmentPlan.blocked.map((item) => item.skill),
+      ...assignmentPlan.planned.map((item) => item.skill)
+    ]);
 
     for (const blocked of assignmentPlan.blocked) {
       const blockedStatus = blockedStatusFromPlan({
@@ -428,10 +431,45 @@ export async function status({
   };
 }
 
-async function loadStatusLineage(sourceRoot: string): Promise<StatusLineageResult> {
+function createStatusLineageLoader(sourceRoot: string, errors: StatusFinding[]): {
+  load: (skillNames: Iterable<string>) => Promise<Map<string, Omit<UpstreamLineage, "target">>>;
+} {
+  const lineageBySkill = new Map<string, Omit<UpstreamLineage, "target">>();
+  const loadedSkills = new Set<string>();
+  let loadFailed = false;
+
+  return {
+    async load(skillNames: Iterable<string>): Promise<Map<string, Omit<UpstreamLineage, "target">>> {
+      if (loadFailed) {
+        return lineageBySkill;
+      }
+
+      const missingSkills = [...new Set(skillNames)].filter((skill) => !loadedSkills.has(skill));
+      if (missingSkills.length === 0) {
+        return lineageBySkill;
+      }
+
+      const lineageResult = await loadStatusLineage(sourceRoot, new Set(missingSkills));
+      errors.push(...lineageResult.errors);
+      for (const [skill, lineage] of lineageResult.lineageBySkill) {
+        lineageBySkill.set(skill, lineage);
+      }
+      for (const skill of missingSkills) {
+        loadedSkills.add(skill);
+      }
+      if (lineageResult.errors.length > 0 && lineageResult.lineageBySkill.size === 0) {
+        loadFailed = true;
+      }
+
+      return lineageBySkill;
+    }
+  };
+}
+
+async function loadStatusLineage(sourceRoot: string, skillNames: ReadonlySet<string>): Promise<StatusLineageResult> {
   let loaded: Awaited<ReturnType<typeof loadUpstreamLock>>;
   try {
-    loaded = await loadUpstreamLock(sourceRoot);
+    loaded = await loadUpstreamLock(sourceRoot, { skills: skillNames });
   } catch (error) {
     return {
       lineageBySkill: new Map(),
