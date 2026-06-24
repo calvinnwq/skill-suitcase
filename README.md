@@ -498,9 +498,7 @@ descriptions, or target-specific assumptions.
 
 ## `validate` Strict Mode
 
-`validate --source <skills-repo> --json` runs fast catalog-health checks only
-(manifest relationships, per-skill `SKILL.md` presence, and upstream lock
-metadata when `.skill-suitcase/upstream-lock.json` exists).
+`validate --source <skills-repo> --json` runs fast catalog-health checks only, including manifest relationships, logical-group references, per-skill `SKILL.md` presence, and upstream lock metadata when `.skill-suitcase/upstream-lock.json` exists.
 Adding `--strict` extends the same command into strict Skillify-10 contract
 validation for catalog-authored skills referenced by a suitcase. Skills declared
 in `.skill-suitcase/upstream-lock.json` are upstream-managed provider source, so
@@ -513,8 +511,7 @@ node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --
 Strict mode mirrors the deterministic checks in
 `skills/skillify/scripts/check_skillify_contract.py` from the catalog repo, so
 the CLI scores each skill the same way without shelling out to Python.
-All validation results include `summary.upstreamDeclarations`, the number of
-valid upstream-managed skills declared in `.skill-suitcase/upstream-lock.json`.
+All validation results include `summary.groups`, the number of manifest-owned logical groups, and `summary.upstreamDeclarations`, the number of valid upstream-managed skills declared in `.skill-suitcase/upstream-lock.json`.
 
 Strict validation gains these top-level fields:
 
@@ -550,7 +547,7 @@ Strict mode distinguishes warnings from release-blocking failures:
 {
   "ok": false,
   "strict": true,
-  "summary": { "referencedSkills": 4, "upstreamDeclarations": 1, "contractsEvaluated": 3, "contractsComplete": 2, "contractsSkippedUpstream": 1, "findings": 3 },
+  "summary": { "referencedSkills": 4, "groups": 1, "upstreamDeclarations": 1, "contractsEvaluated": 3, "contractsComplete": 2, "contractsSkippedUpstream": 1, "findings": 3 },
   "contracts": [
     {
       "skill": "office-hours",
