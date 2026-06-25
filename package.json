@@ -1,6 +1,6 @@
 {
   "name": "skill-suitcase",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Skill install planner and transactional installer for portable agent skill catalogs.",
   "type": "module",
   "repository": {

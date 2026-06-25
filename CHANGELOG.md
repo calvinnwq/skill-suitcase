@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.12.0...v0.13.0) (2026-06-25)
+
+
+### Features
+
+* **upstream:** support pinned git sources ([#65](https://github.com/calvinnwq/skill-suitcase/issues/65)) ([e3f90c0](https://github.com/calvinnwq/skill-suitcase/commit/e3f90c07d13141df6979726ece00b0e98e44c2b0))
+
 ## [0.12.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.11.0...v0.12.0) (2026-06-25)
 
 
