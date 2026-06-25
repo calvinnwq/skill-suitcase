@@ -10,9 +10,11 @@ import { loadCatalog } from "../catalog/index.js";
 
 export const UPSTREAM_LOCK_SCHEMA = "calvinnwq.skills.upstream-lock.v0";
 export const SKILLS_SH_PROVIDER = "skills-sh";
+export const GIT_PROVIDER = "git";
+type UpstreamProvider = typeof SKILLS_SH_PROVIDER | typeof GIT_PROVIDER;
 
 export type UpstreamSkillDeclaration = {
-  provider: typeof SKILLS_SH_PROVIDER;
+  provider: UpstreamProvider;
   packageName?: string;
   packageVersion: string;
   upstream: {
@@ -44,7 +46,7 @@ export type UpstreamFinding = {
 
 export type UpstreamDeclarationEntry = {
   skill: string;
-  provider: typeof SKILLS_SH_PROVIDER;
+  provider: UpstreamProvider;
   packageName: string;
   packageVersion: string;
   upstreamRepo: string;
@@ -65,7 +67,7 @@ export type UpstreamDeclarationEntry = {
  */
 export type UpstreamLineage = {
   upstream: {
-    provider: typeof SKILLS_SH_PROVIDER;
+    provider: UpstreamProvider;
     packageName: string;
     packageVersion: string;
     repo: string;
@@ -242,9 +244,9 @@ export async function checkUpstream(source: string): Promise<UpstreamCheckResult
   const loaded = await loadUpstreamLock(source);
   const errors = [...loaded.findings];
   const declarations = loaded.declarations.map((entry) => {
-    const packageAvailable = checkPackageRunnerAvailable();
+    const packageAvailable = checkProviderRunnerAvailable(entry.provider);
     const entryErrors = packageAvailable ? [] : [
-      finding("upstream_package_runner_missing", "Unable to run npm for pinned skills-sh package checks.", `upstream.skills.${entry.skill}`)
+      finding("upstream_package_runner_missing", `Unable to run ${runnerNameFor(entry.provider)} for pinned ${entry.provider} upstream checks.`, `upstream.skills.${entry.skill}`)
     ];
     const refresh = upstreamCatalogDrift(entry);
     return {
@@ -471,7 +473,7 @@ async function prepareFetchedSkill(
   await mkdir(workspace, { recursive: true });
   await mkdir(home, { recursive: true });
 
-  const result = await (fetcher ?? defaultSkillsFetcher)({ workspace, home, declaration });
+  const result = await (fetcher ?? defaultUpstreamFetcher)({ workspace, home, declaration });
   if (!result.ok || result.skillPath === null) {
     await rm(tempRoot, { recursive: true, force: true });
     return {
@@ -529,6 +531,13 @@ async function prepareFetchedSkill(
     catalogSkillPath: path.join(loaded.source, DEFAULT_SKILLS_DIRECTORY, skill),
     cleanup: () => rm(tempRoot, { recursive: true, force: true })
   };
+}
+
+async function defaultUpstreamFetcher(input: FetcherInput): Promise<FetcherResult> {
+  if (input.declaration.provider === GIT_PROVIDER) {
+    return defaultGitFetcher(input);
+  }
+  return defaultSkillsFetcher(input);
 }
 
 async function defaultSkillsFetcher({ workspace, home, declaration }: FetcherInput): Promise<FetcherResult> {
@@ -592,6 +601,58 @@ async function defaultSkillsFetcher({ workspace, home, declaration }: FetcherInp
   };
 }
 
+async function defaultGitFetcher({ workspace, declaration }: FetcherInput): Promise<FetcherResult> {
+  const repoUrl = gitRepoUrlFor(declaration.upstream.repo);
+  if (repoUrl === null) {
+    return {
+      ok: false,
+      skillPath: null,
+      errors: [
+        finding(
+          "invalid_upstream_identity",
+          `Git upstream repo ${declaration.upstream.repo} must be a GitHub owner/repo or HTTPS GitHub URL.`,
+          `upstream.skills.${declaration.upstream.skill}`
+        )
+      ]
+    };
+  }
+
+  const repoPath = path.join(workspace, "repo");
+  const commands: Array<[string, string[]]> = [
+    ["git", ["init", repoPath]],
+    ["git", ["-C", repoPath, "remote", "add", "origin", repoUrl]],
+    ["git", ["-C", repoPath, "fetch", "--depth", "1", "origin", declaration.packageVersion]],
+    ["git", ["-C", repoPath, "checkout", "--detach", "FETCH_HEAD"]]
+  ];
+
+  for (const [command, args] of commands) {
+    const result = spawnSync(command, args, {
+      cwd: workspace,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    if (result.status !== 0) {
+      return {
+        ok: false,
+        skillPath: null,
+        errors: [
+          finding(
+            "upstream_fetch_failed",
+            `Pinned git fetch failed for ${declaration.upstream.repo}@${declaration.packageVersion}: ${(result.stderr || result.stdout || "unknown error").trim()}`,
+            `upstream.skills.${declaration.upstream.skill}`
+          )
+        ]
+      };
+    }
+  }
+
+  await rm(path.join(repoPath, ".git"), { recursive: true, force: true });
+  return {
+    ok: true,
+    skillPath: declaration.upstream.skill === "." ? repoPath : path.join(repoPath, declaration.upstream.skill)
+  };
+}
+
 function validateLockDocument(value: unknown): { ok: true; lock: UpstreamLockDocument } | { ok: false; findings: UpstreamFinding[] } {
   const findings: UpstreamFinding[] = [];
   if (!isRecord(value)) {
@@ -636,10 +697,13 @@ function parseDeclaration(skill: string, value: unknown): { ok: true; declaratio
   if (!isRecord(value)) {
     return { ok: false, findings: [finding("invalid_upstream_declaration", `Upstream declaration for ${skill} must be an object.`, `skills.${skill}`)] };
   }
-  if (value.provider !== SKILLS_SH_PROVIDER) {
-    findings.push(finding("unsupported_upstream_provider", `Upstream declaration for ${skill} must use provider ${SKILLS_SH_PROVIDER}.`, `skills.${skill}.provider`));
+  const provider = value.provider;
+  if (provider !== SKILLS_SH_PROVIDER && provider !== GIT_PROVIDER) {
+    findings.push(finding("unsupported_upstream_provider", `Upstream declaration for ${skill} must use provider ${SKILLS_SH_PROVIDER} or ${GIT_PROVIDER}.`, `skills.${skill}.provider`));
   }
-  if (!isExactPackageVersion(value.packageVersion)) {
+  if (provider === GIT_PROVIDER && !isPinnedGitRef(value.packageVersion)) {
+    findings.push(finding("invalid_upstream_package_version", `Git upstream declaration for ${skill} must pin packageVersion to a version tag or full commit SHA.`, `skills.${skill}.packageVersion`));
+  } else if (provider !== GIT_PROVIDER && !isExactPackageVersion(value.packageVersion)) {
     findings.push(finding("invalid_upstream_package_version", `Upstream declaration for ${skill} must pin packageVersion to an exact package version.`, `skills.${skill}.packageVersion`));
   }
   const packageName = value.packageName;
@@ -668,7 +732,10 @@ function parseDeclaration(skill: string, value: unknown): { ok: true; declaratio
       if (!isNonBlankString(imported.sha256)) {
         findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.sha256 must be a non-empty string.`, `skills.${skill}.imported.sha256`));
       }
-      if (imported.packageVersion !== undefined && !isExactPackageVersion(imported.packageVersion)) {
+      if (
+        imported.packageVersion !== undefined
+        && (provider === GIT_PROVIDER ? !isPinnedGitRef(imported.packageVersion) : !isExactPackageVersion(imported.packageVersion))
+      ) {
         findings.push(finding("invalid_upstream_imported", `Upstream declaration for ${skill} imported.packageVersion must be an exact package version.`, `skills.${skill}.imported.packageVersion`));
       }
       if (imported.at !== undefined && !isIsoDateString(imported.at)) {
@@ -685,7 +752,7 @@ function parseDeclaration(skill: string, value: unknown): { ok: true; declaratio
   }
 
   const declaration: UpstreamSkillDeclaration = {
-    provider: SKILLS_SH_PROVIDER,
+    provider: provider === GIT_PROVIDER ? GIT_PROVIDER : SKILLS_SH_PROVIDER,
     packageVersion: String(value.packageVersion),
     upstream: {
       repo: String(value.upstream.repo),
@@ -756,7 +823,19 @@ function declarationForSkill(loaded: UpstreamLoadResult, skill: string): Upstrea
 }
 
 function packageNameFor(declaration: UpstreamSkillDeclaration): string {
-  return declaration.packageName ?? "skills";
+  return declaration.packageName ?? (declaration.provider === GIT_PROVIDER ? "git" : "skills");
+}
+
+function gitRepoUrlFor(repo: string): string | null {
+  const ownerRepo = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(repo);
+  if (ownerRepo !== null) {
+    return `https://github.com/${ownerRepo[1]}/${ownerRepo[2]}.git`;
+  }
+  const githubHttps = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(repo);
+  if (githubHttps !== null) {
+    return `https://github.com/${githubHttps[1]}/${githubHttps[2]}.git`;
+  }
+  return null;
 }
 
 async function diffSkillTrees(catalogSkillPath: string, fetchedSkillPath: string): Promise<UpstreamFileDiff[]> {
@@ -848,12 +927,16 @@ function emptyDiffSummary(): UpstreamFetchResult["summary"] {
   return { create: 0, update: 0, delete: 0, unchanged: 0 };
 }
 
-function checkPackageRunnerAvailable(): boolean {
-  const result = spawnSync("npm", ["--version"], {
+function checkProviderRunnerAvailable(provider: UpstreamProvider): boolean {
+  const result = spawnSync(runnerNameFor(provider), ["--version"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"]
   });
   return result.status === 0;
+}
+
+function runnerNameFor(provider: UpstreamProvider): "git" | "npm" {
+  return provider === GIT_PROVIDER ? "git" : "npm";
 }
 
 function checkCatalogCleanForImport(sourceRoot: string, skill: string): { ok: true } | { ok: false; errors: UpstreamFinding[] } {
@@ -996,12 +1079,19 @@ function updateImportedMetadata(
             sha256: importedHash,
             packageVersion: declaration.packageVersion,
             at: now.toISOString(),
-            source: `${SKILLS_SH_PROVIDER}:${declaration.upstream.repo}:${declaration.upstream.skill}`
+            source: importedSourceFor(declaration)
           }
         }
       }).sort(([left], [right]) => left.localeCompare(right))
     ) as Record<string, UpstreamSkillDeclaration>
   };
+}
+
+function importedSourceFor(declaration: UpstreamSkillDeclaration): string {
+  if (declaration.provider === GIT_PROVIDER) {
+    return `${GIT_PROVIDER}:${declaration.upstream.repo}:${declaration.packageVersion}:${declaration.upstream.skill}`;
+  }
+  return `${SKILLS_SH_PROVIDER}:${declaration.upstream.repo}:${declaration.upstream.skill}`;
 }
 
 function failedImport(
@@ -1135,6 +1225,13 @@ function isPlainSegment(value: string): boolean {
 function isExactPackageVersion(value: unknown): value is string {
   return typeof value === "string" &&
     /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value);
+}
+
+function isPinnedGitRef(value: unknown): value is string {
+  return typeof value === "string" && (
+    /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value) ||
+    /^[0-9a-f]{40}$/i.test(value)
+  );
 }
 
 function isIsoDateString(value: unknown): value is string {

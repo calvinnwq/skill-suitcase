@@ -273,16 +273,28 @@ The lock file is catalog metadata, separate from target assignments and receipts
         "at": "2026-06-24T01:00:00.000Z",
         "source": "skills-sh:heygen-com/hyperframes:hyperframes"
       }
+    },
+    "last30days": {
+      "provider": "git",
+      "packageVersion": "v3.8.1",
+      "upstream": {
+        "repo": "mvanhorn/last30days-skill",
+        "skill": "."
+      },
+      "group": "last30days"
     }
   }
 }
 ```
 
-`provider` must be `skills-sh`, `packageVersion` must be an exact pinned
-version, and optional `packageName` defaults to `skills`.
+`provider` must be `skills-sh` or `git`. For `skills-sh`, `packageVersion` must
+be an exact pinned package version and optional `packageName` defaults to
+`skills`. For `git`, `packageVersion` must be a pinned version tag such as
+`v3.8.1` or a full commit SHA, `repo` must be a GitHub owner/repo or HTTPS
+GitHub URL, and `skill` is the repo-relative skill path (`"."` means repo root).
 The optional `imported` block records the last imported catalog tree hash, the
-package version that produced it, the import timestamp, and the provider source
-string.
+package version or git ref that produced it, the import timestamp, and the
+provider source string.
 `upstream check --json` and `status --json` reuse this metadata in their
 `lineage` blocks so operators can audit upstream-to-catalog and catalog-to-target
 state without stitching reports together.
