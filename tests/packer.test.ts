@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { access, chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -216,6 +216,49 @@ test("pack writes an explicit staging bundle under managed artifact storage", as
   assert.equal(manifest.source.repo, result.source);
 
   await access(path.join(result.bundle.artifactPath, "skills", "office-hours", "SKILL.md"));
+});
+
+test("pack preserves executable file modes in artifact storage", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-exec-mode-src-"));
+  const target = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-exec-mode-target-"));
+  const output = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-exec-mode-output-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(target, { recursive: true, force: true }));
+  t.after(() => rm(output, { recursive: true, force: true }));
+
+  const scriptPath = path.join(source, "skills", "autoreview", "scripts", "autoreview");
+  await mkdir(path.dirname(scriptPath), { recursive: true });
+  await writeFile(path.join(source, "skills", "autoreview", "SKILL.md"), "# Autoreview\n");
+  await writeFile(scriptPath, "#!/usr/bin/env python3\nprint('ok')\n");
+  await chmod(scriptPath, 0o700);
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  agents-global:
+    skills:
+      - autoreview
+
+assignments:
+  agents:
+    suitcases:
+      - agents-global
+
+assignmentPaths:
+  agents:
+    kind: agents-skills-root
+    assignment: agents
+    path: ${target}
+`
+  );
+  git(source, "init");
+  git(source, "add", "skill-suitcase.yaml", "skills/autoreview/SKILL.md", "skills/autoreview/scripts/autoreview");
+
+  const result = await pack({ source, target: "agents", output });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.bundle.artifactPath);
+  const bundledScript = path.join(result.bundle.artifactPath, "skills", "autoreview", "scripts", "autoreview");
+  assert.equal((await stat(bundledScript)).mode & 0o777, 0o700);
 });
 
 test("pack refuses selected source skills with untracked git files", async (t) => {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type LoadedCatalog, type TargetOverrides } from "../catalog/index.js";
 import {
@@ -339,6 +339,7 @@ async function writeBundle({ outputPath, sourceRoot, manifest, artifact, manifes
     const bundleFile = path.join(artifactRoot, file.bundlePath);
     await mkdir(path.dirname(bundleFile), { recursive: true });
     await copyFile(file.sourcePath, bundleFile);
+    await chmod(bundleFile, (await stat(file.sourcePath)).mode & 0o777);
   }
 
   const storedManifest = buildStoredManifest(artifact, sourceRoot);

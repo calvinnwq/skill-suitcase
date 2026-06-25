@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assessPlanLock, type PlanLock, PLAN_LOCK_SCHEMA } from "../planning/plan-lock.js";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
@@ -2004,8 +2004,10 @@ async function writePlannedEntryWithRollback({
       await rename(targetPath, backupPath);
     }
 
+    const sourceMode = (await stat(sourcePath)).mode & 0o777;
     const contents = await readFile(sourcePath);
-    await writeFile(tmpPath, contents);
+    await writeFile(tmpPath, contents, { mode: sourceMode });
+    await chmod(tmpPath, sourceMode);
     await rename(tmpPath, targetPath);
     restorePlan.push({
       targetPath,
