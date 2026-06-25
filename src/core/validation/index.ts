@@ -307,6 +307,7 @@ function validateSkillifySkipPolicy(
       continue;
     }
 
+    let hasValidProvenance = true;
     for (const field of ["source", "owner", "reason"] as const) {
       if (!hasNonBlankValue(entry[field])) {
         findings.push(error(
@@ -314,6 +315,7 @@ function validateSkillifySkipPolicy(
           `Skillify skip entry ${skillName} kind ${kind} must include ${field}.`,
           `${pathName}.${field}`
         ));
+        hasValidProvenance = false;
       }
     }
 
@@ -354,9 +356,12 @@ function validateSkillifySkipPolicy(
         `Skillify skip entry ${skillName} reviewAfter must use YYYY-MM-DD.`,
         `${pathName}.reviewAfter`
       ));
+      hasValidProvenance = false;
     }
 
-    externalManagedSkills.add(skillName);
+    if (hasValidProvenance) {
+      externalManagedSkills.add(skillName);
+    }
   }
 
   return {

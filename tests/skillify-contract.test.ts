@@ -561,12 +561,14 @@ validationPolicy:
 test("strict validate reports malformed Skillify skip policy entries", async () => {
   const root = await makeCatalogRoot();
   await writeSkill(root, "external-video", "# External Video\n\nExternal source shape.\n");
+  await writeSkill(root, "external-dated", "# External Dated\n\nExternal source shape.\n");
   await writeFile(
     path.join(root, "skill-suitcase.yaml"),
     `suitcases:
   core:
     skills:
       - external-video
+      - external-dated
 
 assignments:
   openclaw:
@@ -583,6 +585,12 @@ validationPolicy:
       external-video:
         kind: external-managed
         source: agents-global
+      external-dated:
+        kind: external-managed
+        source: agents-global
+        owner: upstream
+        reason: Maintained in an external video workflow skill source.
+        reviewAfter: soon
       stale-skill:
         kind: external-managed
         source: elsewhere
@@ -600,9 +608,14 @@ validationPolicy:
   const codes = result.findings.map((finding) => finding.code);
 
   assert.equal(result.ok, false);
+  assert.equal(result.summary.contractsEvaluated, 2);
+  assert.equal(result.summary.contractsSkippedExternal, 0);
   assert.ok(codes.includes("missing_skillify_skip_metadata"));
+  assert.ok(codes.includes("invalid_skillify_skip_review_after"));
   assert.ok(codes.includes("unreferenced_skillify_skip"));
   assert.ok(codes.includes("invalid_skillify_skip_kind"));
+  assert.ok(result.findings.some((finding) => finding.path?.startsWith("skills.external-video.contract.")));
+  assert.ok(result.findings.some((finding) => finding.path?.startsWith("skills.external-dated.contract.")));
 });
 
 test("strict validate skips legacy-local skills but leaves a review warning", async () => {
