@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -2550,6 +2550,8 @@ test("apply writes files, emits receipt, and preserves extras", async (t) => {
 
   await rm(path.join(sourceSkill, "guide.md"));
   await writeFile(path.join(sourceSkill, "notes.md"), "apply me\n");
+  await writeFile(path.join(sourceSkill, "runner"), "#!/bin/sh\necho ok\n");
+  await chmod(path.join(sourceSkill, "runner"), 0o700);
 
   const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-lock-success-")), "plan-lock.json");
   t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
@@ -2581,6 +2583,7 @@ test("apply writes files, emits receipt, and preserves extras", async (t) => {
 
   const createdNotes = await readFile(path.join(targetSkill, "notes.md"), "utf8");
   assert.equal(createdNotes, "apply me\n");
+  assert.equal((await stat(path.join(targetSkill, "runner"))).mode & 0o777, 0o700);
 
   const preservedGuide = await readFile(path.join(targetSkill, "guide.md"), "utf8");
   assert.equal(preservedGuide, "keep me\n");
