@@ -106,6 +106,7 @@
     "tests/repair.test.ts",
     "tests/import-target.test.ts",
     "tests/import-target-dogfood.test.ts",
-    "tests/docs-guidance.test.ts"
+    "tests/docs-guidance.test.ts",
+    "tests/source-policy.test.ts"
   ]
 }

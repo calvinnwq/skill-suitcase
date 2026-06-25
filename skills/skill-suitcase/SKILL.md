@@ -147,6 +147,12 @@ Run the catalog gates first:
 logical groups. Broken group references are catalog metadata problems; do not
 turn a group into an implicit install target.
 
+Manifest `sourcePolicy` is a materialization boundary. `exclude` patterns omit
+reviewed generated/cache paths from packs, plan locks, diffs, and apply writes;
+`deny` patterns and built-in secret-like denials block selected source skills
+with `source_denied_path`/`diff_source_denied_path`. Do not work around a denied
+path by copying it manually into a target home.
+
 ## Source And Target Matrix
 
 Use this matrix to choose the command shape. Add new providers as rows in the
@@ -241,7 +247,9 @@ ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
 
 For Git-backed catalogs, `pack`, plan-lock creation, and `apply` refuse selected
 source skills that contain untracked, non-ignored files. Track or remove scratch
-files in the selected skill before trying to materialize it.
+files in the selected skill before trying to materialize it. Manifest
+`sourcePolicy.exclude` can deliberately omit reviewed generated/cache paths;
+manifest `sourcePolicy.deny` and built-in secret-like denials block materialization.
 
 For another target, keep the same pattern and replace only the target id and
 override flags from the matrix.

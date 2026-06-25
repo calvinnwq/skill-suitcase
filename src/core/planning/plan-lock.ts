@@ -2,9 +2,14 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { loadCatalog } from "../catalog/index.js";
+import { loadCatalog, type Catalog } from "../catalog/index.js";
 import { plan, type PlanResult } from "./index.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
+import {
+  collectSourcePolicyDeniedPaths,
+  sourcePolicyDecision,
+  sourcePolicyPrunesDirectory
+} from "../source-policy.js";
 
 export const PLAN_LOCK_SCHEMA = "calvinnwq.skills.plan-lock.v0";
 
@@ -58,7 +63,7 @@ export async function buildPlanLock({
   assignmentPath,
   sourceCommit
 }: PlanLockInput): Promise<PlanLockRecord> {
-  const { sourceRoot } = await loadCatalog(source);
+  const { sourceRoot, manifest } = await loadCatalog(source);
   const planResult: PlanResult = await plan({ source: sourceRoot, target });
 
   if (!planResult.ok) {
@@ -69,7 +74,8 @@ export async function buildPlanLock({
 
   const hygiene = checkSelectedSourceHygiene({
     sourceRoot,
-    plannedSkills: planResult.planned
+    plannedSkills: planResult.planned,
+    sourcePolicy: manifest.sourcePolicy
   });
   if (!hygiene.ok) {
     throw new Error(`Cannot create lock for unclean source: ${hygiene.errors[0]?.message}`);
@@ -77,7 +83,7 @@ export async function buildPlanLock({
 
   const normalizedAssignmentPath = normalizeValue(assignmentPath);
   const commit = await resolveSourceCommit(sourceCommit, sourceRoot);
-  const fileHashes = await collectPlanFileHashes(planResult.planned);
+  const fileHashes = await collectPlanFileHashes(planResult.planned, manifest.sourcePolicy);
   const planEntries = planResult.planned.map((item) => stableObject(plannedEntry(item)) as PlanEntry);
   const selectedSkills = [...new Set(planResult.planned.map((item) => item.skill))].sort();
 
@@ -182,14 +188,31 @@ export async function assessPlanLock({
   };
 }
 
-async function collectPlanFileHashes(plannedSkills: PlanResult["planned"]): Promise<PlanLock["fileHashes"]> {
+async function collectPlanFileHashes(
+  plannedSkills: PlanResult["planned"],
+  sourcePolicy: Catalog["sourcePolicy"]
+): Promise<PlanLock["fileHashes"]> {
   const hashes: PlanLock["fileHashes"] = {};
 
   for (const item of plannedSkills) {
-    const skillFiles = await listFiles(item.sourcePath);
+    const deniedPaths = await collectSourcePolicyDeniedPaths(item.sourcePath, sourcePolicy);
+    if (deniedPaths.length > 0) {
+      throw new Error(
+        `Cannot create lock for unclean source: Refusing to materialize ${item.skill}: source policy denies paths (${deniedPaths.join(", ")}).`
+      );
+    }
+    const skillFiles = await listFiles(item.sourcePath, "", sourcePolicy);
     const fileHashList: Record<string, string> = {};
 
     for (const relativePath of skillFiles) {
+      const policyDecision = sourcePolicyDecision(relativePath, sourcePolicy);
+      if (policyDecision.action === "deny") {
+        throw new Error(`Cannot create lock for denied source path: ${item.skill}/${relativePath}`);
+      }
+      if (policyDecision.action === "exclude") {
+        continue;
+      }
+
       const filePath = path.join(item.sourcePath, relativePath);
       const bytes = await readFile(filePath);
       fileHashList[relativePath] = createHash("sha256").update(bytes).digest("hex");
@@ -303,7 +326,7 @@ function objectHashesEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(stableObject(left)) === JSON.stringify(stableObject(right));
 }
 
-async function listFiles(root: string, prefix = ""): Promise<string[]> {
+async function listFiles(root: string, prefix = "", sourcePolicy?: Catalog["sourcePolicy"]): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files: string[] = [];
 
@@ -314,9 +337,12 @@ async function listFiles(root: string, prefix = ""): Promise<string[]> {
       if (entry.name === "__pycache__") {
         continue;
       }
+      if (sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
+        continue;
+      }
 
       const childPath = path.join(root, entry.name);
-      const childEntries = await listFiles(childPath, relativePath);
+      const childEntries = await listFiles(childPath, relativePath, sourcePolicy);
       files.push(...childEntries);
       continue;
     }

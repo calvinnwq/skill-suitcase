@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import path from "node:path";
+import { sourcePolicyDecision, type SourcePolicy } from "./source-policy.js";
 
 export type PlannedSourceSkill = {
   skill: string;
@@ -8,7 +9,7 @@ export type PlannedSourceSkill = {
 };
 
 export type SourceHygieneError = {
-  code: "source_untracked_files" | "source_hygiene_failed" | "source_path_outside_repo";
+  code: "source_untracked_files" | "source_denied_path" | "source_hygiene_failed" | "source_path_outside_repo";
   message: string;
   skill: string;
   paths: string[];
@@ -26,10 +27,12 @@ export type SourceHygieneResult = {
  */
 export function checkSelectedSourceHygiene({
   sourceRoot,
-  plannedSkills
+  plannedSkills,
+  sourcePolicy
 }: {
   sourceRoot: string;
   plannedSkills: PlannedSourceSkill[];
+  sourcePolicy?: SourcePolicy | undefined;
 }): SourceHygieneResult {
   const selected = plannedSkills.filter(
     (item) => item.skill.trim().length > 0 && item.sourcePath.trim().length > 0
@@ -103,6 +106,10 @@ export function checkSelectedSourceHygiene({
       continue;
     }
     const relativePath = normalizeGitPath(path.relative(owner.comparablePath, absolutePath));
+    const policyDecision = sourcePolicyDecision(relativePath, sourcePolicy);
+    if (policyDecision.action === "exclude") {
+      continue;
+    }
     const current = pathsBySkill.get(owner.skill) ?? [];
     current.push(relativePath);
     pathsBySkill.set(owner.skill, current);
@@ -111,6 +118,16 @@ export function checkSelectedSourceHygiene({
   const errors: SourceHygieneError[] = [];
   for (const [skill, paths] of [...pathsBySkill.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     const sortedPaths = [...new Set(paths)].sort();
+    const deniedPaths = sortedPaths.filter((relativePath) => sourcePolicyDecision(relativePath, sourcePolicy).action === "deny");
+    if (deniedPaths.length > 0) {
+      errors.push({
+        code: "source_denied_path",
+        message: `Refusing to materialize ${skill}: source policy denies paths (${deniedPaths.join(", ")}). Remove them or adjust sourcePolicy before packing/applying.`,
+        skill,
+        paths: deniedPaths
+      });
+      continue;
+    }
     errors.push({
       code: "source_untracked_files",
       message: `Refusing to materialize ${skill}: source skill contains untracked files (${sortedPaths.join(", ")}). Track or remove them before packing/applying.`,

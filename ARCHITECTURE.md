@@ -148,6 +148,9 @@ The durable state model belongs to Skill Suitcase:
 - source hygiene gates ensure materialization boundaries only snapshot or install
   selected Git-backed source skills after untracked, non-ignored files are
   removed or tracked
+- manifest `sourcePolicy` gates omit approved generated/cache paths from pack,
+  plan-lock, diff, and apply materialization, while denied or secret-like paths
+  refuse with path-level evidence before any target write
 - receipts record ownership, source provenance, install mode, file hashes, and
   rollback state
 - status decides whether a target is current, missing, dirty, blocked, unknown,
@@ -163,6 +166,16 @@ by referencing skills, suitcases, and assignments already declared in the
 catalog. Groups must validate deterministically, but they must not alter
 planning, packing, installation, receipt ownership, or target assignment
 semantics unless a later feature explicitly wires that behavior.
+
+Manifest source policy is part of the same catalog contract, not target policy.
+`sourcePolicy.exclude` is an explicit omission list for generated or cache paths
+that remain in the source tree but must not be copied, hashed into plan locks, or
+installed into agent homes. `sourcePolicy.deny` is a hard block for unsafe
+source content such as secrets or provider-owned payloads; built-in denials cover
+common secret-like filenames. These checks run on materialization paths
+(`pack`, plan-lock creation, and `apply` through `diff`) and must report the
+skill plus offending relative path through `source_denied_path` or
+`diff_source_denied_path` without mutating live targets.
 
 ## Target Registry Providers
 

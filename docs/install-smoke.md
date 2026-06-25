@@ -46,6 +46,11 @@ and `validate --strict --json` as reporting metadata only. Groups should
 summarize related skills, suitcases, or assignments without changing target
 planning or install semantics.
 
+If the catalog declares manifest `sourcePolicy`, smoke both sides of the
+materialization boundary: excluded generated/cache paths should be omitted from
+`pack --dry-run`, while `sourcePolicy.deny` paths should report
+`source_denied_path` or `diff_source_denied_path` and write no target files.
+
 For Git-backed catalogs, `pack` refuses selected source skills with untracked,
 non-ignored files. Commit, stage, or remove scratch files inside selected skills
 before expecting the pack smoke to pass.

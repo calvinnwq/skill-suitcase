@@ -581,6 +581,104 @@ compatibility:
   assert.equal(result.entries.filter((entry) => entry.action === "extra").length, 0);
 });
 
+test("diff refuses unreadable sourcePolicy excluded directories", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-excluded-unreadable-source-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-excluded-unreadable-target-"));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  const cacheRoot = path.join(skillRoot, ".cache");
+  t.after(async () => {
+    await chmod(cacheRoot, 0o700).catch(() => undefined);
+    await rm(source, { recursive: true, force: true });
+    await rm(targetRoot, { recursive: true, force: true });
+  });
+  await mkdir(cacheRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "Office Hours\n");
+  await writeFile(path.join(cacheRoot, "generated.json"), "{}\n");
+  await chmod(cacheRoot, 0o000);
+
+  await createCatalog(
+    source,
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${targetRoot}
+
+compatibility:
+  office-hours:
+    agents:
+      - openclaw
+
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+
+  const result = await diff({ source, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((item) => item.code === "source_denied_path" && item.message.includes(".cache")), true);
+  assert.equal(result.entries.length, 0);
+});
+
+test("diff refuses denied source paths inside excluded trees", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-exclude-deny-source-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-exclude-deny-target-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(path.join(skillRoot, ".cache"), { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "Office Hours\n");
+  await writeFile(path.join(skillRoot, ".cache", ".env"), "TOKEN=secret\n");
+
+  await createCatalog(
+    source,
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${targetRoot}
+
+compatibility:
+  office-hours:
+    agents:
+      - openclaw
+
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+
+  const result = await diff({ source, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((item) => item.code === "source_denied_path" && item.message.includes(".cache/.env")));
+});
+
 test("diff returns ambiguous install-root error for duplicate assignment paths", async (t) => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-ambiguous-target-"));
   const primaryRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-ambiguous-primary-"));

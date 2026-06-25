@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assessPlanLock, type PlanLock, PLAN_LOCK_SCHEMA } from "../planning/plan-lock.js";
-import type { TargetOverrides } from "../catalog/index.js";
+import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
 import {
   classifySymlinkInstall,
@@ -22,6 +22,11 @@ import {
 import { readSkillVersion } from "../skill-metadata.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
 import { status } from "../status/index.js";
+import {
+  collectSourcePolicyExcludedPaths,
+  sourcePolicyHasExcludePatterns,
+  type SourcePolicy
+} from "../source-policy.js";
 
 type ApplyInput = {
   source: string;
@@ -269,9 +274,11 @@ export async function apply({
     });
   }
 
+  const { manifest } = await loadCatalog(diffResult.source, { targetOverrides });
   const hygiene = checkSelectedSourceHygiene({
     sourceRoot: diffResult.source,
-    plannedSkills: diffResult.planned
+    plannedSkills: diffResult.planned,
+    sourcePolicy: manifest.sourcePolicy
   });
   if (!hygiene.ok) {
     return failure({
@@ -343,6 +350,16 @@ export async function apply({
     });
   }
 
+  if (installMode === "copy") {
+    preApplyErrors.push(
+      ...(await collectExcludedTargetPolicyFindings({
+        plannedSkills: diffResult.planned,
+        installRoot,
+        sourcePolicy: manifest.sourcePolicy
+      }))
+    );
+  }
+
   for (const targetStatus of targetStatuses) {
     if (
       targetStatus.status === "dirty"
@@ -395,7 +412,8 @@ export async function apply({
       targetStatuses,
       preApplySummary,
       targetOverrides,
-      target
+      target,
+      sourcePolicy: manifest.sourcePolicy
     });
   }
 
@@ -681,6 +699,46 @@ function normalizeInstallMode(mode: string | undefined): ApplyInstallMode | null
   return null;
 }
 
+async function collectExcludedTargetPolicyFindings({
+  plannedSkills,
+  installRoot,
+  sourcePolicy
+}: {
+  plannedSkills: DiffForApply["planned"];
+  installRoot: string;
+  sourcePolicy: SourcePolicy | undefined;
+}): Promise<ApplyFinding[]> {
+  if (!sourcePolicyHasExcludePatterns(sourcePolicy)) {
+    return [];
+  }
+
+  const errors: ApplyFinding[] = [];
+  for (const planned of plannedSkills) {
+    const targetPath = path.join(installRoot, planned.skill);
+    let info;
+    try {
+      info = await lstat(targetPath);
+    } catch {
+      continue;
+    }
+    if (!info.isDirectory()) {
+      continue;
+    }
+
+    const excludedPaths = await collectSourcePolicyExcludedPaths(targetPath, sourcePolicy);
+    if (excludedPaths.length === 0) {
+      continue;
+    }
+
+    errors.push({
+      code: "source_policy_excluded_target",
+      message: `Refusing to apply ${planned.skill}: target contains source policy excluded paths (${excludedPaths.join(", ")}).`
+    });
+  }
+
+  return errors;
+}
+
 type SymlinkApplyPlanItem = {
   skill: string;
   sourcePath: string;
@@ -708,7 +766,8 @@ async function applySymlinkInstalls({
   targetStatuses,
   preApplySummary,
   targetOverrides,
-  target
+  target,
+  sourcePolicy
 }: {
   diffResult: DiffForApply;
   context: ApprovalContext;
@@ -718,6 +777,7 @@ async function applySymlinkInstalls({
   preApplySummary: ApplyStatusSummary;
   targetOverrides: TargetOverrides | undefined;
   target: string;
+  sourcePolicy: SourcePolicy | undefined;
 }): Promise<ApplyResult> {
   const sourceRoot = diffResult.source;
   const assignment = diffResult.assignment ?? target;
@@ -758,6 +818,18 @@ async function applySymlinkInstalls({
       errors.push({
         code: "symlink_source_escape",
         message: `Refusing to symlink ${planned.skill}: source ${sourcePath} escapes the approved source root ${sourceRoot}.`
+      });
+      continue;
+    }
+
+    if (sourcePolicyHasExcludePatterns(sourcePolicy)) {
+      const excludedPaths = await collectSourcePolicyExcludedPaths(sourcePath, sourcePolicy);
+      const detail = excludedPaths.length > 0
+        ? `excludes paths (${excludedPaths.join(", ")})`
+        : "defines exclude patterns";
+      errors.push({
+        code: "symlink_source_policy_exclude",
+        message: `Refusing to symlink ${planned.skill}: source policy ${detail}, which symlink mode would expose.`
       });
       continue;
     }

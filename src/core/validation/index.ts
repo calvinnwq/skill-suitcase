@@ -156,6 +156,8 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
     }
   }
 
+  validateSourcePolicyMetadata(manifest.sourcePolicy, findings);
+
   for (const skillName of Object.keys(manifest.compatibility)) {
     if (!referencedSkills.has(skillName)) {
       findings.push(
@@ -224,6 +226,34 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
     findings,
     contracts
   };
+}
+
+function validateSourcePolicyMetadata(sourcePolicy: Catalog["sourcePolicy"], findings: Finding[]): void {
+  for (const field of ["exclude", "deny"] as const) {
+    for (const [index, pattern] of (sourcePolicy[field] ?? []).entries()) {
+      const pathName = `sourcePolicy.${field}.${index}`;
+      if (pattern.trim().length === 0) {
+        findings.push(error(
+          "empty_source_policy_pattern",
+          `sourcePolicy.${field} contains an empty pattern.`,
+          pathName
+        ));
+        continue;
+      }
+
+      if (hasParentTraversalSegment(pattern)) {
+        findings.push(error(
+          "invalid_source_policy_pattern",
+          `sourcePolicy.${field} pattern ${pattern} must not contain parent traversal segments.`,
+          pathName
+        ));
+      }
+    }
+  }
+}
+
+function hasParentTraversalSegment(value: string): boolean {
+  return value.split(/[\\/]+/).some((segment) => segment === "..");
 }
 
 async function scoreReferencedContracts(
