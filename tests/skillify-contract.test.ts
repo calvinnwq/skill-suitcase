@@ -696,6 +696,49 @@ validationPolicy:
   assert.ok(result.findings.some((finding) => finding.path?.startsWith("skills.external-dated.contract.")));
 });
 
+test("basic validate ignores Skillify skip policy metadata", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(root, "external-video", "# External Video\n\nExternal source shape.\n");
+  await writeFile(
+    path.join(root, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - external-video
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    assignment: openclaw
+
+validationPolicy:
+  skillify:
+    skip:
+      external-video:
+        kind: maybe
+      stale-skill:
+        kind: external-managed
+        source: elsewhere
+        owner: upstream
+        reason: Not referenced.
+`
+  );
+
+  const result = await validate({ source: root });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.strict, false);
+  assert.equal(result.summary.contractsEvaluated, 0);
+  assert.equal(result.summary.contractsSkippedExternal, 0);
+  assert.equal(result.summary.contractsSkippedLegacy, 0);
+  assert.deepEqual(result.contracts, []);
+  assert.ok(!result.findings.some((finding) => finding.path?.startsWith("validationPolicy.skillify.skip.")));
+});
+
 test("strict validate skips legacy-local skills but leaves a review warning", async () => {
   const root = await makeCatalogRoot();
   await writeSkill(root, "legacy-local", "# Legacy Local\n\nOld local source shape.\n");
@@ -771,7 +814,10 @@ validationPolicy:
   const codes = result.findings.map((finding) => finding.code);
 
   assert.equal(result.ok, false);
-  assert.equal(result.summary.contractsSkippedLegacy, 1);
+  assert.equal(result.summary.contractsEvaluated, 1);
+  assert.equal(result.summary.contractsSkippedLegacy, 0);
   assert.ok(codes.includes("missing_skillify_skip_review_after"));
-  assert.ok(codes.includes("legacy_skillify_skip"));
+  assert.ok(codes.includes("skillify_contract_failed"));
+  assert.ok(!codes.includes("legacy_skillify_skip"));
+  assert.ok(result.findings.some((finding) => finding.path?.startsWith("skills.legacy-local.contract.")));
 });

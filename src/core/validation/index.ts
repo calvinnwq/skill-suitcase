@@ -186,12 +186,14 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
 
   const upstream = await loadUpstreamLock(sourceRoot);
   const upstreamManagedSkills = new Set(upstream.declarations.map((declaration) => declaration.skill));
-  const policySkips = validateSkillifySkipPolicy(
-    manifest.validationPolicy.skillify.skip,
-    referencedSkills,
-    upstreamManagedSkills,
-    findings
-  );
+  const policySkips = strict
+    ? validateSkillifySkipPolicy(
+      manifest.validationPolicy.skillify.skip,
+      referencedSkills,
+      upstreamManagedSkills,
+      findings
+    )
+    : emptySkillifyPolicySkipSets();
   const skippedContractSkills = new Set([
     ...upstreamManagedSkills,
     ...policySkips.externalManagedSkills,
@@ -248,6 +250,13 @@ type SkillifyPolicySkipSets = {
   externalManagedSkills: Set<string>;
   legacyLocalSkills: Set<string>;
 };
+
+function emptySkillifyPolicySkipSets(): SkillifyPolicySkipSets {
+  return {
+    externalManagedSkills: new Set<string>(),
+    legacyLocalSkills: new Set<string>()
+  };
+}
 
 function validateSkillifySkipPolicy(
   policy: SkillifySkipPolicy,
@@ -330,25 +339,30 @@ function validateSkillifySkipPolicy(
 
     if (kind === "legacy-local") {
       const reviewAfter = entry.reviewAfter;
+      let hasValidReviewAfter = true;
       if (!hasNonBlankValue(reviewAfter)) {
         findings.push(error(
           "missing_skillify_skip_review_after",
           `Skillify skip entry ${skillName} kind legacy-local must include reviewAfter.`,
           `${pathName}.reviewAfter`
         ));
+        hasValidReviewAfter = false;
       } else if (!isIsoDate(reviewAfter)) {
         findings.push(error(
           "invalid_skillify_skip_review_after",
           `Skillify skip entry ${skillName} reviewAfter must use YYYY-MM-DD.`,
           `${pathName}.reviewAfter`
         ));
+        hasValidReviewAfter = false;
       }
-      findings.push(warning(
-        "legacy_skillify_skip",
-        `Skill ${skillName} is temporarily exempt from Skillify-10 as legacy-local until ${entry.reviewAfter ?? "an unspecified review date"}.`,
-        pathName
-      ));
-      legacyLocalSkills.add(skillName);
+      if (hasValidProvenance && hasValidReviewAfter) {
+        findings.push(warning(
+          "legacy_skillify_skip",
+          `Skill ${skillName} is temporarily exempt from Skillify-10 as legacy-local until ${entry.reviewAfter ?? "an unspecified review date"}.`,
+          pathName
+        ));
+        legacyLocalSkills.add(skillName);
+      }
       continue;
     }
 
