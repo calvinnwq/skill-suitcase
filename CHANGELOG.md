@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.13.0...v0.14.0) (2026-06-25)
+
+
+### Features
+
+* **validation:** add skillify skip policy ([a10d002](https://github.com/calvinnwq/skill-suitcase/commit/a10d002a2005e97d33ef198f776e7333eb4ac932))
+* **validation:** add strict Skillify skip policy ([334b64c](https://github.com/calvinnwq/skill-suitcase/commit/334b64c10686d22ef3354d8a037fb6fd10c869be))
+
+
+### Bug Fixes
+
+* **validation:** reject upstream skip overlaps ([c6f2280](https://github.com/calvinnwq/skill-suitcase/commit/c6f22809d2d121215655f5591a99f8041f39fe58))
+
 ## [0.13.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.12.0...v0.13.0) (2026-06-25)
 
 
