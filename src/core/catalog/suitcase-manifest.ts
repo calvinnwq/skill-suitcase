@@ -14,6 +14,18 @@ type ManifestSourcePolicy = {
   exclude?: string[];
   deny?: string[];
 };
+type ManifestSkillifySkip = {
+  kind?: string;
+  source?: string;
+  owner?: string;
+  reason?: string;
+  reviewAfter?: string;
+};
+type ManifestValidationPolicy = {
+  skillify: {
+    skip: Record<string, ManifestSkillifySkip>;
+  };
+};
 type ManifestVariant = {
   source?: string;
   agents?: string[];
@@ -32,15 +44,21 @@ type ParsedManifest = {
   assignmentPaths: Record<string, Record<string, string>>;
   groups: Record<string, ManifestGroup>;
   sourcePolicy: ManifestSourcePolicy;
+  validationPolicy: ManifestValidationPolicy;
   compatibility: Record<string, ManifestCompatibility>;
   variants: Record<string, Record<string, ManifestVariant>>;
 };
 
-type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "groups" | "sourcePolicy" | "compatibility" | "variants" | null;
+type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "groups" | "sourcePolicy" | "validationPolicy" | "compatibility" | "variants" | null;
 type GroupField = "skills" | "suitcases" | "assignments" | "tags" | null;
 type SourcePolicyField = "exclude" | "deny" | null;
 type CompatibilityField = "agents" | "evidence" | "blockedAgents" | null;
 type VariantField = "agents" | null;
+type ValidationPolicyState = {
+  skillify: boolean;
+  skillifySkip: boolean;
+  skillName: string | null;
+};
 
 export function parseSuitcaseManifest(text: string): ParsedManifest {
   const manifest: ParsedManifest = {
@@ -49,6 +67,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
     assignmentPaths: {},
     groups: {},
     sourcePolicy: {},
+    validationPolicy: { skillify: { skip: {} } },
     compatibility: {},
     variants: {}
   };
@@ -59,6 +78,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
   let currentVariantName: string | null = null;
   let currentGroupField: GroupField = null;
   let currentSourcePolicyField: SourcePolicyField = null;
+  let currentValidationPolicy: ValidationPolicyState = { skillify: false, skillifySkip: false, skillName: null };
   let currentField: CompatibilityField = null;
   let currentVariantField: VariantField = null;
 
@@ -80,6 +100,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         sectionValue === "assignmentPaths" ||
         sectionValue === "groups" ||
         sectionValue === "sourcePolicy" ||
+        sectionValue === "validationPolicy" ||
         sectionValue === "compatibility" ||
         sectionValue === "variants"
       )
@@ -89,6 +110,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       currentVariantName = null;
       currentGroupField = null;
       currentSourcePolicyField = null;
+      currentValidationPolicy = { skillify: false, skillifySkip: false, skillName: null };
       currentField = null;
       currentVariantField = null;
       continue;
@@ -100,6 +122,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       section !== "assignmentPaths" &&
       section !== "groups" &&
       section !== "sourcePolicy" &&
+      section !== "validationPolicy" &&
       section !== "compatibility" &&
       section !== "variants"
     ) {
@@ -111,11 +134,17 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       continue;
     }
 
+    if (section === "validationPolicy") {
+      currentValidationPolicy = parseValidationPolicyLine(manifest.validationPolicy, indent, trimmed, currentValidationPolicy);
+      continue;
+    }
+
     if (indent === 2 && trimmed.endsWith(":")) {
       currentName = trimmed.slice(0, -1);
       currentVariantName = null;
       currentGroupField = null;
       currentSourcePolicyField = null;
+      currentValidationPolicy = { skillify: false, skillifySkip: false, skillName: null };
       currentField = null;
       currentVariantField = null;
 
@@ -216,6 +245,52 @@ function parseSourcePolicyLine(
   }
 
   return currentSourcePolicyField;
+}
+
+function parseValidationPolicyLine(
+  validationPolicy: ManifestValidationPolicy,
+  indent: number,
+  trimmed: string,
+  state: ValidationPolicyState
+): ValidationPolicyState {
+  if (indent === 2 && trimmed === "skillify:") {
+    validationPolicy.skillify = validationPolicy.skillify ?? { skip: {} };
+    validationPolicy.skillify.skip = validationPolicy.skillify.skip ?? {};
+    return { skillify: true, skillifySkip: false, skillName: null };
+  }
+
+  if (!state.skillify) {
+    return state;
+  }
+
+  if (indent === 4 && trimmed === "skip:") {
+    validationPolicy.skillify.skip = validationPolicy.skillify.skip ?? {};
+    return { skillify: true, skillifySkip: true, skillName: null };
+  }
+
+  if (!state.skillifySkip) {
+    return state;
+  }
+
+  if (indent === 6 && trimmed.endsWith(":")) {
+    const skillName = trimmed.slice(0, -1);
+    validationPolicy.skillify.skip[skillName] = {};
+    return { skillify: true, skillifySkip: true, skillName };
+  }
+
+  if (indent === 8 && state.skillName !== null && trimmed.includes(":")) {
+    const entry = validationPolicy.skillify.skip[state.skillName] ?? {};
+    const separator = trimmed.indexOf(":");
+    const key = trimmed.slice(0, separator).trim();
+    const value = unquoteValue(trimmed.slice(separator + 1).trim());
+    if (key === "kind" || key === "source" || key === "owner" || key === "reason" || key === "reviewAfter") {
+      entry[key] = value;
+      validationPolicy.skillify.skip[state.skillName] = entry;
+    }
+    return state;
+  }
+
+  return state;
 }
 
 function parseGroupLine(

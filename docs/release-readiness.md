@@ -181,6 +181,9 @@ Manifest-owned logical groups are release-safe reporting metadata when
 `import --json` and `validate --json` can prove their referenced skills,
 suitcases, and assignments exist. They must not change target planning or
 install semantics.
+Manifest `validationPolicy.skillify.skip` is release-safe only when `validate --strict --json` proves each skip entry is referenced and has valid provenance.
+`external-managed` skips should count in `summary.contractsSkippedExternal`, and `legacy-local` skips should count in `summary.contractsSkippedLegacy` while still surfacing `legacy_skillify_skip` debt.
+Malformed skip entries are release-blocking and must not hide Skillify-10 contract failures.
 
 Live mutation requires explicit approval input and should start in disposable
 fixtures or a clearly approved target:
@@ -253,6 +256,7 @@ Before a public announcement or npm publish:
   including custom manifest `assignmentPaths` roots.
 - Docs that mention upstream-managed refresh preserve the separate
   upstream-to-catalog and catalog-to-target lifecycle policy.
+- Docs that mention Skillify validation policy distinguish strict-validation skips from install, receipt, and target drift semantics.
 
 ## Current Decision
 

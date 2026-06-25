@@ -51,6 +51,10 @@ materialization boundary: excluded generated/cache paths should be omitted from
 `pack --dry-run`, while `sourcePolicy.deny` paths should report
 `source_denied_path` or `diff_source_denied_path` and write no target files.
 
+If the catalog declares manifest `validationPolicy.skillify.skip`, smoke it through `validate --strict --json` as a strict-validation boundary only.
+Valid `external-managed` entries should increase `summary.contractsSkippedExternal`, while valid `legacy-local` entries should increase `summary.contractsSkippedLegacy` and emit `legacy_skillify_skip`.
+Malformed entries should produce release-blocking skip-policy findings and the affected skills should remain subject to Skillify-10 scoring.
+
 For Git-backed catalogs, `pack` refuses selected source skills with untracked,
 non-ignored files. Commit, stage, or remove scratch files inside selected skills
 before expecting the pack smoke to pass.

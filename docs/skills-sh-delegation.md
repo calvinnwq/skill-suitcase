@@ -167,6 +167,7 @@ and include `upstream.repo` plus `upstream.skill`.
 An optional `packageName` can override the default npm package name `skills`.
 `validate --source <repo> --json` validates this metadata and counts valid
 declarations in `summary.upstreamDeclarations`.
+Manifest `validationPolicy.skillify.skip` must not replace this lock for upstream-managed skills; strict validation treats the upstream lock as the ownership source of truth and warns on duplicate manifest provenance.
 
 The operator commands are:
 

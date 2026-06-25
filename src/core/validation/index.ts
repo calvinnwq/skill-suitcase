@@ -23,6 +23,8 @@ type ValidationSummary = {
   contractsEvaluated: number;
   contractsComplete: number;
   contractsSkippedUpstream: number;
+  contractsSkippedExternal: number;
+  contractsSkippedLegacy: number;
   findings: number;
 };
 
@@ -184,7 +186,20 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
 
   const upstream = await loadUpstreamLock(sourceRoot);
   const upstreamManagedSkills = new Set(upstream.declarations.map((declaration) => declaration.skill));
-  const contracts = strict ? await scoreReferencedContracts(sourceRoot, referencedSkills, findings, upstreamManagedSkills) : [];
+  const policySkips = strict
+    ? validateSkillifySkipPolicy(
+      manifest.validationPolicy.skillify.skip,
+      referencedSkills,
+      upstreamManagedSkills,
+      findings
+    )
+    : emptySkillifyPolicySkipSets();
+  const skippedContractSkills = new Set([
+    ...upstreamManagedSkills,
+    ...policySkips.externalManagedSkills,
+    ...policySkips.legacyLocalSkills
+  ]);
+  const contracts = strict ? await scoreReferencedContracts(sourceRoot, referencedSkills, findings, skippedContractSkills) : [];
   findings.push(
     ...upstream.findings.map((item) => ({
       level: "error" as const,
@@ -221,11 +236,169 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
       contractsEvaluated: contracts.length,
       contractsComplete: contracts.filter((report) => report.complete).length,
       contractsSkippedUpstream: strict ? countIntersectingSkills(referencedSkills, upstreamManagedSkills) : 0,
+      contractsSkippedExternal: strict ? countIntersectingSkills(referencedSkills, policySkips.externalManagedSkills) : 0,
+      contractsSkippedLegacy: strict ? countIntersectingSkills(referencedSkills, policySkips.legacyLocalSkills) : 0,
       findings: findings.length
     },
     findings,
     contracts
   };
+}
+
+type SkillifySkipPolicy = Catalog["validationPolicy"]["skillify"]["skip"];
+type SkillifyPolicySkipSets = {
+  externalManagedSkills: Set<string>;
+  legacyLocalSkills: Set<string>;
+};
+
+function emptySkillifyPolicySkipSets(): SkillifyPolicySkipSets {
+  return {
+    externalManagedSkills: new Set<string>(),
+    legacyLocalSkills: new Set<string>()
+  };
+}
+
+function validateSkillifySkipPolicy(
+  policy: SkillifySkipPolicy,
+  referencedSkills: Set<string>,
+  upstreamManagedSkills: Set<string>,
+  findings: Finding[]
+): SkillifyPolicySkipSets {
+  const externalManagedSkills = new Set<string>();
+  const legacyLocalSkills = new Set<string>();
+  const validKinds = new Set(["external-managed", "legacy-local", "upstream-managed"]);
+
+  for (const [skillName, entry] of Object.entries(policy)) {
+    const pathName = `validationPolicy.skillify.skip.${skillName}`;
+
+    if (!isPlainPathSegment(skillName)) {
+      findings.push(error(
+        "invalid_skillify_skip_skill_name",
+        `Skillify skip entry ${skillName} must be a plain skill name.`,
+        pathName
+      ));
+      continue;
+    }
+
+    if (!referencedSkills.has(skillName)) {
+      findings.push(error(
+        "unreferenced_skillify_skip",
+        `Skillify skip entry ${skillName} is not referenced by any suitcase.`,
+        pathName
+      ));
+    }
+
+    const kind = entry.kind?.trim() ?? "";
+    if (!validKinds.has(kind)) {
+      findings.push(error(
+        "invalid_skillify_skip_kind",
+        `Skillify skip entry ${skillName} must use kind external-managed, legacy-local, or upstream-managed.`,
+        `${pathName}.kind`
+      ));
+      continue;
+    }
+
+    if (kind === "upstream-managed") {
+      if (!upstreamManagedSkills.has(skillName)) {
+        findings.push(error(
+          "invalid_skillify_skip_upstream",
+          `Skillify skip entry ${skillName} is marked upstream-managed but is not declared in the upstream lock.`,
+          pathName
+        ));
+      }
+      if (hasNonBlankValue(entry.reason) || hasNonBlankValue(entry.source) || hasNonBlankValue(entry.owner)) {
+        findings.push(warning(
+          "redundant_skillify_upstream_skip_metadata",
+          `Skillify skip entry ${skillName} duplicates upstream-lock metadata; the upstream lock remains the source of truth.`,
+          pathName
+        ));
+      }
+      continue;
+    }
+
+    if (upstreamManagedSkills.has(skillName)) {
+      findings.push(error(
+        "invalid_skillify_skip_upstream_overlap",
+        `Skillify skip entry ${skillName} is already upstream-managed; keep upstream ownership in the upstream lock.`,
+        pathName
+      ));
+      continue;
+    }
+
+    let hasValidProvenance = true;
+    for (const field of ["source", "owner", "reason"] as const) {
+      if (!hasNonBlankValue(entry[field])) {
+        findings.push(error(
+          "missing_skillify_skip_metadata",
+          `Skillify skip entry ${skillName} kind ${kind} must include ${field}.`,
+          `${pathName}.${field}`
+        ));
+        hasValidProvenance = false;
+      }
+    }
+
+    if (kind === "legacy-local") {
+      const reviewAfter = entry.reviewAfter;
+      let hasValidReviewAfter = true;
+      if (!hasNonBlankValue(reviewAfter)) {
+        findings.push(error(
+          "missing_skillify_skip_review_after",
+          `Skillify skip entry ${skillName} kind legacy-local must include reviewAfter.`,
+          `${pathName}.reviewAfter`
+        ));
+        hasValidReviewAfter = false;
+      } else if (!isIsoDate(reviewAfter)) {
+        findings.push(error(
+          "invalid_skillify_skip_review_after",
+          `Skillify skip entry ${skillName} reviewAfter must use YYYY-MM-DD.`,
+          `${pathName}.reviewAfter`
+        ));
+        hasValidReviewAfter = false;
+      }
+      if (hasValidProvenance && hasValidReviewAfter) {
+        findings.push(warning(
+          "legacy_skillify_skip",
+          `Skill ${skillName} is temporarily exempt from Skillify-10 as legacy-local until ${entry.reviewAfter ?? "an unspecified review date"}.`,
+          pathName
+        ));
+        legacyLocalSkills.add(skillName);
+      }
+      continue;
+    }
+
+    const reviewAfter = entry.reviewAfter;
+    if (!hasNonBlankValue(reviewAfter)) {
+      findings.push(warning(
+        "missing_skillify_skip_review_after",
+        `Skillify skip entry ${skillName} kind external-managed has no reviewAfter; add one if the external ownership should be rechecked later.`,
+        `${pathName}.reviewAfter`
+      ));
+    } else if (!isIsoDate(reviewAfter)) {
+      findings.push(error(
+        "invalid_skillify_skip_review_after",
+        `Skillify skip entry ${skillName} reviewAfter must use YYYY-MM-DD.`,
+        `${pathName}.reviewAfter`
+      ));
+      hasValidProvenance = false;
+    }
+
+    if (hasValidProvenance) {
+      externalManagedSkills.add(skillName);
+    }
+  }
+
+  return {
+    externalManagedSkills,
+    legacyLocalSkills
+  };
+}
+
+function hasNonBlankValue(value: string | undefined): value is string {
+  return value !== undefined && value.trim().length > 0;
+}
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function validateSourcePolicyMetadata(sourcePolicy: Catalog["sourcePolicy"], findings: Finding[]): void {
