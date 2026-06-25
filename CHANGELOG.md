@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.10.1...v0.11.0) (2026-06-25)
+
+
+### Features
+
+* **core:** support manifest logical groups ([#60](https://github.com/calvinnwq/skill-suitcase/issues/60)) ([efa2531](https://github.com/calvinnwq/skill-suitcase/commit/efa25314320d1486e921414043990b1258c45e45))
+* **pack:** add source materialization policy ([c095e23](https://github.com/calvinnwq/skill-suitcase/commit/c095e2326be933b141232992b44629d2a3f00eb3))
+* **status:** report scoped upstream lineage ([48fbdca](https://github.com/calvinnwq/skill-suitcase/commit/48fbdca3ef6bce27c6168b458f27dd253298b364))
+
+
+### Bug Fixes
+
+* **packing:** preserve provider read-only boundaries ([#59](https://github.com/calvinnwq/skill-suitcase/issues/59)) ([39f62bb](https://github.com/calvinnwq/skill-suitcase/commit/39f62bb3e09bcad1ec1c749a88c4c21adb063024))
+
 ## [0.10.1](https://github.com/calvinnwq/skill-suitcase/compare/v0.10.0...v0.10.1) (2026-06-24)
 
 
