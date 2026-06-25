@@ -385,7 +385,7 @@ sourcePolicy:
   );
 });
 
-test("buildPlanLock prunes excluded sourcePolicy directories before reading them", async (t) => {
+test("buildPlanLock refuses unreadable sourcePolicy excluded directories", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-plan-lock-excluded-unreadable-"));
 
   const skillRoot = path.join(sourceRoot, "skills", "office-hours");
@@ -418,14 +418,15 @@ sourcePolicy:
   git(sourceRoot, "init");
   git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md");
 
-  const lock = await buildPlanLock({
-    source: sourceRoot,
-    target: "openclaw",
-    assignmentPath: "openclaw",
-    sourceCommit: "deadbeef"
-  });
-
-  assert.deepEqual(Object.keys(lock.fileHashes["office-hours"] ?? {}), ["SKILL.md"]);
+  await assert.rejects(
+    () => buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }),
+    /source policy denies paths \(\.cache\)/
+  );
 });
 
 test("assessPlanLock returns valid when the lock matches the current plan state", async (t) => {

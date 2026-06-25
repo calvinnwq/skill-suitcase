@@ -1610,7 +1610,7 @@ sourcePolicy:
   assert.equal(item.currentHash, installedHash);
 });
 
-test("status prunes sourcePolicy excluded directories before scanning", async (t) => {
+test("status refuses unreadable sourcePolicy excluded directories", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-source-policy-prune-src-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-source-policy-prune-target-"));
   const unreadableCache = path.join(sourceRoot, "skills", "office-hours", ".cache");
@@ -1662,9 +1662,11 @@ sourcePolicy:
 
   const result = await status({ source: sourceRoot, target: "openclaw" });
 
-  assert.equal(result.ok, true);
-  assert.equal(result.summary.current, 1);
-  assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.current, 0);
+  assert.equal(result.summary.unknown, 1);
+  assert.equal(firstItem(result.statuses, "result.statuses").status, "unknown");
+  assert.equal(result.errors.some((error) => error.code === "source_read_failed"), true);
 });
 
 test("status legacy fallback ignores sourcePolicy excluded files", async (t) => {
@@ -3476,6 +3478,51 @@ test("status keeps a correct symlink current even after the source content chang
   assert.equal(result.summary.behind, 0);
   assert.equal(result.summary.dirty, 0);
   assert.equal(firstItem(result.statuses, "result.statuses").status, "current");
+});
+
+test("status marks symlink installs dirty when sourcePolicy excludes paths", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-policy-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-symlink-policy-install-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: office-hours\nversion: 2026.06.10\n---\n");
+  await symlink(sourceSkill, path.join(installRoot, "office-hours"), "dir");
+  await writeSymlinkReceipt({ installRoot, sourceRoot, skillName: "office-hours", version: "2026.06.10" });
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${installRoot}
+
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+
+  const result = await status({ source: sourceRoot });
+  const item = firstItem(result.statuses, "result.statuses");
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.current, 0);
+  assert.equal(result.summary.dirty, 1);
+  assert.equal(item.status, "dirty");
+  assert.match(item.reason, /sourcePolicy exclude/i);
 });
 
 test("status lineage reports symlink receipt hash from receipt provenance", async (t) => {

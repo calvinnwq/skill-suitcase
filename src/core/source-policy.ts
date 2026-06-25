@@ -137,11 +137,18 @@ async function collectPolicyPaths({
   try {
     entries = await readdir(root, { withFileTypes: true });
   } catch (error) {
-    if (
-      prefix.length > 0 &&
-      (sourcePolicyDecision(prefix, policy).action === "exclude" || sourcePolicyPrunesDirectory(prefix, policy))
-    ) {
-      return;
+    if (prefix.length > 0) {
+      const decision = sourcePolicyDecision(prefix, policy);
+      if (decision.action === action || (action === "exclude" && sourcePolicyPrunesDirectory(prefix, policy))) {
+        paths.push(prefix);
+        return;
+      }
+      if (decision.action === "exclude" || sourcePolicyPrunesDirectory(prefix, policy)) {
+        if (action === "deny") {
+          paths.push(prefix);
+        }
+        return;
+      }
     }
     throw error;
   }

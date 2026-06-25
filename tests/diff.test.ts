@@ -581,7 +581,7 @@ compatibility:
   assert.equal(result.entries.filter((entry) => entry.action === "extra").length, 0);
 });
 
-test("diff prunes excluded sourcePolicy directories before reading them", async (t) => {
+test("diff refuses unreadable sourcePolicy excluded directories", async (t) => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-excluded-unreadable-source-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-excluded-unreadable-target-"));
 
@@ -628,10 +628,9 @@ sourcePolicy:
 
   const result = await diff({ source, target: "openclaw" });
 
-  assert.equal(result.ok, true);
-  assert.deepEqual(result.errors, []);
-  assert.ok(actionByKey(result.entries, "create", "SKILL.md"));
-  assert.equal(actionByKey(result.entries, "create", ".cache/generated.json"), undefined);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((item) => item.code === "source_denied_path" && item.message.includes(".cache")), true);
+  assert.equal(result.entries.length, 0);
 });
 
 test("diff refuses denied source paths inside excluded trees", async (t) => {

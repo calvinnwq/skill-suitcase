@@ -23,7 +23,13 @@ import {
   upstreamLineage,
   type UpstreamLineage
 } from "../upstream/index.js";
-import { collectSourcePolicyDeniedPaths, sourcePolicyDecision, sourcePolicyPrunesDirectory, type SourcePolicy } from "../source-policy.js";
+import {
+  collectSourcePolicyDeniedPaths,
+  sourcePolicyDecision,
+  sourcePolicyHasExcludePatterns,
+  sourcePolicyPrunesDirectory,
+  type SourcePolicy
+} from "../source-policy.js";
 
 type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
 type StatusSummary = {
@@ -696,7 +702,8 @@ async function statusSkill({
       sourceVersion,
       sourceHashValue,
       currentCommit,
-      installRecord
+      installRecord,
+      sourcePolicy
     });
   }
 
@@ -875,7 +882,8 @@ function statusSymlinkSkill({
   sourceVersion,
   sourceHashValue,
   currentCommit,
-  installRecord
+  installRecord,
+  sourcePolicy
 }: {
   classification: Awaited<ReturnType<typeof classifySymlinkInstall>>;
   installRoot: string;
@@ -884,12 +892,26 @@ function statusSymlinkSkill({
   sourceHashValue: string;
   currentCommit: string | null;
   installRecord: InstallRecord;
+  sourcePolicy: SourcePolicy | undefined;
 }): StatusCheckResult {
   const installedCommit = installRecord.sourceCommit ?? null;
 
   if (classification.state === "correct") {
-    // A correct symlink reflects the live source, so it is current by
-    // definition: the installed tree is the source tree.
+    if (sourcePolicyHasExcludePatterns(sourcePolicy)) {
+      return {
+        status: "dirty",
+        reason: "symlink exposes sourcePolicy exclude patterns",
+        target: installRoot,
+        targetPath,
+        installedVersion: installRecord.version ?? null,
+        currentVersion: sourceVersion,
+        installedCommit,
+        currentCommit,
+        installedHash: installRecord.sourceHash ?? null,
+        currentHash: sourceHashValue,
+        errors: []
+      };
+    }
     return {
       status: "current",
       reason: "symlink points at the selected source path",

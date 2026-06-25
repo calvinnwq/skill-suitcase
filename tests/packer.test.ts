@@ -320,7 +320,7 @@ assignments:
   assert.equal(result.errors.length, 0);
 });
 
-test("pack excludes manifest sourcePolicy paths without materializing them", async (t) => {
+test("pack refuses unreadable sourcePolicy excluded paths", async (t) => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-source-policy-exclude-"));
 
   const skillRoot = path.join(source, "skills", "office-hours");
@@ -355,7 +355,8 @@ sourcePolicy:
 
   const result = await pack({ source, target: "openclaw", dryRun: true });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "source_denied_path" && error.message.includes(".cache")), true);
   assert.deepEqual(result.files.map((file) => file.relativePath), ["SKILL.md"]);
 });
 
