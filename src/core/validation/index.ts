@@ -307,6 +307,15 @@ function validateSkillifySkipPolicy(
       continue;
     }
 
+    if (upstreamManagedSkills.has(skillName)) {
+      findings.push(error(
+        "invalid_skillify_skip_upstream_overlap",
+        `Skillify skip entry ${skillName} is already upstream-managed; keep upstream ownership in the upstream lock.`,
+        pathName
+      ));
+      continue;
+    }
+
     let hasValidProvenance = true;
     for (const field of ["source", "owner", "reason"] as const) {
       if (!hasNonBlankValue(entry[field])) {

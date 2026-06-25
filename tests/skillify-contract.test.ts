@@ -512,6 +512,84 @@ assignmentPaths:
   assert.ok(!result.findings.some((finding) => finding.path?.startsWith("skills.upstream-video.contract.")));
 });
 
+test("strict validate rejects non-upstream skip kinds for upstream-managed skills", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(root, "external-overlap", "# External Overlap\n\nProvider-owned source shape.\n");
+  await writeSkill(root, "legacy-overlap", "# Legacy Overlap\n\nProvider-owned source shape.\n");
+  await mkdir(path.join(root, ".skill-suitcase"), { recursive: true });
+  await writeFile(
+    path.join(root, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - external-overlap
+      - legacy-overlap
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    assignment: openclaw
+
+validationPolicy:
+  skillify:
+    skip:
+      external-overlap:
+        kind: external-managed
+        source: agents-global
+        owner: upstream
+        reason: Maintained in an external workflow source.
+        reviewAfter: 2026-09-01
+      legacy-overlap:
+        kind: legacy-local
+        source: local-catalog
+        owner: skill-maintainers
+        reason: Temporary exemption while old local skills are migrated.
+        reviewAfter: 2026-09-01
+`
+  );
+  await writeFile(
+    path.join(root, ".skill-suitcase", "upstream-lock.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.upstream-lock.v0",
+      skills: {
+        "external-overlap": {
+          provider: "skills-sh",
+          packageVersion: "1.5.13",
+          upstream: {
+            repo: "heygen-com/hyperframes",
+            skill: "external-overlap"
+          },
+          group: "video"
+        },
+        "legacy-overlap": {
+          provider: "skills-sh",
+          packageVersion: "1.5.13",
+          upstream: {
+            repo: "heygen-com/hyperframes",
+            skill: "legacy-overlap"
+          },
+          group: "video"
+        }
+      }
+    }, null, 2)}\n`
+  );
+
+  const result = await validate({ source: root, strict: true });
+  const overlapFindings = result.findings.filter((finding) => finding.code === "invalid_skillify_skip_upstream_overlap");
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.contractsEvaluated, 0);
+  assert.equal(result.summary.contractsSkippedUpstream, 2);
+  assert.equal(result.summary.contractsSkippedExternal, 0);
+  assert.equal(result.summary.contractsSkippedLegacy, 0);
+  assert.equal(overlapFindings.length, 2);
+  assert.ok(!result.findings.some((finding) => finding.code === "legacy_skillify_skip"));
+});
+
 test("strict validate skips external-managed skills with explicit provenance", async () => {
   const root = await makeCatalogRoot();
   await writeSkill(root, "external-video", "# External Video\n\nExternal source shape.\n");
