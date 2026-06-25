@@ -135,6 +135,10 @@ and receipt commit when the target skill is upstream-managed.
 Target-scoped status reports should compute lineage only for reported skills and must not hash unrelated upstream-managed catalog skills.
 `validate --strict` also validates `.skill-suitcase/upstream-lock.json` when the
 catalog has one.
+`validate --strict` also validates manifest `validationPolicy.skillify.skip` entries when the catalog declares them.
+Valid `external-managed` entries skip Skillify-10 scoring only after `source`, `owner`, and `reason` provenance validates; missing `reviewAfter` is a warning.
+Valid `legacy-local` entries require `source`, `owner`, `reason`, and a `reviewAfter` date, skip scoring, and emit `legacy_skillify_skip` so migration debt remains visible.
+Malformed skip policy is release-blocking and does not suppress Skillify-10 scoring.
 `import --json` and `validate --json` also report manifest logical groups as catalog metadata.
 Broken group references are catalog metadata problems, not implicit install targets.
 

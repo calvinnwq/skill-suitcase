@@ -110,6 +110,10 @@ It does not auto-commit and does not install, receipt, or sync targets.
 Strict validation checks the upstream declaration and `SKILL.md` presence for
 these skills, but excludes upstream-managed skills from Skillify-10 contract
 scoring because that contract applies only to locally authored/managed skills.
+For other carried skills, strict validation may skip Skillify-10 scoring through manifest `validationPolicy.skillify.skip`.
+Use `external-managed` only for a real external source of truth with `source`, `owner`, and `reason`; add `reviewAfter` when the provenance should be rechecked.
+Use `legacy-local` only as temporary migration debt with `source`, `owner`, `reason`, and `reviewAfter`; expect a `legacy_skillify_skip` warning until the debt is removed.
+If skip policy is malformed, fix the manifest rather than rewriting or installing the skill to silence validation.
 
 Lifecycle policy:
 
@@ -157,6 +161,8 @@ reviewed generated/cache paths from packs, plan locks, diffs, and apply writes;
 `deny` patterns and built-in secret-like denials block selected source skills
 with `source_denied_path`/`diff_source_denied_path`. Do not work around a denied
 path by copying it manually into a target home.
+Manifest `validationPolicy.skillify.skip` is a strict-validation boundary only.
+It does not change planning, packing, installation, receipt ownership, or target drift handling.
 
 ## Source And Target Matrix
 

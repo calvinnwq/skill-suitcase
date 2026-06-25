@@ -151,6 +151,7 @@ The durable state model belongs to Skill Suitcase:
 - manifest `sourcePolicy` gates omit approved generated/cache paths from pack,
   plan-lock, diff, and apply materialization, while denied or secret-like paths
   refuse with path-level evidence before any target write
+- manifest `validationPolicy.skillify.skip` records reviewed exceptions for referenced skills that strict validation must not score against the local Skillify-10 authoring contract
 - receipts record ownership, source provenance, install mode, file hashes, and
   rollback state
 - status decides whether a target is current, missing, dirty, blocked, unknown,
@@ -176,6 +177,12 @@ common secret-like filenames. These checks run on materialization paths
 (`pack`, plan-lock creation, and `apply` through `diff`) and must report the
 skill plus offending relative path through `source_denied_path` or
 `diff_source_denied_path` without mutating live targets.
+
+Manifest validation policy is also catalog policy, not target policy.
+`validationPolicy.skillify.skip` may exempt referenced skills from strict Skillify-10 scoring only after validation proves the skip provenance.
+`external-managed` skips require `source`, `owner`, and `reason`, and may carry a `reviewAfter` ISO date for periodic rechecks.
+`legacy-local` skips require the same provenance plus `reviewAfter`, emit a warning, and exist only as temporary migration debt.
+`upstream-managed` ownership belongs in `.skill-suitcase/upstream-lock.json`; manifest skip entries for that kind are accepted only when the lock declares the same referenced skill and extra duplicate provenance stays advisory.
 
 ## Target Registry Providers
 
@@ -256,6 +263,8 @@ Strict validation must still validate upstream declarations and referenced
 skill presence, but it must not apply the Skillify-10 authoring contract to
 skills declared in the upstream lock. The Skillify contract is for skills we
 create and maintain ourselves.
+Strict validation may also skip referenced skills declared under manifest `validationPolicy.skillify.skip` when they are externally managed or temporarily legacy-local with valid provenance.
+Malformed skip policy is a catalog validation finding, and a malformed skip does not suppress Skillify-10 scoring.
 
 Source refresh commands should be explicit and staged:
 

@@ -564,6 +564,8 @@ but recommended so provenance can be rechecked. Use `legacy-local` only as a
 temporary local migration exemption; it requires `reviewAfter` and always emits
 a warning. Upstream-lock remains the preferred source of truth for
 `upstream-managed` skills.
+If a manifest uses `kind: upstream-managed`, the same skill must also be declared in `.skill-suitcase/upstream-lock.json`; duplicate `source`, `owner`, or `reason` metadata on that manifest entry is only advisory and produces a warning.
+Basic validation parses this section but validates skip entries only in strict mode.
 
 ```bash
 node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --json
@@ -584,10 +586,9 @@ Strict validation gains these top-level fields:
   `missing` reasons. Evidence paths are emitted relative to the source root for
   deterministic JSON.
 
-Strict `summary` also gains `contractsEvaluated`, `contractsComplete`,
-`contractsSkippedUpstream`, `contractsSkippedExternal`, and
-`contractsSkippedLegacy` counts. `contractsSkippedUpstream` is the number of
-referenced upstream-managed skills excluded from Skillify-10 scoring.
+The `summary` object also includes `contractsEvaluated`, `contractsComplete`, `contractsSkippedUpstream`, `contractsSkippedExternal`, and `contractsSkippedLegacy` counts.
+These contract counters are `0` for basic validation.
+`contractsSkippedUpstream` is the number of referenced upstream-managed skills excluded from Skillify-10 scoring.
 `contractsSkippedExternal` counts referenced `external-managed` policy skips.
 `contractsSkippedLegacy` counts referenced `legacy-local` policy skips.
 Upstream lock findings are release-blocking errors.
@@ -597,6 +598,8 @@ Those error codes include `invalid_upstream_lock_json`,
 `invalid_upstream_package_version`, `invalid_upstream_package_name`,
 `invalid_upstream_identity`, `invalid_upstream_group`,
 `invalid_upstream_imported`, and `unreferenced_upstream_skill`.
+Skillify skip policy errors are also release-blocking in strict mode.
+Those error codes include `invalid_skillify_skip_skill_name`, `unreferenced_skillify_skip`, `invalid_skillify_skip_kind`, `invalid_skillify_skip_upstream`, `invalid_skillify_skip_upstream_overlap`, `missing_skillify_skip_metadata`, `missing_skillify_skip_review_after`, and `invalid_skillify_skip_review_after`.
 
 Strict mode distinguishes warnings from release-blocking failures:
 
@@ -608,9 +611,11 @@ Strict mode distinguishes warnings from release-blocking failures:
   becomes a `skillify_contract_warning`, which is reported but keeps `ok: true`.
 - An `external-managed` policy skip removes that skill from Skillify-10 scoring
   only after provenance metadata validates.
+  A missing `reviewAfter` is a warning, but an invalid date is an error.
 - A `legacy-local` policy skip also removes that skill from Skillify-10 scoring,
   but emits `legacy_skillify_skip` so old local debt remains visible until the
   review date.
+  Missing or invalid `reviewAfter` is an error for `legacy-local`.
 
 ```json
 {
