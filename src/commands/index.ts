@@ -177,7 +177,7 @@ function isKnownCommand(command: string): command is CommandName {
 function isValueArg(token: string): boolean {
   return token === "--source" || token === "--target" || token === "--target-skill" || token === "--output"
     || token === "--lock" || token === "--artifact" || token === "--mode" || token === "--receipt"
-    || token === "--codex-home" || token === "--codex-skills" || token === "--claude-skills";
+    || token === "--agents-skills" || token === "--codex-home" || token === "--codex-skills" || token === "--claude-skills";
 }
 
 function parseUpstreamAction(rest: string[], args: ParsedCommandArgs): string[] {
@@ -204,6 +204,8 @@ function valueFlagName(token: string): ValueFlagName {
   switch (token) {
     case "--target-skill":
       return "targetSkill";
+    case "--agents-skills":
+      return "agentsSkills";
     case "--codex-home":
       return "codexHome";
     case "--codex-skills":
@@ -240,6 +242,7 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
       return command === "apply";
     case "--receipt":
       return command === "rollback";
+    case "--agents-skills":
     case "--codex-home":
     case "--codex-skills":
     case "--claude-skills":

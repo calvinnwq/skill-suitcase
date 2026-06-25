@@ -209,6 +209,73 @@ test("--codex-home alone overrides codexHome and defaults skillsPath to <home>/s
   assert.equal(codexGlobal.skillsPath, path.join(codexHome, "skills"));
 });
 
+test("agents skills root is a writable manifest target with local override support", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-agents-source-"));
+  const fakeHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-agents-home-"));
+  const overrideRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-agents-override-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(fakeHome, { recursive: true, force: true }));
+  t.after(() => rm(overrideRoot, { recursive: true, force: true }));
+
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  agents-global:
+    skills:
+      - autoreview
+
+assignments:
+  agents:
+    suitcases:
+      - agents-global
+
+assignmentPaths:
+  agents:
+    kind: agents-skills-root
+    assignment: agents
+    path: ~/.agents/skills
+
+compatibility:
+  autoreview:
+    agents:
+      - agents
+    variant: canonical
+`
+  );
+
+  const expanded = await targets({
+    source,
+    targetOverrides: {
+      home: fakeHome
+    }
+  });
+  const agents = expanded.targets.find((entry) => entry.id === "agents");
+
+  assert.equal(expanded.ok, true);
+  assert.ok(agents);
+  assert.equal(agents.path, path.join(fakeHome, ".agents", "skills"));
+  assert.equal(agents.safety.classification, "missing");
+  assert.deepEqual(agents.platform, {
+    adapter: "agents",
+    installRoot: path.join(fakeHome, ".agents", "skills"),
+    compatibility: ["agents"],
+    metadata: {}
+  });
+
+  const overridden = await targets({
+    source,
+    targetOverrides: {
+      agentsSkills: overrideRoot
+    }
+  });
+  const overriddenAgents = overridden.targets.find((entry) => entry.id === "agents");
+
+  assert.ok(overriddenAgents);
+  assert.equal(overriddenAgents.path, overrideRoot);
+  assert.equal(overriddenAgents.exists.path, true);
+  assert.equal(overriddenAgents.safety.classification, "live-install-root");
+});
+
 test("reports malformed assignmentPaths as errors and classifies them as invalid", async () => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-invalid-"));
   const existingPath = path.join(source, "skills-root");

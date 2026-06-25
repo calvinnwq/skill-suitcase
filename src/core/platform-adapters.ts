@@ -1,11 +1,12 @@
 export type PlatformPathField = "path" | "home" | "codexHome" | "skillsPath";
 
-export type PlatformAdapterId = "openclaw" | "codex" | "claude" | "opencode" | "pi";
+export type PlatformAdapterId = "openclaw" | "codex" | "agents" | "claude" | "opencode" | "pi";
 
 export type PlatformAdapterKind =
   | "openclaw-skills-root"
   | "codex-home"
   | "nested-home-codex"
+  | "agents-skills-root"
   | "claude-skills-root"
   | "opencode-skills-root"
   | "pi-skills-root";
@@ -59,6 +60,14 @@ const PLATFORM_ADAPTERS: Record<PlatformAdapterKind, PlatformAdapter> = {
     metadata: {
       nestedHome: true
     }
+  },
+  "agents-skills-root": {
+    id: "agents",
+    kind: "agents-skills-root",
+    installRootField: "path",
+    requiredFields: ["path"],
+    compatibilityNames: ["agents"],
+    metadata: {}
   },
   "claude-skills-root": {
     id: "claude",

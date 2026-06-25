@@ -170,6 +170,26 @@ test("parseCommandArgs supports explicit reconcile dry-run and apply modes", () 
   });
 });
 
+test("parseCommandArgs supports the agents skills target override", () => {
+  assert.deepEqual(parseCommandArgs([
+    "status",
+    "--source",
+    fixtureSource,
+    "--target",
+    "agents",
+    "--agents-skills",
+    "/tmp/agents/skills",
+    "--json"
+  ]), {
+    command: "status",
+    source: fixtureSource,
+    target: "agents",
+    agentsSkills: "/tmp/agents/skills",
+    dryRun: false,
+    json: true
+  });
+});
+
 test("parseCommandArgs supports the repair dry-run mode", () => {
   assert.deepEqual(parseCommandArgs([
     "repair",

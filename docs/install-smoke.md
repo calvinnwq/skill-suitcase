@@ -93,19 +93,20 @@ For a Codex/Claude-only machine, smoke local target overrides and target-scoped
 status without requiring OpenClaw paths from the shared catalog to exist:
 
 ```bash
-node dist/src/cli.js targets --source /path/to/skills-catalog --codex-home ~/.codex --claude-skills ~/.claude/skills --json
+node dist/src/cli.js targets --source /path/to/skills-catalog --agents-skills ~/.agents/skills --codex-home ~/.codex --claude-skills ~/.claude/skills --json
+node dist/src/cli.js status --source /path/to/skills-catalog --target agents --agents-skills ~/.agents/skills --json
 node dist/src/cli.js status --source /path/to/skills-catalog --target codex --codex-home ~/.codex --json
 node dist/src/cli.js diff --source /path/to/skills-catalog --target codex --codex-home ~/.codex --json
 node dist/src/cli.js status --source /path/to/skills-catalog --target claude --claude-skills ~/.claude/skills --json
 node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --claude-skills ~/.claude/skills --json
 ```
 
-`--codex-home`, `--codex-skills`, and `--claude-skills` are local overrides for
-global target paths. They are intended for `targets`, `status`, `diff`, `pack`,
-`apply`, `track`, `reconcile`, `repair`, and `import-target`; `status --target`
-accepts either an assignment path id or an assignment name. Exact assignment
-path ids win, so `--target codex` selects the global Codex target when that id
-exists.
+`--agents-skills`, `--codex-home`, `--codex-skills`, and `--claude-skills` are
+local overrides for global target paths. They are intended for `targets`,
+`status`, `diff`, `pack`, `apply`, `track`, `reconcile`, `repair`, and
+`import-target`; `status --target` accepts either an assignment path id or an
+assignment name. Exact assignment path ids win, so `--target codex` selects the
+global Codex target when that id exists.
 
 For Codex or Claude paths that have source variants, `plan`, `diff`, `pack`,
 `apply`, `track`, `reconcile`, `repair`, `import-target`, receipts, and `status`

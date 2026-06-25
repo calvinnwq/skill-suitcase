@@ -7,6 +7,7 @@ export type Catalog = ReturnType<typeof parseSuitcaseManifest>;
 
 export type TargetOverrides = {
   home?: string;
+  agentsSkills?: string;
   codexHome?: string;
   codexSkills?: string;
   claudeSkills?: string;
@@ -72,6 +73,11 @@ function applyTargetOverrides(manifest: Catalog, overrides: TargetOverrides | un
     claudeGlobal.path = path.resolve(overrides.claudeSkills);
   }
 
+  const agentsGlobal = assignmentPaths["agents"];
+  if (agentsGlobal !== undefined && overrides.agentsSkills !== undefined) {
+    agentsGlobal.path = path.resolve(overrides.agentsSkills);
+  }
+
   return {
     ...manifest,
     assignmentPaths
@@ -79,7 +85,8 @@ function applyTargetOverrides(manifest: Catalog, overrides: TargetOverrides | un
 }
 
 function isEmptyTargetOverrides(overrides: TargetOverrides): boolean {
-  return overrides.codexHome === undefined &&
+  return overrides.agentsSkills === undefined &&
+    overrides.codexHome === undefined &&
     overrides.codexSkills === undefined &&
     overrides.claudeSkills === undefined &&
     overrides.home === undefined;

@@ -118,6 +118,81 @@ compatibility:
   assert.equal(result.assignments[0]?.installRoot, codexSkills);
 });
 
+test("status reports managed skills in the agents skills root", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-agents-source-"));
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-agents-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(installRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "autoreview");
+  const targetSkill = path.join(installRoot, "autoreview");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), [
+    "---",
+    "name: autoreview",
+    "version: 2026.06.25",
+    "---",
+    "",
+    "# Autoreview"
+  ].join("\n"));
+  await cp(sourceSkill, targetSkill, { recursive: true });
+  await writeReceipt({
+    installRoot,
+    sourceRoot,
+    skillName: "autoreview",
+    version: "2026.06.25",
+    sourceHash: await hashDirectory(sourceSkill),
+    installedFiles: await buildInstalledFiles(targetSkill)
+  });
+
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  agents-global:
+    skills:
+      - autoreview
+
+assignments:
+  agents:
+    suitcases:
+      - agents-global
+
+assignmentPaths:
+  agents:
+    kind: agents-skills-root
+    assignment: agents
+    path: ~/.agents/skills
+
+compatibility:
+  autoreview:
+    agents:
+      - agents
+    variant: canonical
+`);
+
+  const result = await status({
+    source: sourceRoot,
+    target: "agents",
+    targetOverrides: {
+      agentsSkills: installRoot
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.summary, {
+    current: 1,
+    behind: 0,
+    version: 0,
+    dirty: 0,
+    missing: 0,
+    unknown: 0,
+    blocked: 0
+  });
+  assert.equal(result.assignments.length, 1);
+  assert.equal(result.assignments[0]?.assignmentPath, "agents");
+  assert.equal(result.assignments[0]?.kind, "agents-skills-root");
+  assert.equal(result.assignments[0]?.installRoot, installRoot);
+  assert.equal(firstItem(result.statuses, "statuses").skill, "autoreview");
+});
+
 test("status attaches upstream lineage for upstream-managed skills", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-upstream-source-"));
   const installRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-status-upstream-target-"));
