@@ -82,6 +82,46 @@ test("upstream check rejects malformed imported lineage metadata", async (t) => 
   ]);
 });
 
+test("upstream supports pinned git declarations and import lineage", async (t) => {
+  const { source } = await createCatalog(t);
+  await writeGitUpstreamLock(source, null);
+  await commitCatalog(source);
+  const fetcher: UpstreamFetcher = async ({ workspace, declaration }) => {
+    assert.equal(declaration.provider, "git");
+    assert.equal(declaration.packageVersion, "v3.8.1");
+    assert.equal(declaration.upstream.repo, "mvanhorn/last30days-skill");
+    assert.equal(declaration.upstream.skill, ".");
+    return {
+      ok: true,
+      skillPath: await createFetchedSkill(t, workspace)
+    };
+  };
+
+  const check = await checkUpstream(source);
+  assert.equal(check.ok, true);
+  assert.equal(check.declarations[0]?.provider, "git");
+  assert.deepEqual(check.declarations[0]?.lineage.upstream, {
+    provider: "git",
+    packageName: "git",
+    packageVersion: "v3.8.1",
+    repo: "mvanhorn/last30days-skill",
+    skill: ".",
+    group: "last30days"
+  });
+
+  const result = await importUpstreamSkill(source, "hyperframes", {
+    fetcher,
+    now: () => new Date("2026-06-25T08:30:00.000Z")
+  });
+  assert.equal(result.ok, true);
+
+  const lock = JSON.parse(await readFile(path.join(source, ".skill-suitcase", "upstream-lock.json"), "utf8")) as {
+    skills: Record<string, { imported?: { packageVersion?: string; source?: string } }>;
+  };
+  assert.equal(lock.skills.hyperframes?.imported?.packageVersion, "v3.8.1");
+  assert.equal(lock.skills.hyperframes?.imported?.source, "git:mvanhorn/last30days-skill:v3.8.1:.");
+});
+
 test("upstream fetch dry-run compares fetched source without catalog or target writes", async (t) => {
   const { source, targetRoot } = await createCatalog(t);
   await writeUpstreamLock(source, null);
@@ -348,6 +388,24 @@ test("upstream import refuses unpinned package versions", async (t) => {
   assert.equal(await readFile(path.join(targetRoot, "sentinel.txt"), "utf8"), "untouched\n");
 });
 
+test("upstream import refuses unpinned git refs", async (t) => {
+  const { source, targetRoot } = await createCatalog(t);
+  await writeGitUpstreamLock(source, null, "main");
+  await commitCatalog(source);
+  let fetched = false;
+  const fetcher: UpstreamFetcher = async ({ workspace }) => {
+    fetched = true;
+    return { ok: true, skillPath: await createFetchedSkill(t, workspace) };
+  };
+
+  const result = await importUpstreamSkill(source, "hyperframes", { fetcher });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "invalid_upstream_package_version");
+  assert.equal(fetched, false);
+  assert.equal(await readFile(path.join(targetRoot, "sentinel.txt"), "utf8"), "untouched\n");
+});
+
 async function createCatalog(t: TestContext): Promise<{ source: string; targetRoot: string }> {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upstream-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-upstream-target-"));
@@ -398,6 +456,38 @@ async function writeUpstreamLock(source: string, importedHash: string | null, pa
       packageVersion,
       at: "2026-06-23T08:30:00.000Z",
       source: "skills-sh:heygen-com/hyperframes:hyperframes"
+    }
+  };
+  await writeFile(
+    path.join(source, ".skill-suitcase", "upstream-lock.json"),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.upstream-lock.v0",
+      skills: {
+        hyperframes: {
+          ...declaration,
+          ...imported
+        }
+      }
+    }, null, 2)}\n`
+  );
+}
+
+async function writeGitUpstreamLock(source: string, importedHash: string | null, packageVersion = "v3.8.1"): Promise<void> {
+  const declaration = {
+    provider: "git",
+    packageVersion,
+    upstream: {
+      repo: "mvanhorn/last30days-skill",
+      skill: "."
+    },
+    group: "last30days"
+  };
+  const imported = importedHash === null ? {} : {
+    imported: {
+      sha256: importedHash,
+      packageVersion,
+      at: "2026-06-25T08:30:00.000Z",
+      source: `git:mvanhorn/last30days-skill:${packageVersion}:.`
     }
   };
   await writeFile(

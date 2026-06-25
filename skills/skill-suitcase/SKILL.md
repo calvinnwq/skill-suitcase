@@ -89,7 +89,8 @@ If a selected upstream-managed skill needs source refresh, fetch it only through
 ## Upstream Source Refresh
 
 Use this lane only when the task explicitly asks to refresh catalog source from
-an upstream provider such as `skills.sh`. It never writes live agent homes.
+an upstream provider such as `skills.sh` or a pinned GitHub git source. It never
+writes live agent homes.
 
 ```bash
 "$CLI" upstream check --source "$SRC" --json
@@ -99,8 +100,11 @@ an upstream provider such as `skills.sh`. It never writes live agent homes.
 ```
 
 The declaration file is `.skill-suitcase/upstream-lock.json` with schema
-`calvinnwq.skills.upstream-lock.v0`. `upstream fetch` uses an isolated temp
-workspace/home and reports file-level catalog diffs.
+`calvinnwq.skills.upstream-lock.v0`. `skills-sh` entries pin an exact package
+version. `git` entries pin `packageVersion` to a version tag such as `v3.8.1`
+or a full commit SHA and use a GitHub owner/repo plus repo-relative skill path.
+`upstream fetch` uses an isolated temp workspace/home and reports file-level
+catalog diffs.
 `upstream import` refuses malformed upstream lock metadata before fetching, then writes only the selected catalog skill directory plus the upstream lock metadata on success.
 It does not auto-commit and does not install, receipt, or sync targets.
 Strict validation checks the upstream declaration and `SKILL.md` presence for
@@ -127,9 +131,10 @@ repo/skill, imported hash, current catalog hash and drift, target status,
 receipt hash, and receipt commit without stitching together multiple reports.
 Target-scoped status should load lineage for reported skills only and should not hash unrelated upstream-managed catalog skills.
 
-Trust boundary: trust only the exact pinned upstream package in the isolated
-temp workspace/home for catalog source refresh. Do not trust upstream tooling to
-choose target roots, write receipts, prove rollback, or mutate live agent homes.
+Trust boundary: trust only the exact pinned upstream package or git ref in the
+isolated temp workspace/home for catalog source refresh. Do not trust upstream
+tooling to choose target roots, write receipts, prove rollback, or mutate live
+agent homes.
 
 ## Read-Only Audit
 

@@ -220,7 +220,8 @@ An upstream-managed skill is still a catalog-owned skill. The catalog stores the
 reviewed source files, target assignments, variants, and install policy. The
 upstream provider only describes where a fresh source copy can be fetched from.
 
-The first supported upstream lane is for `skills.sh` / `npx skills`.
+The upstream lane supports `skills.sh` / `npx skills` packages and pinned
+GitHub git sources.
 Its v1 boundary is source refresh only:
 
 ```txt
@@ -240,10 +241,13 @@ remain the target-side record of what Skill Suitcase installed.
 
 The v1 declaration file is `.skill-suitcase/upstream-lock.json`. It uses schema
 `calvinnwq.skills.upstream-lock.v0` and declares selected catalog skills under a
-`skills` object. Each `skills-sh` declaration pins `packageVersion`, records the
-upstream repo and skill name, can group related imports such as `hyperframes`,
-and stores last-imported provenance under `imported.sha256`,
-`imported.packageVersion`, `imported.at`, and `imported.source`.
+`skills` object. Each `skills-sh` declaration pins an exact package
+`packageVersion`, records the upstream repo and skill name, can group related
+imports such as `hyperframes`, and stores last-imported provenance under
+`imported.sha256`, `imported.packageVersion`, `imported.at`, and
+`imported.source`. Each `git` declaration pins `packageVersion` to a version tag
+such as `v3.8.1` or a full commit SHA, records a GitHub repo and skill path, and
+uses the same provenance block.
 This file is catalog source metadata only; it does not grant target write
 authority.
 
@@ -256,8 +260,8 @@ create and maintain ourselves.
 Source refresh commands should be explicit and staged:
 
 1. `upstream check --source <repo> --json` reports declared upstream-managed
-   skills, pinned package metadata, lineage metadata, catalog hashes, and local
-   package-runner availability without writing files
+   skills, pinned package/ref metadata, lineage metadata, catalog hashes, and
+   local provider-runner availability without writing files
 2. `upstream fetch --source <repo> --skill <name> --dry-run --json` runs the
    pinned fetch in an isolated temp workspace/home and reports a file-level
    catalog diff
