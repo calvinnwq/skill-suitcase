@@ -128,20 +128,22 @@ never creates install roots, runtime homes, receipts, or bundle artifacts.
 Directories under `skills/` that contain `.support-directory` are treated as
 support data and are not counted as installable skills.
 
-Targets currently exercised against fixture #1:
+Supported target adapters currently include:
 
 - `openclaw`
 - `codex`
 - `openclaw-codex`
+- `agents`
 - `claude`
 - `opencode`
 - `pi`
 
 Platform adapters are explicit. `openclaw-skills-root` uses the declared `path`
 as the workspace skill root. `codex-home` installs into `skillsPath` without
-assuming a universal Codex home. `claude-skills-root` uses the declared `path`.
-The `nested-home-codex` adapter is still supported for legacy nested homes, but
-it is not part of the current default target set.
+assuming a universal Codex home. `agents-skills-root` uses the declared `path`
+for generic `$HOME/.agents/skills` installs. `claude-skills-root` uses the
+declared `path`. The `nested-home-codex` adapter is still supported for legacy
+nested homes, but it is not part of the current default target set.
 Provider-backed `opencode-skills-root` and `pi-skills-root` entries are compatibility/reference targets with read-only metadata, not Suitcase-owned install roots.
 
 Smoke-test discovery with:
@@ -155,14 +157,16 @@ the local runtime homes, pass local target overrides instead of editing the
 catalog:
 
 ```bash
-node dist/src/cli.js targets --source /path/to/skills-catalog --codex-home ~/.codex --claude-skills ~/.claude/skills --json
+node dist/src/cli.js targets --source /path/to/skills-catalog --agents-skills ~/.agents/skills --codex-home ~/.codex --claude-skills ~/.claude/skills --json
 node dist/src/cli.js status --source /path/to/skills-catalog --target codex --codex-home ~/.codex --json
+node dist/src/cli.js status --source /path/to/skills-catalog --target agents --agents-skills ~/.agents/skills --json
 node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --claude-skills ~/.claude/skills --json
 ```
 
 `--codex-home <dir>` overrides the `codex` `codexHome` and defaults its
 `skillsPath` to `<dir>/skills`. `--codex-skills <dir>` can override that skills
-path directly. `--claude-skills <dir>` overrides the `claude` skills root.
+path directly. `--agents-skills <dir>` overrides the generic `agents` skills
+root. `--claude-skills <dir>` overrides the `claude` skills root.
 These flags work with `targets`, `status`, `diff`, `pack`, `apply`, `track`,
 `reconcile`, `repair`, and `import-target`. Use `status --target <target>` with
 an assignment path id or assignment name. If an exact assignment path id exists,

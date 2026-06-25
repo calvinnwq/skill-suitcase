@@ -4,6 +4,10 @@ import type { ParsedCommandArgs } from "./types.js";
 export function targetOverridesFromArgs(args: ParsedCommandArgs): TargetOverrides | undefined {
   const overrides: TargetOverrides = {};
 
+  if (args.agentsSkills !== undefined) {
+    overrides.agentsSkills = args.agentsSkills;
+  }
+
   if (args.codexHome !== undefined) {
     overrides.codexHome = args.codexHome;
   }
@@ -16,7 +20,8 @@ export function targetOverridesFromArgs(args: ParsedCommandArgs): TargetOverride
     overrides.claudeSkills = args.claudeSkills;
   }
 
-  return overrides.codexHome === undefined &&
+  return overrides.agentsSkills === undefined &&
+    overrides.codexHome === undefined &&
     overrides.codexSkills === undefined &&
     overrides.claudeSkills === undefined
       ? undefined

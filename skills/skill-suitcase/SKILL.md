@@ -163,6 +163,7 @@ same model; do not rewrite the workflow around provider-specific prose.
 | OpenClaw workspace | `openclaw` | `targets --json` | usually none | live only after approval |
 | Global Codex | `codex` | `targets --json` | `--codex-home` or `--codex-skills` | live only after approval |
 | OpenClaw Codex home | `openclaw-codex` | `targets --json` | target-specific Codex home if needed | live only after approval |
+| Generic agent skills root | `agents` | `targets --json` | `--agents-skills` | live only after approval |
 | Claude skills root | `claude` | `targets --json` | `--claude-skills` | live only after approval |
 | Provider-managed skills | provider-specific | provider/plugin docs | none in Suitcase | read-only or skip; `pack`/mutation commands refuse even custom manifest assignment paths |
 | Future provider | manifest target id | `targets --json` | provider adapter override if supported | read-only until proven |
@@ -180,6 +181,9 @@ Use local overrides on machines whose homes differ from the catalog defaults:
 ```bash
 "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 "$CLI" diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+
+"$CLI" status --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
+"$CLI" diff --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
 
 "$CLI" status --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
 "$CLI" diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json

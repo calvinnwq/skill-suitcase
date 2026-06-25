@@ -128,7 +128,7 @@ function resolveManifestTargetRegistryEntries(
     }
 
     const provider = resolveTargetRegistryEntry(targetId, targetOverrides);
-    entries.push(manifestEntryToTarget(targetId, assignmentPath, provider));
+    entries.push(manifestEntryToTarget(targetId, assignmentPath, provider, targetOverrides));
   }
 
   return entries;
@@ -162,17 +162,18 @@ function providerEntryToTarget(
 function manifestEntryToTarget(
   targetId: string,
   assignmentPath: Record<string, unknown>,
-  provider: TargetRegistryEntry | null
+  provider: TargetRegistryEntry | null,
+  targetOverrides?: TargetOverrides | undefined
 ): TargetRegistryEntry {
   const normalized = normalizeAssignmentPath(assignmentPath);
   const fallbackAssignment = provider?.assignment ?? targetId;
   const assignment = normalized.assignment ?? fallbackAssignment;
   const kind = normalized.kind ?? provider?.kind ?? "";
   const adapter = resolvePlatformAdapter(kind);
-  const nextPath = normalized.path ?? provider?.path ?? null;
-  const nextHome = normalized.home ?? provider?.home ?? null;
-  const nextCodexHome = normalized.codexHome ?? provider?.codexHome ?? null;
-  const nextSkillsPath = normalized.skillsPath ?? provider?.skillsPath ?? null;
+  const nextPath = expandOptionalHome(normalized.path, targetOverrides?.home) ?? provider?.path ?? null;
+  const nextHome = expandOptionalHome(normalized.home, targetOverrides?.home) ?? provider?.home ?? null;
+  const nextCodexHome = expandOptionalHome(normalized.codexHome, targetOverrides?.home) ?? provider?.codexHome ?? null;
+  const nextSkillsPath = expandOptionalHome(normalized.skillsPath, targetOverrides?.home) ?? provider?.skillsPath ?? null;
   const adapterProvider = adapter?.metadata.skillsShCompatibility ? SKILLS_SH_PROVIDER : null;
 
   return {
@@ -248,6 +249,13 @@ function expandHome(value: string, homeOverride: string | undefined): string {
     return path.join(home, value.slice(2));
   }
   return path.resolve(value);
+}
+
+function expandOptionalHome(value: string | undefined, homeOverride: string | undefined): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  return expandHome(value, homeOverride);
 }
 
 function normalizeValue(value: unknown): string | null {

@@ -45,6 +45,7 @@ export function usageText(): string {
     "  upstream import        Copy fetched source into the catalog only; no target sync or commit",
     "",
     "Target path overrides:",
+    "  --agents-skills <dir>  Override agents skills root",
     "  --codex-home <dir>     Override codex codexHome; skillsPath defaults to <dir>/skills",
     "  --codex-skills <dir>   Override codex skillsPath",
     "  --claude-skills <dir>  Override claude path"

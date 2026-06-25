@@ -207,8 +207,8 @@ without explicit approval for the target, catalog source, and mode.
 Portable support:
 
 - catalog layouts with `skill-suitcase.yaml`
-- target overrides such as `--codex-home`, `--codex-skills`, and
-  `--claude-skills`
+- target overrides such as `--agents-skills`, `--codex-home`,
+  `--codex-skills`, and `--claude-skills`
 - read-only planning, diffing, status, target discovery, validation, and import
 - read-only upstream declaration checks and sandboxed upstream fetch diffs
 - staging bundles and plan locks

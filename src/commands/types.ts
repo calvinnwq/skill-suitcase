@@ -47,6 +47,7 @@ export type ParsedCommandArgs = {
   artifact?: string;
   mode?: string;
   receipt?: string;
+  agentsSkills?: string;
   codexHome?: string;
   codexSkills?: string;
   claudeSkills?: string;
@@ -62,6 +63,7 @@ export type ValueFlagName =
   | "artifact"
   | "mode"
   | "receipt"
+  | "agentsSkills"
   | "codexHome"
   | "codexSkills"
   | "claudeSkills";
