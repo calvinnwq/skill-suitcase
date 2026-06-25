@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.11.0...v0.12.0) (2026-06-25)
+
+
+### Features
+
+* **targets:** add generic agents skills root ([#62](https://github.com/calvinnwq/skill-suitcase/issues/62)) ([197e862](https://github.com/calvinnwq/skill-suitcase/commit/197e8622e4d96ff9305be46daa6499a7d852eaf4))
+
+
+### Bug Fixes
+
+* **apply:** preserve executable file modes ([0adcf77](https://github.com/calvinnwq/skill-suitcase/commit/0adcf775e3e2c32fa8f6ede1157c8484d3cf69c7))
+
 ## [0.11.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.10.1...v0.11.0) (2026-06-25)
 
 
