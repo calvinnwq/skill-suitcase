@@ -511,3 +511,176 @@ assignmentPaths:
   assert.ok(result.findings.some((finding) => finding.path?.startsWith("skills.local-broken.contract.")));
   assert.ok(!result.findings.some((finding) => finding.path?.startsWith("skills.upstream-video.contract.")));
 });
+
+test("strict validate skips external-managed skills with explicit provenance", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(root, "external-video", "# External Video\n\nExternal source shape.\n");
+  await writeSkill(root, "local-broken", "# Local Broken\n\nNo frontmatter.\n");
+  await writeFile(
+    path.join(root, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - external-video
+      - local-broken
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    assignment: openclaw
+
+validationPolicy:
+  skillify:
+    skip:
+      external-video:
+        kind: external-managed
+        source: agents-global
+        owner: upstream
+        reason: Maintained in an external video workflow skill source.
+        reviewAfter: 2026-09-01
+`
+  );
+
+  const result = await validate({ source: root, strict: true });
+
+  assert.equal(result.strict, true);
+  assert.equal(result.summary.referencedSkills, 2);
+  assert.equal(result.summary.contractsEvaluated, 1);
+  assert.equal(result.summary.contractsSkippedExternal, 1);
+  assert.equal(result.summary.contractsSkippedLegacy, 0);
+  assert.deepEqual(result.contracts.map((contract) => contract.skill), ["local-broken"]);
+  assert.ok(result.findings.some((finding) => finding.path?.startsWith("skills.local-broken.contract.")));
+  assert.ok(!result.findings.some((finding) => finding.path?.startsWith("skills.external-video.contract.")));
+  assert.ok(!result.findings.some((finding) => finding.path?.startsWith("validationPolicy.skillify.skip.external-video")));
+});
+
+test("strict validate reports malformed Skillify skip policy entries", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(root, "external-video", "# External Video\n\nExternal source shape.\n");
+  await writeFile(
+    path.join(root, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - external-video
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    assignment: openclaw
+
+validationPolicy:
+  skillify:
+    skip:
+      external-video:
+        kind: external-managed
+        source: agents-global
+      stale-skill:
+        kind: external-managed
+        source: elsewhere
+        owner: upstream
+        reason: Not referenced.
+      bad-kind:
+        kind: maybe
+        source: elsewhere
+        owner: upstream
+        reason: Invalid kind.
+`
+  );
+
+  const result = await validate({ source: root, strict: true });
+  const codes = result.findings.map((finding) => finding.code);
+
+  assert.equal(result.ok, false);
+  assert.ok(codes.includes("missing_skillify_skip_metadata"));
+  assert.ok(codes.includes("unreferenced_skillify_skip"));
+  assert.ok(codes.includes("invalid_skillify_skip_kind"));
+});
+
+test("strict validate skips legacy-local skills but leaves a review warning", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(root, "legacy-local", "# Legacy Local\n\nOld local source shape.\n");
+  await writeFile(
+    path.join(root, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - legacy-local
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    assignment: openclaw
+
+validationPolicy:
+  skillify:
+    skip:
+      legacy-local:
+        kind: legacy-local
+        source: local-catalog
+        owner: skill-maintainers
+        reason: Temporary exemption while old local skills are migrated.
+        reviewAfter: 2026-09-01
+`
+  );
+
+  const result = await validate({ source: root, strict: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.contractsEvaluated, 0);
+  assert.equal(result.summary.contractsSkippedLegacy, 1);
+  assert.deepEqual(result.contracts, []);
+  assert.ok(result.findings.some((finding) => finding.code === "legacy_skillify_skip"));
+  assert.ok(!result.findings.some((finding) => finding.path?.startsWith("skills.legacy-local.contract.")));
+});
+
+test("strict validate requires review dates for legacy-local skips", async () => {
+  const root = await makeCatalogRoot();
+  await writeSkill(root, "legacy-local", "# Legacy Local\n\nOld local source shape.\n");
+  await writeFile(
+    path.join(root, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - legacy-local
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    assignment: openclaw
+
+validationPolicy:
+  skillify:
+    skip:
+      legacy-local:
+        kind: legacy-local
+        source: local-catalog
+        owner: skill-maintainers
+        reason: Temporary exemption while old local skills are migrated.
+`
+  );
+
+  const result = await validate({ source: root, strict: true });
+  const codes = result.findings.map((finding) => finding.code);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.contractsSkippedLegacy, 1);
+  assert.ok(codes.includes("missing_skillify_skip_review_after"));
+  assert.ok(codes.includes("legacy_skillify_skip"));
+});

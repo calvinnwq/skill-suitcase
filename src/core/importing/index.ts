@@ -816,6 +816,7 @@ function emptyManifest(): Catalog {
     assignmentPaths: {},
     groups: {},
     sourcePolicy: {},
+    validationPolicy: { skillify: { skip: {} } },
     compatibility: {},
     variants: {}
   };
