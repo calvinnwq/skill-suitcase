@@ -531,6 +531,74 @@ sourcePolicy:
   await assert.rejects(() => lstat(path.join(targetRoot, "office-hours", ".cache", "generated.js")));
 });
 
+test("apply refuses to refresh receipts while target contains sourcePolicy excluded files", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-excluded-stale-target-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-excluded-stale-target-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `${await readFile(path.join(sourceRoot, "skill-suitcase.yaml"), "utf8")}
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+
+  const targetSkill = path.join(targetRoot, "office-hours");
+  await mkdir(path.join(targetSkill, ".cache"), { recursive: true });
+  await writeFile(path.join(targetSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(targetSkill, "runtime.js"), "console.log(\"current\");\n");
+  await writeFile(path.join(targetSkill, ".cache", "generated.js"), "console.log('stale');\n");
+
+  await upsertAndWriteReceipt({
+    installRoot: targetRoot,
+    skillName: "office-hours",
+    installRecord: {
+      skill: "office-hours",
+      agent: "openclaw",
+      target: "openclaw",
+      mode: "copy",
+      source: {
+        path: sourceSkill
+      },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      version: "2026.06.11",
+      sourceHash: await hashDirectory(targetSkill),
+      installedFiles: await buildInstalledFiles(targetSkill)
+    }
+  });
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-excluded-stale-target-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "source_policy_excluded_target"), true);
+  assert.equal(await readFile(path.join(targetSkill, ".cache", "generated.js"), "utf8"), "console.log('stale');\n");
+});
+
 test("apply refuses artifact installs when selected source has untracked files", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-untracked-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-untracked-target-"));
@@ -3734,6 +3802,52 @@ sourcePolicy:
   git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md");
 
   const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-source-policy-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({
+    source: sourceRoot,
+    target: "openclaw",
+    lock: lockPath,
+    mode: "symlink"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "symlink_source_policy_exclude"), true);
+  await assert.rejects(lstat(path.join(targetRoot, "office-hours")));
+});
+
+test("apply --mode symlink refuses sourcePolicy exclude patterns without current matches", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-future-policy-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-future-policy-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `${await readFile(path.join(sourceRoot, "skill-suitcase.yaml"), "utf8")}
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+`
+  );
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"current\");\n");
+  git(sourceRoot, "init");
+  git(sourceRoot, "add", "skill-suitcase.yaml", "skills/office-hours/SKILL.md", "skills/office-hours/runtime.js");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-symlink-future-policy-lock-")), "plan-lock.json");
   t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
   await writeFile(
     lockPath,

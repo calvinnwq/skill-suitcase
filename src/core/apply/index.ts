@@ -22,7 +22,11 @@ import {
 import { readSkillVersion } from "../skill-metadata.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
 import { status } from "../status/index.js";
-import { collectSourcePolicyExcludedPaths, type SourcePolicy } from "../source-policy.js";
+import {
+  collectSourcePolicyExcludedPaths,
+  sourcePolicyHasExcludePatterns,
+  type SourcePolicy
+} from "../source-policy.js";
 
 type ApplyInput = {
   source: string;
@@ -344,6 +348,16 @@ export async function apply({
       code: "unmanaged_target",
       message: "target has no managed status entries"
     });
+  }
+
+  if (installMode === "copy") {
+    preApplyErrors.push(
+      ...(await collectExcludedTargetPolicyFindings({
+        plannedSkills: diffResult.planned,
+        installRoot,
+        sourcePolicy: manifest.sourcePolicy
+      }))
+    );
   }
 
   for (const targetStatus of targetStatuses) {
@@ -685,6 +699,46 @@ function normalizeInstallMode(mode: string | undefined): ApplyInstallMode | null
   return null;
 }
 
+async function collectExcludedTargetPolicyFindings({
+  plannedSkills,
+  installRoot,
+  sourcePolicy
+}: {
+  plannedSkills: DiffForApply["planned"];
+  installRoot: string;
+  sourcePolicy: SourcePolicy | undefined;
+}): Promise<ApplyFinding[]> {
+  if (!sourcePolicyHasExcludePatterns(sourcePolicy)) {
+    return [];
+  }
+
+  const errors: ApplyFinding[] = [];
+  for (const planned of plannedSkills) {
+    const targetPath = path.join(installRoot, planned.skill);
+    let info;
+    try {
+      info = await lstat(targetPath);
+    } catch {
+      continue;
+    }
+    if (!info.isDirectory()) {
+      continue;
+    }
+
+    const excludedPaths = await collectSourcePolicyExcludedPaths(targetPath, sourcePolicy);
+    if (excludedPaths.length === 0) {
+      continue;
+    }
+
+    errors.push({
+      code: "source_policy_excluded_target",
+      message: `Refusing to apply ${planned.skill}: target contains source policy excluded paths (${excludedPaths.join(", ")}).`
+    });
+  }
+
+  return errors;
+}
+
 type SymlinkApplyPlanItem = {
   skill: string;
   sourcePath: string;
@@ -768,11 +822,14 @@ async function applySymlinkInstalls({
       continue;
     }
 
-    const excludedPaths = await collectSourcePolicyExcludedPaths(sourcePath, sourcePolicy);
-    if (excludedPaths.length > 0) {
+    if (sourcePolicyHasExcludePatterns(sourcePolicy)) {
+      const excludedPaths = await collectSourcePolicyExcludedPaths(sourcePath, sourcePolicy);
+      const detail = excludedPaths.length > 0
+        ? `excludes paths (${excludedPaths.join(", ")})`
+        : "defines exclude patterns";
       errors.push({
         code: "symlink_source_policy_exclude",
-        message: `Refusing to symlink ${planned.skill}: source policy excludes paths (${excludedPaths.join(", ")}), which symlink mode would expose.`
+        message: `Refusing to symlink ${planned.skill}: source policy ${detail}, which symlink mode would expose.`
       });
       continue;
     }

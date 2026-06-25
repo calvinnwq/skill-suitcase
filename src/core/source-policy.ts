@@ -69,6 +69,10 @@ export function sourcePolicyPrunesDirectory(relativePath: string, policy: Source
   });
 }
 
+export function sourcePolicyHasExcludePatterns(policy: SourcePolicy | undefined): boolean {
+  return normalizePatterns(policy?.exclude).length > 0;
+}
+
 export async function collectSourcePolicyDeniedPaths(root: string, policy: SourcePolicy | undefined): Promise<string[]> {
   const deniedPaths: string[] = [];
   await collectPolicyPaths({
