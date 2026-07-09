@@ -241,7 +241,7 @@ pnpm build
 export SRC="$HOME/repos/skills"
 export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
 
-mkdir -p "$HOME/.codex/skills" "$HOME/.claude/skills" "$HOME/.grok/skills"
+mkdir -p "$HOME/.agents/skills" "$HOME/.codex/skills" "$HOME/.claude/skills" "$HOME/.grok/skills"
 
 node "$CLI" import --source "$SRC" --json
 node "$CLI" validate --source "$SRC" --strict --json
