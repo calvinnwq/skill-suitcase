@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.14.0...v0.15.0) (2026-07-09)
+
+
+### Features
+
+* add Grok target overrides ([#69](https://github.com/calvinnwq/skill-suitcase/issues/69)) ([fe82e0d](https://github.com/calvinnwq/skill-suitcase/commit/fe82e0d39fd038cb5857aed6719d01480b52777a))
+
 ## [0.14.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.13.0...v0.14.0) (2026-06-25)
 
 
