@@ -177,7 +177,8 @@ function isKnownCommand(command: string): command is CommandName {
 function isValueArg(token: string): boolean {
   return token === "--source" || token === "--target" || token === "--target-skill" || token === "--output"
     || token === "--lock" || token === "--artifact" || token === "--mode" || token === "--receipt"
-    || token === "--agents-skills" || token === "--codex-home" || token === "--codex-skills" || token === "--claude-skills";
+    || token === "--codex-home" || token === "--codex-skills" || token === "--claude-skills"
+    || token === "--agents-skills" || token === "--grok-skills";
 }
 
 function parseUpstreamAction(rest: string[], args: ParsedCommandArgs): string[] {
@@ -212,6 +213,8 @@ function valueFlagName(token: string): ValueFlagName {
       return "codexSkills";
     case "--claude-skills":
       return "claudeSkills";
+    case "--grok-skills":
+      return "grokSkills";
     default:
       return token.slice(2) as ValueFlagName;
   }
@@ -246,6 +249,7 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--codex-home":
     case "--codex-skills":
     case "--claude-skills":
+    case "--grok-skills":
       return command === "diff" || command === "pack" || command === "targets" || command === "status"
         || command === "apply" || command === "track" || command === "reconcile" || command === "repair"
         || command === "import-target";

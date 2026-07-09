@@ -51,6 +51,8 @@ export type ParsedCommandArgs = {
   codexHome?: string;
   codexSkills?: string;
   claudeSkills?: string;
+  agentsSkills?: string;
+  grokSkills?: string;
   skill?: string[];
 };
 
@@ -66,7 +68,9 @@ export type ValueFlagName =
   | "agentsSkills"
   | "codexHome"
   | "codexSkills"
-  | "claudeSkills";
+  | "claudeSkills"
+  | "agentsSkills"
+  | "grokSkills";
 
 export type CommandJsonResult =
   | Awaited<ReturnType<typeof plan>>

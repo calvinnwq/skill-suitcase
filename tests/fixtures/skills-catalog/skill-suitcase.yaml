@@ -22,6 +22,12 @@ assignments:
   claude:
     suitcases:
       - core
+  agents:
+    suitcases:
+      - core
+  grok:
+    suitcases:
+      - core
 
 assignmentPaths:
   openclaw:
@@ -45,6 +51,16 @@ assignmentPaths:
     kind: claude-skills-root
     path: /tmp/claude/skills
     assignment: claude
+
+  agents:
+    kind: agents-skills-root
+    path: /tmp/agents/skills
+    assignment: agents
+
+  grok:
+    kind: grok-skills-root
+    path: /tmp/grok/skills
+    assignment: grok
 
 groups:
   portable-core:
@@ -92,6 +108,8 @@ compatibility:
       - openclaw
       - codex
       - claude
+      - agents
+      - grok
     variant: canonical
     evidence:
       - docs/install-smoke.md

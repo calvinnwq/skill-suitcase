@@ -43,6 +43,42 @@ test("parseCommandArgs preserves current flag parsing and unknown argument error
     json: true
   });
 
+  assert.deepEqual(parseCommandArgs([
+    "status",
+    "--source",
+    fixtureSource,
+    "--target",
+    "agents",
+    "--agents-skills",
+    "/tmp/agents/skills",
+    "--json"
+  ]), {
+    command: "status",
+    source: fixtureSource,
+    target: "agents",
+    agentsSkills: "/tmp/agents/skills",
+    dryRun: false,
+    json: true
+  });
+
+  assert.deepEqual(parseCommandArgs([
+    "status",
+    "--source",
+    fixtureSource,
+    "--target",
+    "grok",
+    "--grok-skills",
+    "/tmp/grok/skills",
+    "--json"
+  ]), {
+    command: "status",
+    source: fixtureSource,
+    target: "grok",
+    grokSkills: "/tmp/grok/skills",
+    dryRun: false,
+    json: true
+  });
+
   assert.throws(
     () => parseCommandArgs(["plan", "--source", fixtureSource, "--target", "openclaw", "--nope"]),
     /Unknown argument: --nope/

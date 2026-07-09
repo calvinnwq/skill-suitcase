@@ -178,7 +178,7 @@ for catalog source refresh.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.
 
-Inspect local Codex and Claude targets with overrides:
+Inspect local Codex, Claude, and Grok targets with overrides:
 
 ```bash
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
@@ -186,6 +186,12 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
 
 skill-suitcase status --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
 skill-suitcase diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
+
+skill-suitcase status --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
+skill-suitcase diff --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
+
+skill-suitcase status --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json
+skill-suitcase diff --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json
 ```
 
 Use `node "$CLI"` instead of `skill-suitcase` in those commands when operating

@@ -20,10 +20,15 @@ export function targetOverridesFromArgs(args: ParsedCommandArgs): TargetOverride
     overrides.claudeSkills = args.claudeSkills;
   }
 
-  return overrides.agentsSkills === undefined &&
-    overrides.codexHome === undefined &&
+  if (args.grokSkills !== undefined) {
+    overrides.grokSkills = args.grokSkills;
+  }
+
+  return overrides.codexHome === undefined &&
     overrides.codexSkills === undefined &&
-    overrides.claudeSkills === undefined
+    overrides.claudeSkills === undefined &&
+    overrides.agentsSkills === undefined &&
+    overrides.grokSkills === undefined
       ? undefined
       : overrides;
 }

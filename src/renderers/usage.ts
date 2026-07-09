@@ -48,6 +48,8 @@ export function usageText(): string {
     "  --agents-skills <dir>  Override agents skills root",
     "  --codex-home <dir>     Override codex codexHome; skillsPath defaults to <dir>/skills",
     "  --codex-skills <dir>   Override codex skillsPath",
-    "  --claude-skills <dir>  Override claude path"
+    "  --claude-skills <dir>  Override claude path",
+    "  --agents-skills <dir>  Override shared agents skills path",
+    "  --grok-skills <dir>    Override grok path"
   ].join("\n");
 }

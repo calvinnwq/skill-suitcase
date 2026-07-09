@@ -12,10 +12,12 @@ test("lists all assignment paths with stability fields from the fixture catalog"
   const targetIds = result.targets.map((entry) => entry.id);
 
   assert.equal(result.ok, true);
-  assert.equal(result.targets.length, 6);
+  assert.equal(result.targets.length, 8);
   assert.deepEqual(targetIds.sort(), [
+    "agents",
     "claude",
     "codex",
+    "grok",
     "openclaw",
     "openclaw-codex",
     "opencode",
@@ -48,6 +50,32 @@ test("lists all assignment paths with stability fields from the fixture catalog"
     metadata: {
       workspaceSkillRoot: true
     }
+  });
+
+  const agents = result.targets.find((entry) => entry.id === "agents");
+  assert.ok(agents);
+  assert.equal(agents.assignment, "agents");
+  assert.equal(agents.kind, "agents-skills-root");
+  assert.equal(agents.path, "/tmp/agents/skills");
+  assert.deepEqual(agents.platform, {
+    adapter: "agents",
+    installRoot: "/tmp/agents/skills",
+    compatibility: ["agents"],
+    metadata: {
+      skillsShCompatibility: true
+    }
+  });
+
+  const grok = result.targets.find((entry) => entry.id === "grok");
+  assert.ok(grok);
+  assert.equal(grok.assignment, "grok");
+  assert.equal(grok.kind, "grok-skills-root");
+  assert.equal(grok.path, "/tmp/grok/skills");
+  assert.deepEqual(grok.platform, {
+    adapter: "grok",
+    installRoot: "/tmp/grok/skills",
+    compatibility: ["grok"],
+    metadata: {}
   });
 
   const opencode = result.targets.find((entry) => entry.id === "opencode");
@@ -134,26 +162,34 @@ assignmentPaths:
   assert.equal(pi.safety.classification, "missing");
 });
 
-test("local target overrides replace global Codex and Claude install paths", async (t) => {
+test("local target overrides replace global Codex, Claude, Agents, and Grok install paths", async (t) => {
   const codexHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-codex-home-"));
   const codexSkills = path.join(codexHome, "custom-skills");
   const claudeSkills = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-claude-skills-"));
+  const agentsSkills = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-agents-skills-"));
+  const grokSkills = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-targets-grok-skills-"));
   await mkdir(codexSkills, { recursive: true });
   t.after(() => rm(codexHome, { recursive: true, force: true }));
   t.after(() => rm(claudeSkills, { recursive: true, force: true }));
+  t.after(() => rm(agentsSkills, { recursive: true, force: true }));
+  t.after(() => rm(grokSkills, { recursive: true, force: true }));
 
   const result = await targets({
     source: fixtureSource,
     targetOverrides: {
       codexHome,
       codexSkills,
-      claudeSkills
+      claudeSkills,
+      agentsSkills,
+      grokSkills
     }
   });
 
   const codexGlobal = result.targets.find((entry) => entry.id === "codex");
   const kodyCodex = result.targets.find((entry) => entry.id === "openclaw-codex");
   const claudeGlobal = result.targets.find((entry) => entry.id === "claude");
+  const agentsGlobal = result.targets.find((entry) => entry.id === "agents");
+  const grokGlobal = result.targets.find((entry) => entry.id === "grok");
 
   assert.ok(codexGlobal);
   assert.equal(codexGlobal.codexHome, codexHome);
@@ -170,6 +206,16 @@ test("local target overrides replace global Codex and Claude install paths", asy
   assert.equal(claudeGlobal.path, claudeSkills);
   assert.equal(claudeGlobal.platform?.installRoot, claudeSkills);
   assert.equal(claudeGlobal.exists.path, true);
+
+  assert.ok(agentsGlobal);
+  assert.equal(agentsGlobal.path, agentsSkills);
+  assert.equal(agentsGlobal.platform?.installRoot, agentsSkills);
+  assert.equal(agentsGlobal.exists.path, true);
+
+  assert.ok(grokGlobal);
+  assert.equal(grokGlobal.path, grokSkills);
+  assert.equal(grokGlobal.platform?.installRoot, grokSkills);
+  assert.equal(grokGlobal.exists.path, true);
 });
 
 test("--codex-skills alone overrides only skillsPath and preserves codexHome", async (t) => {

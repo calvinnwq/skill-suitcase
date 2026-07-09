@@ -51,6 +51,17 @@ test("claude plans only portable core skills", async () => {
   assert.deepEqual(result.blocked, []);
 });
 
+test("grok plans only portable core skills", async () => {
+  const result = await plan({ source: fixtureSource, target: "grok" });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    result.planned.map((item) => item.skill),
+    ["office-hours"]
+  );
+  assert.deepEqual(result.blocked, []);
+});
+
 test("unknown targets return a machine-readable error", async () => {
   const result = await plan({ source: fixtureSource, target: "unknown" });
 
