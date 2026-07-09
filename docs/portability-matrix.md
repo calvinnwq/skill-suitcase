@@ -74,11 +74,12 @@ files do not reach target homes.
 
 ## Regression Fixture
 
-`tests/fixtures/skills-catalog/skill-suitcase.yaml` keeps `gnhf-postflight`
-canonical for OpenClaw and declares slim Codex and Claude source variants. Use
-it when validating that:
+`tests/fixtures/skills-catalog/skill-suitcase.yaml` keeps `office-hours` canonical across OpenClaw, Codex, Claude, Agents, and Grok.
+It also keeps `gnhf-postflight` canonical for OpenClaw and declares slim Codex and Claude source variants.
+Use it when validating that:
 
 - OpenClaw plans and packs the canonical bundle.
+- Agents and Grok plan canonical portable skills when compatibility declares them.
 - Codex and Claude can plan slim variants when their assignments include the
   skill.
 - Canonical `gnhf-postflight` appears as blocked for Codex or Claude when a

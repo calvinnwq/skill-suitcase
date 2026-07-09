@@ -1,6 +1,6 @@
 ---
 name: skill-suitcase
-description: Use when asked to install, audit, sync, track, reconcile, repair, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, or another machine using a skills catalog.
+description: Use when asked to install, audit, sync, track, reconcile, repair, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, shared agents roots, Grok, or another machine using a skills catalog.
 ---
 
 # Skill Suitcase

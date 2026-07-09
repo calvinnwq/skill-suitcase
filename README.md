@@ -80,8 +80,7 @@ npm install -g skill-suitcase
 skill-suitcase plan --source /path/to/skills-catalog --target openclaw --json
 ```
 
-For agent setup, including installing the packaged `skill-suitcase` operator
-skill into Codex or Claude, follow [`INSTALL.md`](INSTALL.md).
+For agent setup, including installing the packaged `skill-suitcase` operator skill into Codex, Claude, Grok, or the shared agents root, follow [`INSTALL.md`](INSTALL.md).
 
 For local development, build and run the compiled CLI directly:
 
@@ -225,12 +224,11 @@ Live `apply`, `track`, `reconcile --apply`, `repair --apply`, `rollback`,
 `promote --apply`, or `import-target --apply` should target disposable fixtures
 first or require explicit approval for the real agent home and catalog repo.
 
-## Fresh Codex/Claude/Grok Machine
+## Fresh Agent Runtime Machine
 
-For a machine with Codex, Claude, or Grok but no OpenClaw, keep the catalog as
-the shared source of truth and supply local paths at command time:
+For a machine with Codex, Claude, Grok, or a shared agents root but no OpenClaw, keep the catalog as the shared source of truth and supply local paths at command time:
 
-Do not run `skills.sh` or `npx skills` directly against live Codex, Claude, or Grok homes for new-machine setup.
+Do not run `skills.sh` or `npx skills` directly against live Codex, Claude, Grok, or shared agents homes for new-machine setup.
 If an upstream-managed skill needs a refresh, fetch it through the catalog-only source refresh lane first, review the ordinary repository diff, then use the normal Suitcase target sync commands below.
 
 ```bash
@@ -247,6 +245,7 @@ node "$CLI" import --source "$SRC" --json
 node "$CLI" validate --source "$SRC" --strict --json
 node "$CLI" plan --source "$SRC" --target codex --json
 node "$CLI" plan --source "$SRC" --target claude --json
+node "$CLI" plan --source "$SRC" --target agents --json
 node "$CLI" plan --source "$SRC" --target grok --json
 
 node "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
@@ -1012,8 +1011,7 @@ Retention and cleanup:
 
 `targets` returns assignment target discovery details instead of install plans.
 Local target overrides are applied before discovery, so the returned
-`codex`, `claude`, and `grok` paths reflect any override flags passed to
-the command:
+`codex`, `claude`, `agents`, and `grok` paths reflect any override flags passed to the command:
 
 ```json
 {

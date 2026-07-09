@@ -211,7 +211,7 @@ Portable support:
 
 - catalog layouts with `skill-suitcase.yaml`
 - target overrides such as `--agents-skills`, `--codex-home`,
-  `--codex-skills`, and `--claude-skills`
+  `--codex-skills`, `--claude-skills`, and `--grok-skills`
 - read-only planning, diffing, status, target discovery, validation, and import
 - read-only upstream declaration checks and sandboxed upstream fetch diffs
 - staging bundles and plan locks
@@ -257,6 +257,7 @@ Before a public announcement or npm publish:
 - Docs that mention upstream-managed refresh preserve the separate
   upstream-to-catalog and catalog-to-target lifecycle policy.
 - Docs that mention Skillify validation policy distinguish strict-validation skips from install, receipt, and target drift semantics.
+- Docs that mention target overrides include shared agents and Grok roots.
 
 ## Current Decision
 

@@ -305,7 +305,9 @@ compatibility:
     adapter: "agents",
     installRoot: path.join(fakeHome, ".agents", "skills"),
     compatibility: ["agents"],
-    metadata: {}
+    metadata: {
+      skillsShCompatibility: true
+    }
   });
 
   const overridden = await targets({
