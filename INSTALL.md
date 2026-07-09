@@ -71,6 +71,12 @@ AGENT_SKILLS_DIR="$HOME/.codex/skills"
 
 # Claude
 AGENT_SKILLS_DIR="$HOME/.claude/skills"
+
+# Shared agents root
+AGENT_SKILLS_DIR="$HOME/.agents/skills"
+
+# Grok Build
+AGENT_SKILLS_DIR="$HOME/.grok/skills"
 ```
 
 Install into the selected root:
@@ -178,7 +184,7 @@ for catalog source refresh.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.
 
-Inspect local Codex and Claude targets with overrides:
+Inspect local Codex, Claude, Agents, and Grok targets with overrides:
 
 ```bash
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
@@ -186,6 +192,12 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
 
 skill-suitcase status --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
 skill-suitcase diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
+
+skill-suitcase status --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
+skill-suitcase diff --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
+
+skill-suitcase status --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json
+skill-suitcase diff --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json
 ```
 
 Use `node "$CLI"` instead of `skill-suitcase` in those commands when operating
@@ -267,6 +279,20 @@ For Claude, use:
 ```bash
 skill-suitcase pack --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --output "$TMP" --json
 skill-suitcase apply --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --artifact "$ARTIFACT" --json
+```
+
+For the shared agents root, use:
+
+```bash
+skill-suitcase pack --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --output "$TMP" --json
+skill-suitcase apply --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --artifact "$ARTIFACT" --json
+```
+
+For Grok, use:
+
+```bash
+skill-suitcase pack --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --output "$TMP" --json
+skill-suitcase apply --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --artifact "$ARTIFACT" --json
 ```
 
 ## 6. Verify And Report

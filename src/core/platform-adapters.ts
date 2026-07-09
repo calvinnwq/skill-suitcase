@@ -1,6 +1,6 @@
 export type PlatformPathField = "path" | "home" | "codexHome" | "skillsPath";
 
-export type PlatformAdapterId = "openclaw" | "codex" | "agents" | "claude" | "opencode" | "pi";
+export type PlatformAdapterId = "openclaw" | "codex" | "claude" | "agents" | "opencode" | "pi" | "grok";
 
 export type PlatformAdapterKind =
   | "openclaw-skills-root"
@@ -9,7 +9,8 @@ export type PlatformAdapterKind =
   | "agents-skills-root"
   | "claude-skills-root"
   | "opencode-skills-root"
-  | "pi-skills-root";
+  | "pi-skills-root"
+  | "grok-skills-root";
 
 export type PlatformAdapter = {
   id: PlatformAdapterId;
@@ -61,14 +62,6 @@ const PLATFORM_ADAPTERS: Record<PlatformAdapterKind, PlatformAdapter> = {
       nestedHome: true
     }
   },
-  "agents-skills-root": {
-    id: "agents",
-    kind: "agents-skills-root",
-    installRootField: "path",
-    requiredFields: ["path"],
-    compatibilityNames: ["agents"],
-    metadata: {}
-  },
   "claude-skills-root": {
     id: "claude",
     kind: "claude-skills-root",
@@ -76,6 +69,16 @@ const PLATFORM_ADAPTERS: Record<PlatformAdapterKind, PlatformAdapter> = {
     requiredFields: ["path"],
     compatibilityNames: ["claude"],
     metadata: {}
+  },
+  "agents-skills-root": {
+    id: "agents",
+    kind: "agents-skills-root",
+    installRootField: "path",
+    requiredFields: ["path"],
+    compatibilityNames: ["agents"],
+    metadata: {
+      skillsShCompatibility: true
+    }
   },
   "opencode-skills-root": {
     id: "opencode",
@@ -98,6 +101,14 @@ const PLATFORM_ADAPTERS: Record<PlatformAdapterKind, PlatformAdapter> = {
       readOnly: true,
       skillsShCompatibility: true
     }
+  },
+  "grok-skills-root": {
+    id: "grok",
+    kind: "grok-skills-root",
+    installRootField: "path",
+    requiredFields: ["path"],
+    compatibilityNames: ["grok"],
+    metadata: {}
   }
 };
 

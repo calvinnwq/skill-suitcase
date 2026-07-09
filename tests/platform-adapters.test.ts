@@ -17,6 +17,8 @@ test("resolves explicit platform adapters for declared assignment path kinds", (
   const codex = resolvePlatformAdapter("codex-home");
   const nestedCodex = resolvePlatformAdapter("nested-home-codex");
   const claude = resolvePlatformAdapter("claude-skills-root");
+  const agents = resolvePlatformAdapter("agents-skills-root");
+  const grok = resolvePlatformAdapter("grok-skills-root");
 
   assert.equal(openclaw?.id, "openclaw");
   assert.equal(openclaw?.installRootField, "path");
@@ -39,6 +41,17 @@ test("resolves explicit platform adapters for declared assignment path kinds", (
   assert.equal(claude?.installRootField, "path");
   assert.deepEqual(claude?.requiredFields, ["path"]);
   assert.deepEqual(claude?.compatibilityNames, ["claude"]);
+
+  assert.equal(agents?.id, "agents");
+  assert.equal(agents?.installRootField, "path");
+  assert.deepEqual(agents?.requiredFields, ["path"]);
+  assert.deepEqual(agents?.compatibilityNames, ["agents"]);
+  assert.equal(agents?.metadata.skillsShCompatibility, true);
+
+  assert.equal(grok?.id, "grok");
+  assert.equal(grok?.installRootField, "path");
+  assert.deepEqual(grok?.requiredFields, ["path"]);
+  assert.deepEqual(grok?.compatibilityNames, ["grok"]);
 });
 
 test("resolves install roots and missing required adapter fields deterministically", () => {
@@ -85,6 +98,13 @@ test("derives compatibility aliases from explicit platform adapter metadata", ()
       kind: "claude-skills-root"
     }),
     ["global-tools", "claude"]
+  );
+  assert.deepEqual(
+    platformCompatibilityNames({
+      assignment: "grok-build",
+      kind: "grok-skills-root"
+    }),
+    ["grok-build", "grok"]
   );
   assert.deepEqual(
     platformCompatibilityNames({

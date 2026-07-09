@@ -25,10 +25,15 @@ Expected target adapters:
   `skillsPath`, and requires `home`, `codexHome`, and `skillsPath`.
 - `claude-skills-root` resolves to platform adapter `claude`, install root field
   `path`.
+- `agents-skills-root` resolves to platform adapter `agents`, install root
+  field `path`, compatibility name `agents`, and `skills.sh` compatibility
+  metadata.
 - `opencode-skills-root` resolves to platform adapter `opencode`, install root
   field `path`, compatibility name `opencode`, and read-only provider metadata.
 - `pi-skills-root` resolves to platform adapter `pi`, install root field
   `path`, compatibility name `pi`, and read-only provider metadata.
+- `grok-skills-root` resolves to platform adapter `grok`, install root field
+  `path`, and compatibility name `grok`.
 
 Then smoke import and the read-only command boundaries:
 
@@ -93,24 +98,22 @@ Trust only the exact pinned provider in the isolated temp workspace/home.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.
 
-For a Codex/Claude-only machine, smoke local target overrides and target-scoped
-status without requiring OpenClaw paths from the shared catalog to exist:
+For a Codex, Claude, shared agents, and Grok machine, smoke local target overrides and target-scoped status without requiring OpenClaw paths from the shared catalog to exist:
 
 ```bash
-node dist/src/cli.js targets --source /path/to/skills-catalog --agents-skills ~/.agents/skills --codex-home ~/.codex --claude-skills ~/.claude/skills --json
+node dist/src/cli.js targets --source /path/to/skills-catalog --codex-home ~/.codex --claude-skills ~/.claude/skills --agents-skills ~/.agents/skills --grok-skills ~/.grok/skills --json
 node dist/src/cli.js status --source /path/to/skills-catalog --target agents --agents-skills ~/.agents/skills --json
 node dist/src/cli.js status --source /path/to/skills-catalog --target codex --codex-home ~/.codex --json
 node dist/src/cli.js diff --source /path/to/skills-catalog --target codex --codex-home ~/.codex --json
 node dist/src/cli.js status --source /path/to/skills-catalog --target claude --claude-skills ~/.claude/skills --json
 node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --claude-skills ~/.claude/skills --json
+node dist/src/cli.js status --source /path/to/skills-catalog --target grok --grok-skills ~/.grok/skills --json
+node dist/src/cli.js diff --source /path/to/skills-catalog --target grok --grok-skills ~/.grok/skills --json
 ```
 
-`--agents-skills`, `--codex-home`, `--codex-skills`, and `--claude-skills` are
-local overrides for global target paths. They are intended for `targets`,
-`status`, `diff`, `pack`, `apply`, `track`, `reconcile`, `repair`, and
-`import-target`; `status --target` accepts either an assignment path id or an
-assignment name. Exact assignment path ids win, so `--target codex` selects the
-global Codex target when that id exists.
+`--codex-home`, `--codex-skills`, `--claude-skills`, `--agents-skills`, and `--grok-skills` are local overrides for global target paths.
+They are intended for `targets`, `status`, `diff`, `pack`, `apply`, `track`, `reconcile`, `repair`, and `import-target`; `status --target` accepts either an assignment path id or an assignment name.
+Exact assignment path ids win, so `--target codex` selects the global Codex target when that id exists.
 
 For Codex or Claude paths that have source variants, `plan`, `diff`, `pack`,
 `apply`, `track`, `reconcile`, `repair`, `import-target`, receipts, and `status`

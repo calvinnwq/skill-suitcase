@@ -80,8 +80,7 @@ npm install -g skill-suitcase
 skill-suitcase plan --source /path/to/skills-catalog --target openclaw --json
 ```
 
-For agent setup, including installing the packaged `skill-suitcase` operator
-skill into Codex or Claude, follow [`INSTALL.md`](INSTALL.md).
+For agent setup, including installing the packaged `skill-suitcase` operator skill into Codex, Claude, Grok, or the shared agents root, follow [`INSTALL.md`](INSTALL.md).
 
 For local development, build and run the compiled CLI directly:
 
@@ -137,13 +136,15 @@ Supported target adapters currently include:
 - `claude`
 - `opencode`
 - `pi`
+- `grok`
 
 Platform adapters are explicit. `openclaw-skills-root` uses the declared `path`
 as the workspace skill root. `codex-home` installs into `skillsPath` without
 assuming a universal Codex home. `agents-skills-root` uses the declared `path`
-for generic `$HOME/.agents/skills` installs. `claude-skills-root` uses the
-declared `path`. The `nested-home-codex` adapter is still supported for legacy
-nested homes, but it is not part of the current default target set.
+for generic `$HOME/.agents/skills` installs. `claude-skills-root` and
+`grok-skills-root` use the declared `path`. The `nested-home-codex` adapter is
+still supported for legacy nested homes, but it is not part of the current
+default target set.
 Provider-backed `opencode-skills-root` and `pi-skills-root` entries are compatibility/reference targets with read-only metadata, not Suitcase-owned install roots.
 
 Smoke-test discovery with:
@@ -157,21 +158,24 @@ the local runtime homes, pass local target overrides instead of editing the
 catalog:
 
 ```bash
-node dist/src/cli.js targets --source /path/to/skills-catalog --agents-skills ~/.agents/skills --codex-home ~/.codex --claude-skills ~/.claude/skills --json
+node dist/src/cli.js targets --source /path/to/skills-catalog --codex-home ~/.codex --claude-skills ~/.claude/skills --agents-skills ~/.agents/skills --grok-skills ~/.grok/skills --json
 node dist/src/cli.js status --source /path/to/skills-catalog --target codex --codex-home ~/.codex --json
 node dist/src/cli.js status --source /path/to/skills-catalog --target agents --agents-skills ~/.agents/skills --json
 node dist/src/cli.js diff --source /path/to/skills-catalog --target claude --claude-skills ~/.claude/skills --json
+node dist/src/cli.js diff --source /path/to/skills-catalog --target agents --agents-skills ~/.agents/skills --json
+node dist/src/cli.js diff --source /path/to/skills-catalog --target grok --grok-skills ~/.grok/skills --json
 ```
 
 `--codex-home <dir>` overrides the `codex` `codexHome` and defaults its
 `skillsPath` to `<dir>/skills`. `--codex-skills <dir>` can override that skills
-path directly. `--agents-skills <dir>` overrides the generic `agents` skills
-root. `--claude-skills <dir>` overrides the `claude` skills root.
-These flags work with `targets`, `status`, `diff`, `pack`, `apply`, `track`,
-`reconcile`, `repair`, and `import-target`. Use `status --target <target>` with
-an assignment path id or assignment name. If an exact assignment path id exists,
-it wins, so `--target codex` means the global Codex target rather than every
-target assigned to Codex.
+path directly. `--claude-skills <dir>` overrides the `claude` skills root.
+`--agents-skills <dir>` overrides the shared `agents` skills root.
+`--grok-skills <dir>` overrides the `grok` skills root. These flags work with
+`targets`, `status`, `diff`, `pack`, `apply`, `track`, `reconcile`, `repair`,
+and `import-target`. Use `status --target <target>` with an assignment path id
+or assignment name. If an exact assignment path id exists, it wins, so
+`--target codex` means the global Codex target rather than every target assigned
+to Codex.
 
 See [`docs/install-smoke.md`](docs/install-smoke.md) for command-level smoke
 checks and [`docs/portability-matrix.md`](docs/portability-matrix.md) for
@@ -220,12 +224,11 @@ Live `apply`, `track`, `reconcile --apply`, `repair --apply`, `rollback`,
 `promote --apply`, or `import-target --apply` should target disposable fixtures
 first or require explicit approval for the real agent home and catalog repo.
 
-## Fresh Codex/Claude Machine
+## Fresh Agent Runtime Machine
 
-For a machine with Codex and Claude but no OpenClaw, keep the catalog as the
-shared source of truth and supply local paths at command time:
+For a machine with Codex, Claude, Grok, or a shared agents root but no OpenClaw, keep the catalog as the shared source of truth and supply local paths at command time:
 
-Do not run `skills.sh` or `npx skills` directly against live Codex or Claude homes for new-machine setup.
+Do not run `skills.sh` or `npx skills` directly against live Codex, Claude, Grok, or shared agents homes for new-machine setup.
 If an upstream-managed skill needs a refresh, fetch it through the catalog-only source refresh lane first, review the ordinary repository diff, then use the normal Suitcase target sync commands below.
 
 ```bash
@@ -236,18 +239,26 @@ pnpm build
 export SRC="$HOME/repos/skills"
 export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
 
-mkdir -p "$HOME/.codex/skills" "$HOME/.claude/skills"
+mkdir -p "$HOME/.agents/skills" "$HOME/.codex/skills" "$HOME/.claude/skills" "$HOME/.grok/skills"
 
 node "$CLI" import --source "$SRC" --json
 node "$CLI" validate --source "$SRC" --strict --json
 node "$CLI" plan --source "$SRC" --target codex --json
 node "$CLI" plan --source "$SRC" --target claude --json
+node "$CLI" plan --source "$SRC" --target agents --json
+node "$CLI" plan --source "$SRC" --target grok --json
 
 node "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 node "$CLI" diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 
 node "$CLI" status --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
 node "$CLI" diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
+
+node "$CLI" status --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
+node "$CLI" diff --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
+
+node "$CLI" status --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json
+node "$CLI" diff --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json
 ```
 
 ## Upstream Source Refresh
@@ -1000,8 +1011,7 @@ Retention and cleanup:
 
 `targets` returns assignment target discovery details instead of install plans.
 Local target overrides are applied before discovery, so the returned
-`codex` and `claude` paths reflect any override flags passed to
-the command:
+`codex`, `claude`, `agents`, and `grok` paths reflect any override flags passed to the command:
 
 ```json
 {
@@ -1045,8 +1055,9 @@ compatibility), and reports one status per planned or blocked skill. Pass
 `--target <target>` to limit the walk to matching assignment path ids or
 assignment names. Exact assignment path ids win over assignment-name expansion.
 It uses `path` for `openclaw-skills-root` and
-`claude-skills-root` entries, and `skillsPath` for `codex-home` and
-`nested-home-codex` entries. Install roots must already exist.
+`claude-skills-root`, `agents-skills-root`, and `grok-skills-root` entries, and
+`skillsPath` for `codex-home` and `nested-home-codex` entries. Install roots
+must already exist.
 
 ```json
 {

@@ -11,6 +11,7 @@ export type TargetOverrides = {
   codexHome?: string;
   codexSkills?: string;
   claudeSkills?: string;
+  grokSkills?: string;
 };
 
 export type LoadedCatalog = {
@@ -78,6 +79,11 @@ function applyTargetOverrides(manifest: Catalog, overrides: TargetOverrides | un
     agentsGlobal.path = path.resolve(overrides.agentsSkills);
   }
 
+  const grokGlobal = assignmentPaths["grok"];
+  if (grokGlobal !== undefined && overrides.grokSkills !== undefined) {
+    grokGlobal.path = path.resolve(overrides.grokSkills);
+  }
+
   return {
     ...manifest,
     assignmentPaths
@@ -89,5 +95,6 @@ function isEmptyTargetOverrides(overrides: TargetOverrides): boolean {
     overrides.codexHome === undefined &&
     overrides.codexSkills === undefined &&
     overrides.claudeSkills === undefined &&
+    overrides.grokSkills === undefined &&
     overrides.home === undefined;
 }
