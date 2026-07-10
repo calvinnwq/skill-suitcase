@@ -63,14 +63,18 @@ Prefer the global binary when it exists. Otherwise use the built source CLI:
 
 ```bash
 cd "$HOME/repos/skill-suitcase"
-if command -v corepack >/dev/null 2>&1; then
-  corepack enable pnpm
-elif ! command -v pnpm >/dev/null 2>&1 || test "$(pnpm --version)" != "10.34.4"; then
-  npm install --global pnpm@10.34.4
+if command -v corepack >/dev/null 2>&1 \
+  && npm install --global corepack@latest \
+  && corepack enable pnpm \
+  && test "$(pnpm --version)" = "10.34.4"; then
+  :
+else
+  corepack disable pnpm 2>/dev/null || true
+  npm install --global --force pnpm@10.34.4
 fi
-pnpm --version
-pnpm install --frozen-lockfile
-pnpm run build
+test "$(pnpm --version)" = "10.34.4" \
+  && pnpm install --frozen-lockfile \
+  && pnpm run build
 
 export SRC="$HOME/repos/skills"
 export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"

@@ -29,19 +29,23 @@ test -d "$HOME/repos/skills" && skill-suitcase targets --source "$HOME/repos/ski
 ```
 
 Source installs require Node.js 20 or newer and pnpm 10.34.4, as pinned by
-`packageManager` in `package.json`. If Corepack is available, enable the pinned
-pnpm version:
+`packageManager` in `package.json`. Corepack bundled with Node.js can carry
+outdated package signatures, so update it before enabling the pinned pnpm
+version:
 
 ```bash
+npm install --global corepack@latest
 corepack enable pnpm
-pnpm --version
+test "$(pnpm --version)" = "10.34.4"
 ```
 
-If Corepack is not installed, install the same pnpm version with npm:
+If updating or activating Corepack fails, remove any stale pnpm shim and install
+the same pnpm version directly with npm:
 
 ```bash
-npm install --global pnpm@10.34.4
-pnpm --version
+corepack disable pnpm 2>/dev/null || true
+npm install --global --force pnpm@10.34.4
+test "$(pnpm --version)" = "10.34.4"
 ```
 
 Then install from source:
