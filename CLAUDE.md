@@ -1,7 +1,9 @@
 # CLAUDE.md
 
-This repository is a TypeScript CLI. Follow [`AGENTS.md`](AGENTS.md) and keep
-the implementation aligned with [`ARCHITECTURE.md`](ARCHITECTURE.md).
+This repository is a TypeScript CLI. Follow the repository's
+[`AGENTS.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/AGENTS.md)
+and keep the implementation aligned with
+[`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md).
 
 Before adding or changing a command:
 

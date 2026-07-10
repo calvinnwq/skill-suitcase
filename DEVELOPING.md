@@ -33,8 +33,9 @@ is intentional and approved.
 
 ## Architecture
 
-Read [`ARCHITECTURE.md`](ARCHITECTURE.md) before changing a command or adding
-product behavior. The main boundaries are:
+Read the repository's
+[`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md)
+before changing a command or adding product behavior. The main boundaries are:
 
 - `src/cli.ts` is a thin process entrypoint.
 - `src/commands/` parses and validates command input.

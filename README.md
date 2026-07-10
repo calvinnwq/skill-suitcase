@@ -301,7 +301,8 @@ git diff --check
 The current implementation has no runtime package dependencies. Keep
 `src/cli.ts` thin, put parsing and validation in `src/commands/`, durable
 behavior in `src/core/`, infrastructure in `src/adapters/`, and output contracts
-in `src/renderers/`.
+in `src/renderers/`. See the module boundaries in
+[`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md).
 
 Development dependencies support TypeScript compilation, Node.js types, and
 issue-form YAML validation. The manifest reader is strict and intentionally

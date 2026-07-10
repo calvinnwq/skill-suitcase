@@ -11,6 +11,7 @@ in [`SECURITY.md`](SECURITY.md), not a public issue.
 ## Before opening an issue
 
 - Search the existing issues and documentation first.
+- Use the support request form for installation and usage questions.
 - Use the bug report form for reproducible defects.
 - Use the feature request form to describe a user problem before proposing an
   implementation.
@@ -19,8 +20,8 @@ in [`SECURITY.md`](SECURITY.md), not a public issue.
 
 ## Pull requests
 
-1. Read [`DEVELOPING.md`](DEVELOPING.md) and
-   [`ARCHITECTURE.md`](ARCHITECTURE.md).
+1. Read [`DEVELOPING.md`](DEVELOPING.md) and the repository's
+   [`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md).
 2. Keep each pull request focused on one problem.
 3. Add or update tests for behavior changes.
 4. Update user-facing documentation when commands, output, or safety boundaries
