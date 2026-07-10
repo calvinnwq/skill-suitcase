@@ -43,28 +43,18 @@ Use Conventional Commit prefixes:
 - `fix:` for bug fixes
 - `docs:`, `test:`, `refactor:`, and `ci:` for maintenance
 
-Merging the Release Please PR updates `package.json`, `.release-please-manifest.json`,
-and `CHANGELOG.md`, then creates the GitHub release and tag.
-
-When the Release Please run creates a GitHub release, the same workflow verifies
-the package and publishes it to npm through npm Trusted Publishing. The npm
-package must have a trusted publisher configured for `calvinnwq/skill-suitcase`
-and workflow filename `release-please.yml`; do not add long-lived npm tokens.
-
-See [`docs/release-readiness.md`](docs/release-readiness.md) for the Release
-Please merge checklist, npm package/bin policy, repository controls, and the
-public-documentation gate.
-
 GitHub releases and npm publishing are managed by Release Please after changes
 land on the default branch. Contributors should not update package versions or
 the changelog for ordinary pull requests unless a maintainer requests it.
 
 Merging the Release Please pull request updates `package.json`,
 `.release-please-manifest.json`, and `CHANGELOG.md`, then creates the GitHub
-release and tag. The release workflow verifies the package and publishes it
-through npm Trusted Publishing. The npm package must keep its trusted publisher
-configured for repository `calvinnwq/skill-suitcase` and workflow
-`release-please.yml`; never introduce a long-lived npm token.
+release and tag. When a release is created, the same workflow verifies the
+package and publishes it through npm Trusted Publishing. The npm package must
+keep its trusted publisher configured for repository
+`calvinnwq/skill-suitcase` and workflow `release-please.yml`; never introduce a
+long-lived npm token.
 
 See [`docs/release-readiness.md`](docs/release-readiness.md) for the Release
-Please merge checklist, package policy, and public-readiness checks.
+Please merge checklist, npm package/bin policy, repository controls, and the
+public-documentation gate.

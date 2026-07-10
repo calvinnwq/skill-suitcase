@@ -322,14 +322,24 @@ test("release publishing uses the Trusted Publishing safety boundary", async () 
     }
   }
 
-  const publishSteps = steps
-    .map((step, index) => ({ index, step }))
-    .filter(
-      ({ step }) => typeof step.run === "string" && /(?:^|\n)\s*npm publish\b(?![^\n]*--dry-run)/m.test(step.run)
-    );
+  const publishSteps = Object.entries(jobs).flatMap(([jobName, jobValue]) => {
+    const job = expectRecord(jobValue, `${file}.jobs.${jobName}`);
+    const jobSteps = job.steps === undefined ? [] : expectArray(job.steps, `${file}.jobs.${jobName}.steps`);
+    return jobSteps
+      .map((step, index) => ({
+        index,
+        jobName,
+        step: expectRecord(step, `${file}.jobs.${jobName}.steps[${index}]`)
+      }))
+      .filter(
+        ({ step }) =>
+          typeof step.run === "string" && /(?:^|\n)\s*npm publish\b(?![^\n]*--dry-run)/m.test(step.run)
+      );
+  });
   assert.equal(publishSteps.length, 1, `${file} must contain exactly one non-dry-run npm publish step`);
   const publishStep = publishSteps[0];
   assert.ok(publishStep, `${file} must define a non-dry-run npm publish step`);
+  assert.equal(publishStep.jobName, "release-please", `${file} npm publish must run in the release-please job`);
   assert.ok(publishStep.index > releaseStepIndex, `${file} npm publish must run after Release Please`);
   assert.equal(publishStep.step.if, releaseCreatedCondition, `${file} npm publish must require a created release`);
   const publishCommand = expectString(publishStep.step.run, `${file} publish command`);
