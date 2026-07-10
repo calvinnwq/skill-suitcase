@@ -1,121 +1,155 @@
 # Release Readiness
 
-This checklist records the release/public-readiness decisions for Linear
-`NGX-387`.
+This document records the release controls and verified shipped state for Skill
+Suitcase. It is an operational checklist, not a roadmap.
 
-Skill Suitcase is release-managed for GitHub tags, release notes, and npm
-publication. Release Please remains the release authority; npm publication runs
-only after Release Please creates a GitHub release.
+## Verified Shipped State
 
-## Current Release State
+The shipped version is the value shared by npm's `latest` tag and the newest
+non-prerelease GitHub release. Verify both authoritative sources directly:
 
-- GitHub releases are managed by Release Please.
-- The CLI bin name is `skill-suitcase`.
-- The package name is `skill-suitcase`.
-- `skill-suitcase@0.8.0` is published on npm, and `latest` points to `0.8.0`
-  as of 2026-06-20.
-- The `v0.8.0` release includes the receipt-owned `repair` flow, the
-  catalog-owned `import-target` flow for intentional local skill edits, and the
-  installable Skill Suitcase operator skill.
-- Local dogfood after `v0.8.0` verified the installed CLI exposes
-  `import-target`, the skills catalog imports/validates cleanly, all modeled
-  targets report current, and the packaged operator skill copy is installed in
-  local Codex, Claude, and OpenClaw-Codex skill roots.
-- CI runs `pnpm test` on pull requests and pushes to `main`.
-- The Release Please workflow publishes to npm only when
-  `steps.release.outputs.release_created == 'true'`.
+```bash
+npm view skill-suitcase version dist-tags --json
+gh release list \
+  --repo calvinnwq/skill-suitcase \
+  --exclude-drafts \
+  --exclude-pre-releases \
+  --limit 1
+```
 
-## When To Merge Release Please PRs
+This document intentionally does not duplicate that version as a literal.
+Release Please bumps `package.json` in a release PR before the version is
+published, so package metadata alone is not proof of shipped state. At this
+documentation refresh, the two authoritative sources matched.
 
-Merge a Release Please PR only when all of these are true:
+Current durable release facts:
 
-1. The PR changes only release metadata: `package.json`,
+- The GitHub repository is public.
+- The installed binary name is `skill-suitcase`.
+- The package requires Node.js 20 or newer.
+- GitHub releases and release notes are managed by Release Please.
+- npm publication runs only after Release Please creates a GitHub release.
+- npm publication uses GitHub Actions OIDC Trusted Publishing with provenance;
+  the repository does not need a long-lived `NPM_TOKEN`.
+
+The current shipped CLI includes catalog import and validation, strict Skillify
+validation policy, target discovery and local path overrides (including shared
+agents and Grok roots), plans/diffs/status, immutable bundles and plan locks,
+transactional copy and symlink apply, receipts and rollback, track/reconcile/
+repair/promote/import-target workflows, manifest logical groups and source
+policy, provider-backed read-only target boundaries, and pinned skills.sh or Git
+upstream source refresh into the catalog.
+
+OpenCode and Pi remain provider-backed read-only compatibility targets. Upstream
+refresh remains catalog-only: it does not install directly into live agent
+homes.
+
+## Release Authority
+
+Release Please is the source of truth for version changes, changelog entries,
+Git tags, and GitHub releases. The release workflow is
+`.github/workflows/release-please.yml`.
+
+Merge a Release Please PR only when:
+
+1. Its version matches the intended compatibility change.
+2. Its release notes accurately describe merged behavior.
+3. CI is green, or an equivalent local result and the reason for a missing CI
+   signal are recorded.
+4. No implementation change intended for that release is still pending.
+5. The release metadata diff is understood, including `package.json`,
    `.release-please-manifest.json`, and `CHANGELOG.md`.
-2. The version matches the intended public story for the repo.
-3. GitHub CI is green, or the equivalent local verification has been run and
-   the missing CI signal is understood.
-4. The release notes accurately describe merged behavior.
-5. No active implementation PR should land first for the same release train.
 
-For the first public release, prefer a deliberate `0.x` release. Do not infer
-`1.0.0` from the first generated Release Please PR unless Calvin explicitly
-chooses a stable public API promise.
+The project remains pre-1.0. A `1.0.0` release requires an explicit stable API
+decision; it is not inferred from routine Release Please output.
 
-## npm Package And Bin Policy
+## npm Package And Binary Policy
 
-Recommended package policy:
+- Package name: `skill-suitcase`
+- Binary name: `skill-suitcase`
+- Registry access: public
+- Node engine: `>=20`
+- License: MIT
+- Repository: `calvinnwq/skill-suitcase`
 
-- Keep the npm package name as `skill-suitcase`.
-- Keep the bin command as `skill-suitcase`.
-- Keep an explicit `files` whitelist in `package.json` so npm publishes only the
-  runtime CLI, docs, changelog, and package metadata.
-- Publish through npm Trusted Publishing from GitHub Actions; do not add
-  long-lived `NPM_TOKEN` secrets.
-- Keep the Release Please workflow's pre-publish dry-run so local workflow
-  artifacts cannot silently enter the package tarball.
+`package.json` uses an explicit `files` whitelist. Published content is limited
+to the compiled CLI, packaged operator skill, license, product and setup docs,
+changelog, and `docs/*.md`. Tests, source TypeScript, local review artifacts,
+agent state, and workspace files are excluded from the npm payload.
 
-`skill-suitcase` is the right package and command identity because it matches
-the repo and project name, avoids a generic global binary, and makes installed
-CLI provenance obvious in user terminals and automation logs.
+Before publication, the release workflow runs
+`npm publish --dry-run --access public --json`. Inspecting that payload is a
+release gate, not an optional local convention.
 
 ## npm Trusted Publishing
 
-The npm package settings must include this trusted publisher:
+The npm trusted publisher is configured for:
 
 - Publisher: GitHub Actions
-- Organization or user: `calvinnwq`
+- Organization/user: `calvinnwq`
 - Repository: `skill-suitcase`
-- Workflow filename: `release-please.yml`
+- Workflow: `release-please.yml`
 - Allowed action: `npm publish`
-- Environment: blank unless a future GitHub environment approval gate is added
 
-The workflow uses npm's OIDC trusted-publishing path instead of a stored npm
-token. Required workflow properties:
+The workflow requirements are present:
 
 - `permissions.id-token: write`
-- GitHub-hosted `ubuntu-latest` runner
-- Node 24 through `actions/setup-node`
+- GitHub-hosted `ubuntu-latest`
+- `actions/setup-node` with Node 24
 - npm CLI `>=11.5.1`
 - `registry-url: https://registry.npmjs.org`
+- final `npm publish --access public --provenance`
 
-Release publication is intentionally coupled to Release Please output. If
-Release Please only opens or updates a release PR, the npm steps are skipped. If
-Release Please creates a GitHub release after a release PR merge, the workflow
-checks out the release commit, installs dependencies, runs the normal gates,
-checks the publish payload with `npm publish --dry-run --access public --json`,
-and publishes with provenance.
+Publish steps are guarded by
+`steps.release.outputs.release_created == 'true'`. Opening or updating a
+Release Please PR does not publish. Once a release PR merge creates a GitHub
+release, the workflow checks out that release commit, installs the locked
+dependencies, runs the release gates, inspects the package payload, and
+publishes with provenance.
 
-## GitHub Visibility And Rulesets
+## CI And Repository Controls
 
-While the repo is private, GitHub branch protection/ruleset behavior may depend
-on the account plan. If private-repo rulesets are unavailable, use this fallback:
+The public repository runs `.github/workflows/ci.yml` for pull requests and
+pushes to `main`. Its `test` job installs the frozen pnpm lockfile on Node 24 and
+runs `pnpm test`.
 
-- keep PR review/merge discipline manual
-- require local verification in the PR body
-- keep CI enabled even if it is not a hard merge gate
-- do not rely on branch protection as the only release safety mechanism
+Repository rules should require the CI `test` job, restrict direct pushes to
+`main`, and require up-to-date branches when practical. Release Please and npm
+trusted-publishing permissions remain scoped to the release workflow.
 
-If the repo becomes public, enable normal rulesets before treating it as a
-public OSS project:
+Making the repository public is complete and no longer an outstanding release
+decision.
 
-- require the CI `test` job on PRs
-- require branches to be up to date before merge when practical
-- restrict direct pushes to `main`
-- keep Release Please and npm trusted-publishing permissions scoped to the
-  release workflow
+## Required Verification
 
-Making the repo public is a separate approval. This checklist does not approve
-that one-way visibility change.
-
-## Safe Local Workflows
-
-Read-only commands are safe first checks. They must not create install roots,
-runtime homes, receipts, symlinks, or source repo files.
+Run the same local product gates before shipping:
 
 ```bash
-pnpm build
+pnpm install --frozen-lockfile
+pnpm test
+pnpm run typecheck
+pnpm run architecture:check
+git diff --check
+npm publish --dry-run --access public --json
+```
 
-SRC="$HOME/repos/skills"
+The release workflow additionally runs the `lint` and `format:check` script
+aliases. `pnpm test` performs a clean build before executing the compiled test
+suite.
+
+Review the npm dry-run output for the expected executable, compiled runtime,
+operator skill, license, and public docs. Refuse the release if it contains
+tests, local absolute paths as required inputs, private agent state, temporary
+artifacts, or workspace-only files.
+
+## Portable Smoke Test
+
+Public docs and release verification use portable paths:
+
+```bash
+pnpm run build
+
+SRC="/path/to/skills-catalog"
 CLI="$PWD/dist/src/cli.js"
 
 node "$CLI" import --source "$SRC" --json
@@ -127,141 +161,49 @@ node "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --
 node "$CLI" diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 ```
 
-Staging workflows are the next step. They may create an artifact under an
-explicit temporary output directory, but still do not write into agent homes.
-For Git-backed catalogs, selected source skills must not contain untracked,
-non-ignored files; track or remove those files before generating packs or plan
-locks.
+These commands are read-only. A staging smoke test may write beneath an explicit
+temporary directory, but not into a live runtime home:
 
 ```bash
-TMP="$(mktemp -d /tmp/skill-suitcase-pack.XXXXXX)"
-node "$CLI" pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$TMP" --json
-find "$TMP" -maxdepth 3 -type f | sort
-rm -rf "$TMP"
+OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
+node "$CLI" pack \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --output "$OUT" \
+  --json
 ```
 
-Catalog-only upstream refresh is separate from live target mutation.
-Run `upstream check` first, use `upstream fetch --dry-run` to inspect one
-selected skill in an isolated temp workspace/home, and run
-`upstream import --apply` only after approval for the catalog source update:
+Live mutation tests require separate explicit approval and disposable fixtures
+or a clearly approved target. Do not use a maintainer's real agent homes or
+catalog as an implicit release fixture.
 
-```bash
-node "$CLI" upstream fetch --source "$SRC" --skill existing-skill --dry-run --json
-node "$CLI" upstream import --source "$SRC" --skill existing-skill --apply --json
-```
+## Public Documentation Gate
 
-The import must refuse malformed upstream lock metadata before fetching.
-On success it writes only `skills/<name>` and `.skill-suitcase/upstream-lock.json`, never live agent homes.
-Keep upstream-to-catalog drift separate from catalog-to-target drift:
+Before publishing, verify:
 
-- Upstream unchanged: `upstream check` reports declaration and lineage metadata only.
-- Upstream changed: fetch, review, import the selected skill after approval,
-  commit the catalog diff, then use normal target sync.
-- Local catalog edit: treat it as catalog-hash drift and commit, revert, or
-  fork/adopt deliberately.
-- Upstream removed or renamed: preserve the catalog source and upstream lock
-  until an operator chooses keep, fork/adopt, rename, or delete.
-- Target drift: use ordinary `status`, receipts, and target workflows.
-  For upstream-managed skills, `status --json` should surface target status,
-  receipt hash, and receipt commit inside lineage metadata.
-  Target-scoped status should load lineage for reported skills only and should not hash unrelated upstream-managed catalog skills.
-  Do not call `npx skills` against live homes as a shortcut.
+- The README first screen describes the agent-first product that ships now.
+- README examples use `$HOME`, `/path/to/...`, or explicit target overrides;
+  they do not require a maintainer-specific absolute path.
+- Long-form command behavior lives in `docs/command-reference.md`, not in a
+  README roadmap or milestone narrative.
+- `INSTALL.md` covers packaged CLI and operator-skill setup.
+- `CONTRIBUTING.md` explains Release Please and Trusted Publishing boundaries.
+- No doc implies `skills.sh` runtime delegation is a managed installer path.
+- Upstream docs keep upstream-to-catalog drift separate from
+  catalog-to-target drift.
+- OpenCode and Pi are described as read-only even with custom manifest
+  `assignmentPaths` roots.
+- Manifest groups are reporting metadata only.
+- `sourcePolicy` and strict-validation skips do not imply broader target write
+  or ownership authority.
+- Shared agents, Codex, Claude, and Grok target overrides are documented.
+- Release verification confirms that the newest non-prerelease GitHub release
+  matches npm `latest`.
 
-Trust only the exact pinned upstream package in the isolated temp workspace/home
-for catalog source refresh.
-Do not trust upstream tooling to choose target roots, write receipts, prove
-rollback, or mutate live agent homes.
-Provider-backed adapter kinds such as OpenCode and Pi stay read-only
-compatibility surfaces, including when a catalog declares custom
-`assignmentPaths` review roots.
-`pack`, `apply`, `track`, `reconcile`, `repair`, and `import-target` should
-return `read_only_target` for those roots instead of adopting them as
-Suitcase-owned install targets.
-Manifest-owned logical groups are release-safe reporting metadata when
-`import --json` and `validate --json` can prove their referenced skills,
-suitcases, and assignments exist. They must not change target planning or
-install semantics.
-Manifest `validationPolicy.skillify.skip` is release-safe only when `validate --strict --json` proves each skip entry is referenced and has valid provenance.
-`external-managed` skips should count in `summary.contractsSkippedExternal`, and `legacy-local` skips should count in `summary.contractsSkippedLegacy` while still surfacing `legacy_skillify_skip` debt.
-Malformed skip entries are release-blocking and must not hide Skillify-10 contract failures.
+## Current Release Decision
 
-Live mutation requires explicit approval input and should start in disposable
-fixtures or a clearly approved target:
-
-```bash
-node "$CLI" apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact /path/to/skill-suitcase-bundle.json --json
-node "$CLI" apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --lock /path/to/plan-lock.json --mode symlink --json
-node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
-node "$CLI" reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
-node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
-node "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
-node "$CLI" promote --source "$SRC" --target-skill "$HOME/.codex/skills/new-skill" --dry-run --json
-node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
-node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
-```
-
-Do not run live `apply`, `track`, `reconcile --apply`, `repair --apply`,
-`rollback`, `promote --apply`, `import-target --apply`, or
-`upstream import --apply` against Calvin's real agent homes or catalog repo
-without explicit approval for the target, catalog source, and mode.
-
-## Calvin-Local Versus Portable Support
-
-Portable support:
-
-- catalog layouts with `skill-suitcase.yaml`
-- target overrides such as `--agents-skills`, `--codex-home`,
-  `--codex-skills`, `--claude-skills`, and `--grok-skills`
-- read-only planning, diffing, status, target discovery, validation, and import
-- read-only upstream declaration checks and sandboxed upstream fetch diffs
-- staging bundles and plan locks
-- catalog-only upstream imports for declared, pinned source refreshes
-- copy and symlink apply modes when explicitly approved
-- targeted reconcile for selected unknown catalog-owned targets when explicitly
-  approved
-- targeted repair for selected receipt-owned dirty targets when explicitly
-  approved
-- targeted import-target for selected receipt-owned dirty targets when the local
-  edit is intentional and explicitly approved
-- receipts, status, and rollback for Skill Suitcase-managed installs
-
-Calvin-local examples:
-
-- `/Users/ngxcalvin/repos/skills`
-- `/Users/ngxcalvin/repos/skill-suitcase`
-- `/Users/ngxcalvin/.openclaw/...`
-- OpenClaw Kody Codex home paths
-- live adoption state on Calvin's machine
-
-Docs may show Calvin-local paths as concrete examples, but portable docs should
-pair them with `$HOME`, `/path/to/skills-catalog`, or explicit override examples.
-Portable behavior must not depend on Calvin's machine paths being present.
-
-## Public Readiness Checklist
-
-Before a public announcement or npm publish:
-
-- README includes safe read-only and staging workflows.
-- CONTRIBUTING explains Release Please and trusted-publishing boundaries.
-- CI is green on the public default branch.
-- `npm pack --dry-run` has been inspected.
-- Package name and bin policy are still correct.
-- The package `files` whitelist excludes local workflow artifacts, tests, and
-  private agent state.
-- GitHub visibility/ruleset decision is explicit.
-- Support boundary explains Calvin-local paths versus portable config.
-- No docs imply `skills.sh` runtime delegation is part of the managed installer.
-- Docs that mention `skills.sh` source refresh distinguish catalog-only refresh from live agent-home installs.
-- Docs that mention OpenCode or Pi provider roots describe them as read-only,
-  including custom manifest `assignmentPaths` roots.
-- Docs that mention upstream-managed refresh preserve the separate
-  upstream-to-catalog and catalog-to-target lifecycle policy.
-- Docs that mention Skillify validation policy distinguish strict-validation skips from install, receipt, and target drift semantics.
-- Docs that mention target overrides include shared agents and Grok roots.
-
-## Current Decision
-
-Skill Suitcase publishes automatically from the Release Please workflow through
-npm Trusted Publishing. Manual local publishing is still acceptable as emergency
-fallback, but routine releases should flow through Release Please and GitHub
-Actions.
+Routine releases flow through Release Please and GitHub Actions to npm Trusted
+Publishing. Manual local publication is emergency-only and must preserve the
+same verification, payload inspection, provenance, and version-authority
+boundaries.
