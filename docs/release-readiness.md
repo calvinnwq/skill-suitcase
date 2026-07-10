@@ -38,8 +38,8 @@ Merge a Release Please PR only when all of these are true:
 5. No active implementation PR should land first for the same release train.
 
 For the first public release, prefer a deliberate `0.x` release. Do not infer
-`1.0.0` from the first generated Release Please PR unless Calvin explicitly
-chooses a stable public API promise.
+`1.0.0` from the first generated Release Please PR unless the maintainer
+explicitly chooses a stable public API promise.
 
 ## npm Package And Bin Policy
 
@@ -202,10 +202,10 @@ node "$CLI" import-target --source "$SRC" --target codex --codex-home "$HOME/.co
 
 Do not run live `apply`, `track`, `reconcile --apply`, `repair --apply`,
 `rollback`, `promote --apply`, `import-target --apply`, or
-`upstream import --apply` against Calvin's real agent homes or catalog repo
-without explicit approval for the target, catalog source, and mode.
+`upstream import --apply` against real agent homes or a catalog repo without
+explicit approval for the target, catalog source, and mode.
 
-## Calvin-Local Versus Portable Support
+## Environment-Specific Versus Portable Support
 
 Portable support:
 
@@ -225,17 +225,16 @@ Portable support:
   edit is intentional and explicitly approved
 - receipts, status, and rollback for Skill Suitcase-managed installs
 
-Calvin-local examples:
+Environment-specific examples:
 
-- `/Users/ngxcalvin/repos/skills`
-- `/Users/ngxcalvin/repos/skill-suitcase`
-- `/Users/ngxcalvin/.openclaw/...`
-- OpenClaw Kody Codex home paths
-- live adoption state on Calvin's machine
+- local catalog and Skill Suitcase checkout paths
+- local agent-home and skill-root paths
+- runtime-specific nested home paths
+- live adoption state on one operator's machine
 
-Docs may show Calvin-local paths as concrete examples, but portable docs should
-pair them with `$HOME`, `/path/to/skills-catalog`, or explicit override examples.
-Portable behavior must not depend on Calvin's machine paths being present.
+Portable docs should use `$HOME`, `/path/to/skills-catalog`, or explicit
+override examples. Portable behavior must not depend on one operator's machine
+paths being present.
 
 ## Public Readiness Checklist
 
@@ -249,7 +248,7 @@ Before a public announcement or npm publish:
 - The package `files` whitelist excludes local workflow artifacts, tests, and
   private agent state.
 - GitHub visibility/ruleset decision is explicit.
-- Support boundary explains Calvin-local paths versus portable config.
+- Support boundary explains environment-specific paths versus portable config.
 - No docs imply `skills.sh` runtime delegation is part of the managed installer.
 - Docs that mention `skills.sh` source refresh distinguish catalog-only refresh from live agent-home installs.
 - Docs that mention OpenCode or Pi provider roots describe them as read-only,

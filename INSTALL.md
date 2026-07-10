@@ -28,16 +28,31 @@ npm install --global skill-suitcase
 test -d "$HOME/repos/skills" && skill-suitcase targets --source "$HOME/repos/skills" --json
 ```
 
-For source installs:
+Source installs require Node.js 20 or newer and pnpm 10.34.4, as pinned by
+`packageManager` in `package.json`. If Corepack is available, enable the pinned
+pnpm version:
+
+```bash
+corepack enable pnpm
+pnpm --version
+```
+
+If Corepack is not installed, install the same pnpm version with npm:
+
+```bash
+npm install --global pnpm@10.34.4
+pnpm --version
+```
+
+Then install from source:
 
 ```bash
 mkdir -p "$HOME/repos"
 git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase" 2>/dev/null || true
 cd "$HOME/repos/skill-suitcase"
 git pull --ff-only
-corepack enable
-pnpm install
-pnpm build
+pnpm install --frozen-lockfile
+pnpm run build
 ```
 
 Use the source CLI as:

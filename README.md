@@ -82,39 +82,52 @@ skill-suitcase plan --source /path/to/skills-catalog --target openclaw --json
 
 For agent setup, including installing the packaged `skill-suitcase` operator skill into Codex, Claude, Grok, or the shared agents root, follow [`INSTALL.md`](INSTALL.md).
 
-For local development, build and run the compiled CLI directly:
+For local development, follow [`DEVELOPING.md`](DEVELOPING.md), then build and
+run the compiled CLI directly as shown below.
+
+## Community
+
+- Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before proposing a change.
+- Use [`DEVELOPING.md`](DEVELOPING.md) for the supported Node.js range, pinned
+  pnpm setup, architecture, and verification commands.
+- Read [`SUPPORT.md`](SUPPORT.md) before opening a support question or bug
+  report.
+- Report suspected vulnerabilities privately through
+  [`SECURITY.md`](SECURITY.md).
+- Participation is governed by
+  [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 ## Usage
 
 ```bash
 pnpm run build
-node dist/src/cli.js plan --source /Users/ngxcalvin/repos/skills --target openclaw --json
-node dist/src/cli.js diff --source /Users/ngxcalvin/repos/skills --target openclaw --json
-node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --dry-run --json
-node dist/src/cli.js pack --source /Users/ngxcalvin/repos/skills --target openclaw --output /tmp/skill-suitcase-openclaw --json
-node dist/src/cli.js import --source /Users/ngxcalvin/repos/skills --json
-node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --json
-node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --json
-node dist/src/cli.js targets --source /Users/ngxcalvin/repos/skills --json
-node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --json
-node dist/src/cli.js status --source /Users/ngxcalvin/repos/skills --target codex --codex-home ~/.codex --json
-node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --json
-node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --artifact /tmp/skill-suitcase-bundle.json --json
-node dist/src/cli.js apply --source /Users/ngxcalvin/repos/skills --target openclaw --lock /tmp/plan-lock.json --mode symlink --json
+node dist/src/cli.js plan --source /path/to/skills-catalog --target openclaw --json
+node dist/src/cli.js diff --source /path/to/skills-catalog --target openclaw --json
+node dist/src/cli.js pack --source /path/to/skills-catalog --target openclaw --dry-run --json
+node dist/src/cli.js pack --source /path/to/skills-catalog --target openclaw --output /tmp/skill-suitcase-openclaw --json
+node dist/src/cli.js import --source /path/to/skills-catalog --json
+node dist/src/cli.js validate --source /path/to/skills-catalog --json
+node dist/src/cli.js validate --source /path/to/skills-catalog --strict --json
+node dist/src/cli.js targets --source /path/to/skills-catalog --json
+node dist/src/cli.js status --source /path/to/skills-catalog --json
+node dist/src/cli.js status --source /path/to/skills-catalog --target codex --codex-home ~/.codex --json
+node dist/src/cli.js apply --source /path/to/skills-catalog --target openclaw --lock /tmp/plan-lock.json --json
+node dist/src/cli.js apply --source /path/to/skills-catalog --target openclaw --artifact /tmp/skill-suitcase-bundle.json --json
+node dist/src/cli.js apply --source /path/to/skills-catalog --target openclaw --lock /tmp/plan-lock.json --mode symlink --json
 node dist/src/cli.js rollback --receipt /tmp/openclaw-install/.skill-suitcase-receipt.json --json
-node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --json
-node dist/src/cli.js track --source /Users/ngxcalvin/repos/skills --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
-node dist/src/cli.js reconcile --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
-node dist/src/cli.js reconcile --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
-node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
-node dist/src/cli.js repair --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
-node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --dry-run --json
-node dist/src/cli.js promote --source /Users/ngxcalvin/repos/skills --target-skill ~/.codex/skills/new-skill --apply --json
-node dist/src/cli.js import-target --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --dry-run --json
-node dist/src/cli.js import-target --source /Users/ngxcalvin/repos/skills --target openclaw --skill skill-cleaner --apply --json
-node dist/src/cli.js upstream check --source /Users/ngxcalvin/repos/skills --json
-node dist/src/cli.js upstream fetch --source /Users/ngxcalvin/repos/skills --skill hyperframes --dry-run --json
-node dist/src/cli.js upstream import --source /Users/ngxcalvin/repos/skills --skill hyperframes --apply --json
+node dist/src/cli.js track --source /path/to/skills-catalog --target openclaw --json
+node dist/src/cli.js track --source /path/to/skills-catalog --target openclaw --skill office-hours --skill skillify --skill gnhf-postflight --json
+node dist/src/cli.js reconcile --source /path/to/skills-catalog --target openclaw --skill skill-cleaner --dry-run --json
+node dist/src/cli.js reconcile --source /path/to/skills-catalog --target openclaw --skill skill-cleaner --apply --json
+node dist/src/cli.js repair --source /path/to/skills-catalog --target openclaw --skill skill-cleaner --dry-run --json
+node dist/src/cli.js repair --source /path/to/skills-catalog --target openclaw --skill skill-cleaner --apply --json
+node dist/src/cli.js promote --source /path/to/skills-catalog --target-skill ~/.codex/skills/new-skill --dry-run --json
+node dist/src/cli.js promote --source /path/to/skills-catalog --target-skill ~/.codex/skills/new-skill --apply --json
+node dist/src/cli.js import-target --source /path/to/skills-catalog --target openclaw --skill skill-cleaner --dry-run --json
+node dist/src/cli.js import-target --source /path/to/skills-catalog --target openclaw --skill skill-cleaner --apply --json
+node dist/src/cli.js upstream check --source /path/to/skills-catalog --json
+node dist/src/cli.js upstream fetch --source /path/to/skills-catalog --skill hyperframes --dry-run --json
+node dist/src/cli.js upstream import --source /path/to/skills-catalog --skill hyperframes --apply --json
 ```
 
 `import --json` is a read-only onboarding inspection for existing skills repos.
@@ -230,11 +243,13 @@ For a machine with Codex, Claude, Grok, or a shared agents root but no OpenClaw,
 
 Do not run `skills.sh` or `npx skills` directly against live Codex, Claude, Grok, or shared agents homes for new-machine setup.
 If an upstream-managed skill needs a refresh, fetch it through the catalog-only source refresh lane first, review the ordinary repository diff, then use the normal Suitcase target sync commands below.
+Install Node.js 20 or newer and the pinned pnpm version by following
+[`DEVELOPING.md`](DEVELOPING.md) before using a source checkout.
 
 ```bash
 cd ~/repos/skill-suitcase
-pnpm install
-pnpm build
+pnpm install --frozen-lockfile
+pnpm run build
 
 export SRC="$HOME/repos/skills"
 export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
@@ -423,8 +438,8 @@ values, summary counts, a sorted `skills` inventory, and deterministic findings.
 ```json
 {
   "ok": true,
-  "source": "/Users/ngxcalvin/repos/skills",
-  "manifestPath": "/Users/ngxcalvin/repos/skills/skill-suitcase.yaml",
+  "source": "/path/to/skills-catalog",
+  "manifestPath": "/path/to/skills-catalog/skill-suitcase.yaml",
   "summary": {
     "discoveredSkills": 1,
     "referencedSkills": 1,
@@ -454,8 +469,8 @@ values, summary counts, a sorted `skills` inventory, and deterministic findings.
   "skills": [
     {
       "name": "office-hours",
-      "path": "/Users/ngxcalvin/repos/skills/skills/office-hours",
-      "skillFile": "/Users/ngxcalvin/repos/skills/skills/office-hours/SKILL.md",
+      "path": "/path/to/skills-catalog/skills/office-hours",
+      "skillFile": "/path/to/skills-catalog/skills/office-hours/SKILL.md",
       "referencedBy": ["core"],
       "groups": ["portable-core"],
       "compatibility": {
@@ -579,7 +594,7 @@ If a manifest uses `kind: upstream-managed`, the same skill must also be declare
 Basic validation parses this section but validates skip entries only in strict mode.
 
 ```bash
-node dist/src/cli.js validate --source /Users/ngxcalvin/repos/skills --strict --json
+node dist/src/cli.js validate --source /path/to/skills-catalog --strict --json
 ```
 
 Strict mode mirrors the deterministic checks in
@@ -677,8 +692,8 @@ in `.skill-suitcase/upstream-lock.json`:
 {
   "ok": true,
   "readOnly": true,
-  "source": "/Users/ngxcalvin/repos/skills",
-  "lockPath": "/Users/ngxcalvin/repos/skills/.skill-suitcase/upstream-lock.json",
+  "source": "/path/to/skills-catalog",
+  "lockPath": "/path/to/skills-catalog/.skill-suitcase/upstream-lock.json",
   "declarations": [
     {
       "skill": "hyperframes",
@@ -743,7 +758,7 @@ without writing the catalog or targets:
   "ok": true,
   "readOnly": true,
   "dryRun": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "skill": "hyperframes",
   "fetchedSkillPath": "/var/folders/.../skill-suitcase-upstream-.../workspace/...",
   "diff": [
@@ -766,12 +781,12 @@ On success it copies the fetched skill into `skills/<name>`, updates `.skill-sui
   "ok": true,
   "readOnly": false,
   "apply": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "skill": "hyperframes",
-  "catalogSkillPath": "/Users/ngxcalvin/repos/skills/skills/hyperframes",
+  "catalogSkillPath": "/path/to/skills-catalog/skills/hyperframes",
   "summary": { "create": 1, "update": 1, "delete": 0, "unchanged": 0, "filesWritten": 2 },
   "metadata": {
-    "lockPath": "/Users/ngxcalvin/repos/skills/.skill-suitcase/upstream-lock.json",
+    "lockPath": "/path/to/skills-catalog/.skill-suitcase/upstream-lock.json",
     "importedHash": "new-catalog-tree-hash"
   },
   "errors": []
@@ -795,14 +810,14 @@ Upstream error codes include `unknown_upstream_skill`,
 ```json
 {
   "ok": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "target": "openclaw",
   "planned": [
     {
       "skill": "office-hours",
       "action": "install",
       "variant": "canonical",
-      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours",
+      "sourcePath": "/path/to/skills-catalog/skills/office-hours",
       "evidence": ["docs/install-smoke.md"]
     }
   ],
@@ -831,7 +846,7 @@ file-level `entries` and a summary:
 ```json
 {
   "ok": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "target": "openclaw",
   "assignment": "openclaw",
   "installRoot": "/tmp/openclaw/skills",
@@ -840,7 +855,7 @@ file-level `entries` and a summary:
       "skill": "office-hours",
       "action": "install",
       "variant": "canonical",
-      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours",
+      "sourcePath": "/path/to/skills-catalog/skills/office-hours",
       "evidence": ["docs/install-smoke.md"]
     }
   ],
@@ -851,7 +866,7 @@ file-level `entries` and a summary:
       "skill": "office-hours",
       "relativePath": "SKILL.md",
       "targetPath": "/tmp/openclaw/skills/office-hours/SKILL.md",
-      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours/SKILL.md",
+      "sourcePath": "/path/to/skills-catalog/skills/office-hours/SKILL.md",
       "sourceSha256": "b0d..",
       "targetSha256": null,
       "bytes": 123
@@ -861,7 +876,7 @@ file-level `entries` and a summary:
       "skill": "office-hours",
       "relativePath": "runtime.js",
       "targetPath": "/tmp/openclaw/skills/office-hours/runtime.js",
-      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours/runtime.js",
+      "sourcePath": "/path/to/skills-catalog/skills/office-hours/runtime.js",
       "sourceSha256": "e1c..",
       "targetSha256": "e1c..",
       "bytes": 56
@@ -932,7 +947,7 @@ Hygiene failures surface in `errors` as `source_untracked_files`,
 {
   "ok": true,
   "dryRun": false,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "target": "openclaw",
   "bundle": {
     "action": "pack",
@@ -948,7 +963,7 @@ Hygiene failures surface in `errors` as `source_untracked_files`,
       "skill": "office-hours",
       "action": "install",
       "variant": "canonical",
-      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours",
+      "sourcePath": "/path/to/skills-catalog/skills/office-hours",
       "evidence": ["docs/install-smoke.md"]
     }
   ],
@@ -957,7 +972,7 @@ Hygiene failures surface in `errors` as `source_untracked_files`,
     {
       "skill": "office-hours",
       "relativePath": "SKILL.md",
-      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/office-hours/SKILL.md",
+      "sourcePath": "/path/to/skills-catalog/skills/office-hours/SKILL.md",
       "bundlePath": "skills/office-hours/SKILL.md",
       "bytes": 123,
       "sha256": "e1c.."
@@ -1016,7 +1031,7 @@ Local target overrides are applied before discovery, so the returned
 ```json
 {
   "ok": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "targets": [
     {
       "id": "codex",
@@ -1062,8 +1077,8 @@ must already exist.
 ```json
 {
   "ok": true,
-  "source": "/Users/ngxcalvin/repos/skills",
-  "manifestPath": "/Users/ngxcalvin/repos/skills/skill-suitcase.yaml",
+  "source": "/path/to/skills-catalog",
+  "manifestPath": "/path/to/skills-catalog/skill-suitcase.yaml",
   "assignments": [
     {
       "assignmentPath": "codex",
@@ -1238,7 +1253,7 @@ On success (`ok: true`):
 ```json
 {
   "ok": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "target": "openclaw",
   "mode": "lock",
   "input": "/tmp/plan-lock.json",
@@ -1246,7 +1261,7 @@ On success (`ok: true`):
   "planTarget": "openclaw",
   "installRoot": "/tmp/openclaw-install",
   "preApplyStatus": {
-    "source": "/Users/ngxcalvin/repos/skills",
+    "source": "/path/to/skills-catalog",
     "statuses": [{ "skill": "office-hours", "status": "behind", "reason": "..." }],
     "summary": { "total": 1, "behind": 1, "current": 0, "dirty": 0, "missing": 0, "unknown": 0, "blocked": 0, "version": 0, "unchanged": 0 }
   },
@@ -1405,7 +1420,7 @@ On success (`ok: true`):
 ```json
 {
   "ok": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "target": "openclaw",
   "assignment": "openclaw",
   "installRoot": "/tmp/openclaw/skills",
@@ -1482,7 +1497,7 @@ On a clean dry run (`ok: true`):
   "ok": true,
   "dryRun": true,
   "readOnly": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "target": "openclaw",
   "assignment": "openclaw",
   "installRoot": "/tmp/openclaw/skills",
@@ -1490,14 +1505,14 @@ On a clean dry run (`ok: true`):
   "candidates": [
     {
       "skill": "skill-cleaner",
-      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner",
+      "sourcePath": "/path/to/skills-catalog/skills/skill-cleaner",
       "targetPath": "/tmp/openclaw/skills/skill-cleaner",
       "variant": "canonical",
       "status": "unknown",
       "reason": "target exists but has no Suitcase receipt",
       "changes": { "create": 1, "update": 1, "extra": 1, "missing": 0, "unchanged": 0 },
       "entries": [
-        { "action": "update", "skill": "skill-cleaner", "relativePath": "SKILL.md", "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner/SKILL.md", "targetPath": "/tmp/openclaw/skills/skill-cleaner/SKILL.md" }
+        { "action": "update", "skill": "skill-cleaner", "relativePath": "SKILL.md", "sourcePath": "/path/to/skills-catalog/skills/skill-cleaner/SKILL.md", "targetPath": "/tmp/openclaw/skills/skill-cleaner/SKILL.md" }
       ],
       "backup": {
         "strategy": "rename-target-directory",
@@ -1595,7 +1610,7 @@ On a clean dry run (`ok: true`):
   "ok": true,
   "dryRun": true,
   "readOnly": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "target": "openclaw",
   "assignment": "openclaw",
   "installRoot": "/tmp/openclaw/skills",
@@ -1603,7 +1618,7 @@ On a clean dry run (`ok: true`):
   "candidates": [
     {
       "skill": "skill-cleaner",
-      "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner",
+      "sourcePath": "/path/to/skills-catalog/skills/skill-cleaner",
       "targetPath": "/tmp/openclaw/skills/skill-cleaner",
       "variant": "canonical",
       "status": "dirty",
@@ -1612,7 +1627,7 @@ On a clean dry run (`ok: true`):
       "catalogHash": "9a4..",
       "changes": { "create": 0, "update": 1, "extra": 1, "missing": 0, "unchanged": 1 },
       "entries": [
-        { "action": "update", "skill": "skill-cleaner", "relativePath": "runtime.js", "sourcePath": "/Users/ngxcalvin/repos/skills/skills/skill-cleaner/runtime.js", "targetPath": "/tmp/openclaw/skills/skill-cleaner/runtime.js" },
+        { "action": "update", "skill": "skill-cleaner", "relativePath": "runtime.js", "sourcePath": "/path/to/skills-catalog/skills/skill-cleaner/runtime.js", "targetPath": "/tmp/openclaw/skills/skill-cleaner/runtime.js" },
         { "action": "extra", "skill": "skill-cleaner", "relativePath": "extra.js", "sourcePath": null, "targetPath": "/tmp/openclaw/skills/skill-cleaner/extra.js" }
       ],
       "backup": {
@@ -1718,15 +1733,15 @@ On a clean plan (`ok: true`):
   "ok": true,
   "dryRun": true,
   "readOnly": true,
-  "source": "/Users/ngxcalvin/repos/skills",
-  "targetSkill": "/Users/ngxcalvin/.codex/skills/new-skill",
+  "source": "/path/to/skills-catalog",
+  "targetSkill": "/path/to/codex-skills/new-skill",
   "skillName": "new-skill",
-  "repoSkillPath": "/Users/ngxcalvin/repos/skills/skills/new-skill",
+  "repoSkillPath": "/path/to/skills-catalog/skills/new-skill",
   "plan": [
-    { "action": "copy", "description": "Copy the target skill contents into the catalog source path.", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
-    { "action": "verify", "description": "Hash-verify the copied catalog source against the original target contents before swapping.", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
-    { "action": "symlink", "description": "Replace the target directory with a symlink back to the catalog source after verification.", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
-    { "action": "receipt", "description": "Write receipt metadata linking the target to the promoted catalog source.", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" }
+    { "action": "copy", "description": "Copy the target skill contents into the catalog source path.", "from": "/path/to/codex-skills/new-skill", "to": "/path/to/skills-catalog/skills/new-skill" },
+    { "action": "verify", "description": "Hash-verify the copied catalog source against the original target contents before swapping.", "from": "/path/to/codex-skills/new-skill", "to": "/path/to/skills-catalog/skills/new-skill" },
+    { "action": "symlink", "description": "Replace the target directory with a symlink back to the catalog source after verification.", "from": "/path/to/codex-skills/new-skill", "to": "/path/to/skills-catalog/skills/new-skill" },
+    { "action": "receipt", "description": "Write receipt metadata linking the target to the promoted catalog source.", "to": "/path/to/skills-catalog/skills/new-skill" }
   ],
   "conflicts": [],
   "summary": { "conflicts": 0, "steps": 4 }
@@ -1776,19 +1791,19 @@ preserved original (kept as trashable rollback state):
 {
   "ok": true,
   "dryRun": false,
-  "source": "/Users/ngxcalvin/repos/skills",
-  "targetSkill": "/Users/ngxcalvin/.codex/skills/new-skill",
+  "source": "/path/to/skills-catalog",
+  "targetSkill": "/path/to/codex-skills/new-skill",
   "skillName": "new-skill",
-  "repoSkillPath": "/Users/ngxcalvin/repos/skills/skills/new-skill",
+  "repoSkillPath": "/path/to/skills-catalog/skills/new-skill",
   "steps": [
-    { "action": "copy", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
-    { "action": "verify", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
-    { "action": "symlink", "from": "/Users/ngxcalvin/.codex/skills/new-skill", "to": "/Users/ngxcalvin/repos/skills/skills/new-skill" },
-    { "action": "receipt", "to": "/Users/ngxcalvin/.codex/skills/.skill-suitcase-receipt.json" }
+    { "action": "copy", "from": "/path/to/codex-skills/new-skill", "to": "/path/to/skills-catalog/skills/new-skill" },
+    { "action": "verify", "from": "/path/to/codex-skills/new-skill", "to": "/path/to/skills-catalog/skills/new-skill" },
+    { "action": "symlink", "from": "/path/to/codex-skills/new-skill", "to": "/path/to/skills-catalog/skills/new-skill" },
+    { "action": "receipt", "to": "/path/to/codex-skills/.skill-suitcase-receipt.json" }
   ],
   "conflicts": [],
-  "receiptPath": "/Users/ngxcalvin/.codex/skills/.skill-suitcase-receipt.json",
-  "backupPath": "/Users/ngxcalvin/.codex/skills/.new-skill.suitcase-pre-promote-<id>",
+  "receiptPath": "/path/to/codex-skills/.skill-suitcase-receipt.json",
+  "backupPath": "/path/to/codex-skills/.new-skill.suitcase-pre-promote-<id>",
   "errors": []
 }
 ```
@@ -1855,7 +1870,7 @@ On a clean dry run (`ok: true`):
   "ok": true,
   "dryRun": true,
   "readOnly": true,
-  "source": "/Users/ngxcalvin/repos/skills",
+  "source": "/path/to/skills-catalog",
   "target": "openclaw",
   "assignment": "openclaw",
   "installRoot": "/tmp/openclaw/skills",
@@ -1866,7 +1881,7 @@ On a clean dry run (`ok: true`):
       "targetId": "openclaw",
       "installRoot": "/tmp/openclaw/skills",
       "targetSkillPath": "/tmp/openclaw/skills/foo",
-      "catalogSkillPath": "/Users/ngxcalvin/repos/skills/skills/foo",
+      "catalogSkillPath": "/path/to/skills-catalog/skills/foo",
       "status": "dirty",
       "reason": "target files differ from receipt",
       "receiptState": "receipt-owned",
@@ -1876,8 +1891,8 @@ On a clean dry run (`ok: true`):
       "variant": "canonical",
       "changes": { "create": 1, "update": 1, "delete": 0, "unchanged": 2 },
       "repoWrites": [
-        { "action": "update", "skill": "foo", "relativePath": "SKILL.md", "catalogPath": "/Users/ngxcalvin/repos/skills/skills/foo/SKILL.md", "targetPath": "/tmp/openclaw/skills/foo/SKILL.md" },
-        { "action": "create", "skill": "foo", "relativePath": "helper.js", "catalogPath": "/Users/ngxcalvin/repos/skills/skills/foo/helper.js", "targetPath": "/tmp/openclaw/skills/foo/helper.js" }
+        { "action": "update", "skill": "foo", "relativePath": "SKILL.md", "catalogPath": "/path/to/skills-catalog/skills/foo/SKILL.md", "targetPath": "/tmp/openclaw/skills/foo/SKILL.md" },
+        { "action": "create", "skill": "foo", "relativePath": "helper.js", "catalogPath": "/path/to/skills-catalog/skills/foo/helper.js", "targetPath": "/tmp/openclaw/skills/foo/helper.js" }
       ],
       "finalAction": "replace-catalog-from-target"
     }
@@ -2064,6 +2079,10 @@ This module does not write files or require the apply/install layer to exist.
 
 ## Development
 
+Node.js 20 or newer is supported. The repository pins pnpm 10.34.4 through
+`packageManager`; follow [`DEVELOPING.md`](DEVELOPING.md) for Corepack and npm
+setup paths before installing dependencies.
+
 ```bash
 pnpm test
 pnpm run lint
@@ -2080,7 +2099,7 @@ to enforce the module boundaries described in [`ARCHITECTURE.md`](ARCHITECTURE.m
 
 The first milestone has no runtime package dependencies (only the TypeScript dev
 toolchain). The manifest reader is strict and intentionally scoped to the current
-`skill-suitcase.yaml` shape from `/Users/ngxcalvin/repos/skills`, including
+`skill-suitcase.yaml` shape from `/path/to/skills-catalog`, including
 manifest-owned logical groups as reporting metadata.
 
 ## License

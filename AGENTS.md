@@ -13,3 +13,28 @@ Before adding or changing a command:
 
 New product work should extend the command/core/adapter/renderer pattern instead
 of adding behavior directly to `src/cli.ts`.
+
+Preserve existing user changes and avoid generated `dist/`, dependency, local
+agent-state, or review-artifact files. Use portable paths such as `$HOME`, a
+temporary directory, or `/path/to/catalog` in documentation and tests.
+
+## Safety
+
+Prefer read-only commands and disposable fixtures. Do not mutate a real catalog
+or agent home without explicit approval for the target and mode. Keep secrets,
+credentials, private prompts, and unrelated local state out of source and tool
+output.
+
+## Verification
+
+Use the checks relevant to the change. The normal full set is:
+
+```bash
+pnpm test
+pnpm run lint
+pnpm run architecture:check
+git diff --check
+```
+
+See [`DEVELOPING.md`](DEVELOPING.md) for setup, focused tests, and local CLI
+examples.

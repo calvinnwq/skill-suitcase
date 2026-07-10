@@ -136,7 +136,7 @@ into a junk drawer.
 ## Source Of Truth
 
 Skill Suitcase is the source-of-truth manager for approved skill installs. The
-catalog repository, such as `/Users/ngxcalvin/repos/skills`, owns skill source
+catalog repository, such as `/path/to/skills-catalog`, owns skill source
 files, variant metadata, assignments, and target policy. Agent homes are install
 targets, not canonical source directories.
 
@@ -351,7 +351,7 @@ agent skill path -> catalog repo source path
 Example:
 
 ```txt
-~/.codex/skills/my-skill -> /Users/ngxcalvin/repos/skills/skills/my-skill
+~/.codex/skills/my-skill -> /path/to/skills-catalog/skills/my-skill
 ```
 
 The reverse direction is not allowed for managed installs. The catalog repo must

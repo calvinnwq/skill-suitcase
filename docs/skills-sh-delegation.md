@@ -28,7 +28,7 @@ live agent homes.
   receipt output, rollback contract, or exact post-install manifest suitable for
   direct Skill Suitcase ownership.
 - The existing catalog repo compatibility path at
-  `/Users/ngxcalvin/repos/skills/scripts/sync.py` shells out to
+  `/path/to/skills-catalog/scripts/sync.py` shells out to
   `npx skills add <repo> --skill <skill> -g -a <agent> -y`, optionally with
   `--copy`. That path is useful as a compatibility adapter, but it does not
   create Skill Suitcase receipts or prove rollback ownership.
