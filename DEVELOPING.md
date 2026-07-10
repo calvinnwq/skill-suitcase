@@ -43,8 +43,10 @@ before changing a command or adding product behavior. The main boundaries are:
 - `src/adapters/` owns filesystem and infrastructure boundaries.
 - `src/renderers/` owns JSON, usage, error, and exit-code rendering.
 
-Keep machine-readable JSON on stdout deterministic. Human-readable usage,
-notices, warnings, and errors belong on stderr.
+Keep machine-readable JSON on stdout deterministic. Structured command results,
+including findings, warnings, and `ok: false` errors, belong on stdout.
+Parser/usage failures, uncaught fatal diagnostics, and non-JSON notices belong
+on stderr.
 
 ## Verification
 

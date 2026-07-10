@@ -322,11 +322,17 @@ test("release publishing uses the Trusted Publishing safety boundary", async () 
     }
   }
 
-  const publishSteps = steps.filter(
-    (step) => typeof step.run === "string" && /(?:^|\n)\s*npm publish\b(?![^\n]*--dry-run)/m.test(step.run)
-  );
+  const publishSteps = steps
+    .map((step, index) => ({ index, step }))
+    .filter(
+      ({ step }) => typeof step.run === "string" && /(?:^|\n)\s*npm publish\b(?![^\n]*--dry-run)/m.test(step.run)
+    );
   assert.equal(publishSteps.length, 1, `${file} must contain exactly one non-dry-run npm publish step`);
-  const publishCommand = expectString(publishSteps[0]?.run, `${file} publish command`);
+  const publishStep = publishSteps[0];
+  assert.ok(publishStep, `${file} must define a non-dry-run npm publish step`);
+  assert.ok(publishStep.index > releaseStepIndex, `${file} npm publish must run after Release Please`);
+  assert.equal(publishStep.step.if, releaseCreatedCondition, `${file} npm publish must require a created release`);
+  const publishCommand = expectString(publishStep.step.run, `${file} publish command`);
   assert.match(publishCommand, /(?:^|\s)--provenance(?:\s|$)/, `${file} npm publish must attest provenance`);
   assert.match(publishCommand, /(?:^|\s)--access\s+public(?:\s|$)/, `${file} npm publish must remain public`);
   assert.doesNotMatch(
