@@ -1,0 +1,69 @@
+name: Bug report
+description: Report reproducible incorrect Skill Suitcase behavior.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Search existing issues first and do not include secrets, private catalog content, or personal paths. Report vulnerabilities through SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Provide the released package version, commit SHA, or branch you tested.
+      placeholder: skill-suitcase 0.x.x or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the operating system, Node.js version, and installation method.
+      placeholder: macOS; Node.js 24; installed with npm
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and inputs
+      description: Show the command shape and minimal portable fixture or manifest needed to reproduce it. Redact sensitive values.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include relevant deterministic JSON output or stderr text.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: List the smallest reliable sequence that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add any other non-sensitive logs, screenshots, or possible causes.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and tested the newest release when practical.
+          required: true
+        - label: I removed credentials, private prompts, personal paths, and private agent or catalog state.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

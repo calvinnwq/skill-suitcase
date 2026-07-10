@@ -1,0 +1,45 @@
+name: Support question
+description: Ask about documented Skill Suitcase usage or setup.
+title: "support: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Support is best effort. Check README.md, INSTALL.md, and existing issues first. Do not include credentials, private catalog content, personal paths, or agent state.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to accomplish, and where are you blocked?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Provide the released package version, commit SHA, or branch when relevant.
+      placeholder: skill-suitcase 0.x.x or commit SHA
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the operating system, Node.js version, and installation method when relevant.
+      placeholder: Linux; Node.js 24; installed with npm
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Link the documentation you followed and show portable command examples or redacted output.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I checked the documentation and existing issues.
+          required: true
+        - label: I removed credentials, private prompts, personal paths, and private agent or catalog state.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
