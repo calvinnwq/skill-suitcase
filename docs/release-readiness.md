@@ -74,7 +74,7 @@ decision; it is not inferred from routine Release Please output.
 - Repository: `calvinnwq/skill-suitcase`
 
 `package.json` uses an explicit `files` whitelist.
-The public payload is approved through exact curated paths: `dist/src/**/*.js`; `skills/skill-suitcase/SKILL.md`; `skills/skill-suitcase/agents/openai.yaml`; `LICENSE`, `VISION.md`, `README.md`, `INSTALL.md`, and `CHANGELOG.md`; and `docs/install-smoke.md`, `docs/portability-matrix.md`, `docs/release-readiness.md`, and `docs/skills-sh-delegation.md`.
+The public payload is approved through exact curated paths: npm's required `package.json`; `dist/src/**/*.js`; `skills/skill-suitcase/SKILL.md`; `skills/skill-suitcase/agents/openai.yaml`; `LICENSE`, `VISION.md`, `README.md`, `INSTALL.md`, and `CHANGELOG.md`; and `docs/command-reference.md`, `docs/install-smoke.md`, `docs/portability-matrix.md`, `docs/release-readiness.md`, and `docs/skills-sh-delegation.md`.
 Do not replace the exact documentation or operator-skill entries with broad directory globs because a newly added file must not become publish-approved without independent review.
 Tests, source TypeScript, local review artifacts, agent state, and workspace files are excluded from the npm payload.
 
