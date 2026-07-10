@@ -15,6 +15,7 @@ const REQUIRED_COMMUNITY_FILES = [
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/ISSUE_TEMPLATE/bug_report.yml",
   ".github/ISSUE_TEMPLATE/feature_request.yml",
+  ".github/ISSUE_TEMPLATE/support_request.yml",
   ".github/ISSUE_TEMPLATE/config.yml"
 ] as const;
 
@@ -27,7 +28,17 @@ const PORTABLE_COMMUNITY_FILES = [
   "CLAUDE.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/ISSUE_TEMPLATE/bug_report.yml",
-  ".github/ISSUE_TEMPLATE/feature_request.yml"
+  ".github/ISSUE_TEMPLATE/feature_request.yml",
+  ".github/ISSUE_TEMPLATE/support_request.yml"
+] as const;
+
+const PACKAGED_COMMUNITY_FILES = [
+  "CONTRIBUTING.md",
+  "DEVELOPING.md",
+  "SECURITY.md",
+  "SUPPORT.md",
+  "CODE_OF_CONDUCT.md",
+  "CLAUDE.md"
 ] as const;
 
 const COMMUNITY_MARKDOWN_FILES = [
@@ -217,16 +228,21 @@ test("community guidance does not contain contributor-specific local paths", asy
 test("issue forms conform to the expected GitHub schemas", async () => {
   const bugFile = ".github/ISSUE_TEMPLATE/bug_report.yml";
   const featureFile = ".github/ISSUE_TEMPLATE/feature_request.yml";
+  const supportFile = ".github/ISSUE_TEMPLATE/support_request.yml";
   const bugBody = validateIssueForm(bugFile, await readYaml(bugFile));
   const featureBody = validateIssueForm(featureFile, await readYaml(featureFile));
+  const supportBody = validateIssueForm(supportFile, await readYaml(supportFile));
 
   assert.deepEqual(fieldIds(bugBody), ["summary", "reproduce", "expected", "environment", "output", "safety"]);
   assert.deepEqual(fieldIds(featureBody), ["problem", "outcome", "alternatives", "contract", "checks"]);
+  assert.deepEqual(fieldIds(supportBody), ["question", "attempted", "environment", "safety"]);
 
   assertRequiredFields(bugFile, bugBody, ["summary", "reproduce", "expected", "environment"]);
   assertRequiredFields(featureFile, featureBody, ["problem", "outcome"]);
+  assertRequiredFields(supportFile, supportBody, ["question", "attempted", "environment"]);
   const safetyOptions = expectRequiredChecklist(bugFile, bugBody, "safety");
   expectRequiredChecklist(featureFile, featureBody, "checks");
+  expectRequiredChecklist(supportFile, supportBody, "safety");
   assert.ok(
     safetyOptions.some((option) => /not a security vulnerability/i.test(expectString(expectRecord(option, "safety option").label, "safety option label"))),
     `${bugFile} must direct security vulnerabilities to the private reporting process`
@@ -257,6 +273,19 @@ test("issue template config routes support and security contacts", async () => {
   }
 
   assert.deepEqual([...expectedTargets], [], `${file} must link to both support and security guidance`);
+});
+
+test("npm package includes README-linked community guidance", async () => {
+  const packageJson = expectRecord(JSON.parse(await readFile("package.json", "utf8")), "package.json");
+  const packagedFiles = new Set(
+    expectArray(packageJson.files, "package.json.files").map((file, index) =>
+      expectString(file, `package.json.files[${index}]`)
+    )
+  );
+
+  for (const file of PACKAGED_COMMUNITY_FILES) {
+    assert.ok(packagedFiles.has(file), `package.json.files must include ${file}`);
+  }
 });
 
 test("repository file validation rejects unsafe and non-file targets", async () => {

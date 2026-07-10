@@ -55,3 +55,13 @@ public-documentation gate.
 GitHub releases and npm publishing are managed by Release Please after changes
 land on the default branch. Contributors should not update package versions or
 the changelog for ordinary pull requests unless a maintainer requests it.
+
+Merging the Release Please pull request updates `package.json`,
+`.release-please-manifest.json`, and `CHANGELOG.md`, then creates the GitHub
+release and tag. The release workflow verifies the package and publishes it
+through npm Trusted Publishing. The npm package must keep its trusted publisher
+configured for repository `calvinnwq/skill-suitcase` and workflow
+`release-please.yml`; never introduce a long-lived npm token.
+
+See [`docs/release-readiness.md`](docs/release-readiness.md) for the Release
+Please merge checklist, package policy, and public-readiness checks.
