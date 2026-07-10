@@ -47,14 +47,17 @@ pnpm run build
 pnpm run typecheck
 pnpm run lint
 pnpm test
+pnpm run package:smoke
 pnpm run format:check
 pnpm run architecture:check
 ```
 
-`build` compiles TypeScript into `dist/`. `typecheck` runs `tsc --noEmit`, and
-`lint` currently aliases that check. `test` removes `dist/`, builds, then runs
-Node's test runner against the compiled test files. `format:check` runs
-`git diff --check`.
+`build` removes `dist/`, compiles TypeScript, and marks the CLI executable.
+`typecheck` runs `tsc --noEmit`, and `lint` currently aliases that check.
+`test` builds first, then runs Node's test runner against the compiled tests and the packaging tests under `scripts/*.test.mjs`.
+`package:smoke` clean-builds through the npm `prepack` hook, validates the public metadata and exact tarball payload, installs that tarball in an empty temporary project, and runs its read-only `targets` command.
+`package:prepare` is the lower-level clean-build and hash-recording step used by `prepack`, while `package:validate` rechecks the recorded build without rebuilding it.
+`format:check` runs `git diff --check`.
 
 For a focused test, build first and run the compiled file:
 
@@ -90,6 +93,4 @@ chosen for the test.
 7. Update the README, install runbook, operator skill, or architecture guide when
    their documented contract changes.
 
-Before opening a pull request, run the checks relevant to the change; the full
-local closeout is `pnpm test`, `pnpm run lint`, `pnpm run architecture:check`,
-and `git diff --check`.
+Before opening a pull request, run the checks relevant to the change; the full local closeout is `pnpm test`, `pnpm run lint`, `pnpm run package:smoke`, `pnpm run architecture:check`, and `git diff --check`.

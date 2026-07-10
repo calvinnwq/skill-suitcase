@@ -48,9 +48,8 @@ Merging the Release Please PR updates `package.json`,
 `.release-please-manifest.json`, and `CHANGELOG.md`, then creates the GitHub
 release and tag.
 
-When the Release Please run creates a GitHub release, the same workflow verifies
-the package and publishes it to npm through npm Trusted Publishing. Do not add a
-long-lived npm token.
+When the Release Please run creates a GitHub release, the same workflow runs the normal gates, smoke-packs and installs the tarball, checks `npm publish --dry-run --access public --json`, and publishes it to npm with provenance through npm Trusted Publishing.
+The npm package must have a trusted publisher configured for `calvinnwq/skill-suitcase` and workflow filename `release-please.yml`; do not add long-lived npm tokens.
 
 See [`docs/release-readiness.md`](docs/release-readiness.md) for the Release
 Please merge checklist, npm package/bin policy, repository controls, and the

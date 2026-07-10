@@ -31,7 +31,7 @@ const EXPECTED_METADATA = {
   name: "skill-suitcase",
   license: "MIT",
   author: "Calvin Ng",
-  packageManager: "pnpm@10.33.3",
+  packageManager: "pnpm@10.34.4",
   repository: {
     type: "git",
     url: "git+https://github.com/calvinnwq/skill-suitcase.git"
