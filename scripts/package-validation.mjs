@@ -19,6 +19,7 @@ const EXPECTED_FILES_ALLOWLIST = [
   "README.md",
   "INSTALL.md",
   "CHANGELOG.md",
+  "docs/command-reference.md",
   "docs/install-smoke.md",
   "docs/portability-matrix.md",
   "docs/release-readiness.md",
