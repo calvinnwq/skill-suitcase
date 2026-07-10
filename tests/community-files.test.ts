@@ -72,19 +72,21 @@ test("development setup pins pnpm across the supported Node.js range", async () 
   );
 
   assert.equal(packageJson.packageManager, "pnpm@10.34.4");
-  for (const guide of [developing, install]) {
-    const updateCorepack = guide.indexOf("npm install --global corepack@latest");
-    const enableCorepack = guide.indexOf("corepack enable pnpm");
-    const disableCorepack = guide.indexOf("corepack disable pnpm");
-    const npmFallback = guide.indexOf("npm install --global --force pnpm@10.34.4");
+  for (const guide of [developing, install, operatorSkill]) {
+    const pinnedRunner = guide.indexOf("npm exec --yes --package=pnpm@10.34.4 -- pnpm");
+    const versionCheck = guide.indexOf('test "$(pnpm --version)" = "10.34.4"');
+    const frozenInstall = guide.indexOf("pnpm install --frozen-lockfile");
 
-    assert.ok(updateCorepack >= 0 && updateCorepack < enableCorepack);
-    assert.ok(disableCorepack > enableCorepack && disableCorepack < npmFallback);
+    assert.ok(pinnedRunner >= 0 && pinnedRunner < versionCheck);
+    assert.ok(versionCheck < frozenInstall);
     assert.ok(guide.includes('test "$(pnpm --version)" = "10.34.4"'));
+    assert.ok(!guide.includes("corepack@latest"));
+    assert.ok(!guide.includes("npm install --global corepack"));
+    assert.doesNotMatch(guide, /npm install --global(?: --force)? pnpm@/);
   }
   assert.match(
     operatorSkill,
-    /npm install --global corepack@latest[\s\S]+corepack enable pnpm[\s\S]+test "\$\(pnpm --version\)" = "10\.34\.4"; then[\s\S]+else[\s\S]+corepack disable pnpm[\s\S]+npm install --global --force pnpm@10\.34\.4/
+    /pnpm\(\) \{[\s\S]+npm exec --yes --package=pnpm@10\.34\.4 -- pnpm "\$@"[\s\S]+test "\$\(pnpm --version\)" = "10\.34\.4" \\[\s\S]+&& pnpm install --frozen-lockfile/
   );
   for (const workflow of workflows) {
     assert.ok(workflow.includes("pnpm/action-setup@v6"));

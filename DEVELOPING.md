@@ -9,27 +9,15 @@ community expectations live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - pnpm 10.34.4, as pinned by `packageManager` in `package.json`
 - Git
 
-Corepack bundled with Node.js can carry outdated package signatures. Update it
-before enabling the pinned pnpm version:
+Use npm's ephemeral executor for the pinned pnpm version. This shell function
+keeps Corepack and global package-manager shims unchanged; keep it in the
+current shell for the commands below:
 
 ```bash
-npm install --global corepack@latest
-corepack enable pnpm
+pnpm() {
+  npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
+}
 test "$(pnpm --version)" = "10.34.4"
-```
-
-If updating or activating Corepack fails, remove any stale pnpm shim and install
-the same pnpm version directly with npm:
-
-```bash
-corepack disable pnpm 2>/dev/null || true
-npm install --global --force pnpm@10.34.4
-test "$(pnpm --version)" = "10.34.4"
-```
-
-Install the locked dependencies:
-
-```bash
 pnpm install --frozen-lockfile
 ```
 

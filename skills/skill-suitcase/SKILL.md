@@ -63,15 +63,9 @@ Prefer the global binary when it exists. Otherwise use the built source CLI:
 
 ```bash
 cd "$HOME/repos/skill-suitcase"
-if command -v corepack >/dev/null 2>&1 \
-  && npm install --global corepack@latest \
-  && corepack enable pnpm \
-  && test "$(pnpm --version)" = "10.34.4"; then
-  :
-else
-  corepack disable pnpm 2>/dev/null || true
-  npm install --global --force pnpm@10.34.4
-fi
+pnpm() {
+  npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
+}
 test "$(pnpm --version)" = "10.34.4" \
   && pnpm install --frozen-lockfile \
   && pnpm run build

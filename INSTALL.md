@@ -29,32 +29,19 @@ test -d "$HOME/repos/skills" && skill-suitcase targets --source "$HOME/repos/ski
 ```
 
 Source installs require Node.js 20 or newer and pnpm 10.34.4, as pinned by
-`packageManager` in `package.json`. Corepack bundled with Node.js can carry
-outdated package signatures, so update it before enabling the pinned pnpm
-version:
-
-```bash
-npm install --global corepack@latest
-corepack enable pnpm
-test "$(pnpm --version)" = "10.34.4"
-```
-
-If updating or activating Corepack fails, remove any stale pnpm shim and install
-the same pnpm version directly with npm:
-
-```bash
-corepack disable pnpm 2>/dev/null || true
-npm install --global --force pnpm@10.34.4
-test "$(pnpm --version)" = "10.34.4"
-```
-
-Then install from source:
+`packageManager` in `package.json`. Install from source with npm's ephemeral
+executor so the pinned pnpm version runs without changing Corepack or global
+package-manager shims:
 
 ```bash
 mkdir -p "$HOME/repos"
 git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase" 2>/dev/null || true
 cd "$HOME/repos/skill-suitcase"
 git pull --ff-only
+pnpm() {
+  npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
+}
+test "$(pnpm --version)" = "10.34.4"
 pnpm install --frozen-lockfile
 pnpm run build
 ```
