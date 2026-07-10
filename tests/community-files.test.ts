@@ -288,6 +288,59 @@ test("npm package includes README-linked community guidance", async () => {
   }
 });
 
+test("release publishing uses the Trusted Publishing safety boundary", async () => {
+  const file = ".github/workflows/release-please.yml";
+  const workflowText = await readFile(file, "utf8");
+  const workflow = await readYaml(file);
+  const jobs = expectRecord(workflow.jobs, `${file}.jobs`);
+  const releaseJob = expectRecord(jobs["release-please"], `${file}.jobs.release-please`);
+  const permissions = expectRecord(
+    releaseJob.permissions ?? workflow.permissions,
+    `${file}.jobs.release-please effective permissions`
+  );
+  assert.equal(permissions["id-token"], "write", `${file} must grant OIDC token permission`);
+
+  const steps = expectArray(releaseJob.steps, `${file}.jobs.release-please.steps`).map((step, index) =>
+    expectRecord(step, `${file}.jobs.release-please.steps[${index}]`)
+  );
+  const releaseStepIndex = steps.findIndex(
+    (step) =>
+      step.id === "release" &&
+      typeof step.uses === "string" &&
+      step.uses.startsWith("googleapis/release-please-action@")
+  );
+  assert.notEqual(releaseStepIndex, -1, `${file} must define the Release Please output step`);
+
+  const releaseCreatedCondition = "${{ steps.release.outputs.release_created == 'true' }}";
+  for (const [index, step] of steps.entries()) {
+    if (index > releaseStepIndex) {
+      assert.equal(
+        step.if,
+        releaseCreatedCondition,
+        `${file}.jobs.release-please.steps[${index}] must require a created release`
+      );
+    }
+  }
+
+  const publishSteps = steps.filter(
+    (step) => typeof step.run === "string" && /(?:^|\n)\s*npm publish\b(?![^\n]*--dry-run)/m.test(step.run)
+  );
+  assert.equal(publishSteps.length, 1, `${file} must contain exactly one non-dry-run npm publish step`);
+  const publishCommand = expectString(publishSteps[0]?.run, `${file} publish command`);
+  assert.match(publishCommand, /(?:^|\s)--provenance(?:\s|$)/, `${file} npm publish must attest provenance`);
+  assert.match(publishCommand, /(?:^|\s)--access\s+public(?:\s|$)/, `${file} npm publish must remain public`);
+  assert.doesNotMatch(
+    workflowText,
+    /\b(?:npm|node)[_-]?(?:auth[_-]?)?token\b/i,
+    `${file} must not reference a long-lived npm authentication token`
+  );
+  assert.doesNotMatch(
+    workflowText,
+    /\$\{\{\s*secrets\./i,
+    `${file} must publish through OIDC without repository secrets`
+  );
+});
+
 test("repository file validation rejects unsafe and non-file targets", async () => {
   await assert.doesNotReject(assertRepositoryFile("README.md", "LICENSE", "LICENSE"));
   await assert.rejects(assertRepositoryFile("README.md", "/LICENSE", "/LICENSE"), /absolute local link/);
