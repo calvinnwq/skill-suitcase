@@ -190,7 +190,8 @@ Before publishing, verify:
 - Long-form command behavior lives in `docs/command-reference.md`, not in a
   README roadmap or milestone narrative.
 - `INSTALL.md` covers packaged CLI and operator-skill setup.
-- `CONTRIBUTING.md` explains Release Please and Trusted Publishing boundaries.
+- `CONTRIBUTING.md` explains contributor-facing commit and Release Please
+  boundaries; this checklist owns Trusted Publishing details.
 - No doc implies `skills.sh` runtime delegation is a managed installer path.
 - Upstream docs keep upstream-to-catalog drift separate from
   catalog-to-target drift.

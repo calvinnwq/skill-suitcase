@@ -59,9 +59,11 @@ pnpm run architecture:check
 ```
 
 `pnpm test` rebuilds the project and runs Node's built-in test runner against
-the compiled test suite. `lint` currently aliases the TypeScript typecheck.
-`format:check` runs `git diff --check`, and `architecture:check` enforces the
-module boundaries documented in `ARCHITECTURE.md`.
+the compiled test suite, including deterministic checks for the community files,
+issue forms, and local documentation links. `lint` currently aliases the
+TypeScript typecheck. `format:check` runs `git diff --check`, and
+`architecture:check` enforces the module boundaries documented in
+`ARCHITECTURE.md`.
 
 When changing CLI output, test both the parsed JSON stdout and the stderr/exit
 code contract. Tests should use temporary directories and deterministic fixture

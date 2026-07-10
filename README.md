@@ -303,6 +303,11 @@ The current implementation has no runtime package dependencies. Keep
 behavior in `src/core/`, infrastructure in `src/adapters/`, and output contracts
 in `src/renderers/`.
 
+Development dependencies support TypeScript compilation, Node.js types, and
+issue-form YAML validation. The manifest reader is strict and intentionally
+scoped to the current `skill-suitcase.yaml` schema, including manifest-owned
+logical groups as reporting metadata.
+
 Release automation, npm Trusted Publishing, public-repository controls, and the
 current shipped version are documented in
 [`docs/release-readiness.md`](docs/release-readiness.md).
