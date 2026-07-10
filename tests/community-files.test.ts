@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { access, readFile, realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep, win32 } from "node:path";
 import { test } from "node:test";
 import { parseDocument } from "yaml";
 
@@ -42,6 +42,8 @@ const COMMUNITY_MARKDOWN_FILES = [
 ] as const;
 
 type UnknownRecord = Record<string, unknown>;
+
+const REPOSITORY_ROOT = resolve(".");
 
 function expectRecord(value: unknown, context: string): UnknownRecord {
   assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), `${context} must be an object`);
@@ -166,6 +168,36 @@ function markdownLinkTarget(rawTarget: string): string {
   return angleTarget?.[1] ?? trimmed.split(/\s+(?=["'])/, 1)[0] ?? "";
 }
 
+function isWithinRepository(repositoryRoot: string, path: string): boolean {
+  const repositoryPath = relative(repositoryRoot, path);
+  return repositoryPath === "" || (repositoryPath !== ".." && !repositoryPath.startsWith(`..${sep}`) && !isAbsolute(repositoryPath));
+}
+
+async function assertRepositoryFile(sourceFile: string, localPath: string, target: string): Promise<void> {
+  assert.ok(
+    !isAbsolute(localPath) && !win32.isAbsolute(localPath),
+    `${sourceFile} contains an absolute local link: ${target}`
+  );
+
+  const resolvedTarget = resolve(dirname(resolve(sourceFile)), localPath);
+  assert.ok(
+    isWithinRepository(REPOSITORY_ROOT, resolvedTarget),
+    `${sourceFile} contains a local link outside the repository: ${target}`
+  );
+
+  const targetStat = await stat(resolvedTarget).catch(() =>
+    assert.fail(`${sourceFile} contains a broken local link: ${target}`)
+  );
+  assert.ok(targetStat.isFile(), `${sourceFile} contains a local link that is not a regular file: ${target}`);
+
+  const canonicalRepositoryRoot = await realpath(REPOSITORY_ROOT);
+  const canonicalTarget = await realpath(resolvedTarget);
+  assert.ok(
+    isWithinRepository(canonicalRepositoryRoot, canonicalTarget),
+    `${sourceFile} contains a local link outside the repository: ${target}`
+  );
+}
+
 test("repository includes its public community and contributor files", async () => {
   await Promise.all(REQUIRED_COMMUNITY_FILES.map((file) => access(file)));
 });
@@ -227,12 +259,21 @@ test("issue template config routes support and security contacts", async () => {
   assert.deepEqual([...expectedTargets], [], `${file} must link to both support and security guidance`);
 });
 
+test("repository file validation rejects unsafe and non-file targets", async () => {
+  await assert.doesNotReject(assertRepositoryFile("README.md", "LICENSE", "LICENSE"));
+  await assert.rejects(assertRepositoryFile("README.md", "/LICENSE", "/LICENSE"), /absolute local link/);
+  await assert.rejects(assertRepositoryFile("README.md", "C:\\LICENSE", "C:\\LICENSE"), /absolute local link/);
+  await assert.rejects(assertRepositoryFile("README.md", "../", "../"), /outside the repository/);
+  await assert.rejects(assertRepositoryFile("README.md", ".", "."), /not a regular file/);
+});
+
 test("local Markdown links resolve to repository files", async () => {
   for (const file of COMMUNITY_MARKDOWN_FILES) {
     const markdown = await readFile(file, "utf8");
     for (const match of markdown.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
       const target = markdownLinkTarget(match[1] ?? "");
-      if (target === "" || target.startsWith("#") || target.startsWith("//") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target)) {
+      const hasScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target);
+      if (target === "" || target.startsWith("#") || target.startsWith("//") || (hasScheme && !win32.isAbsolute(target))) {
         continue;
       }
 
@@ -243,10 +284,7 @@ test("local Markdown links resolve to repository files", async () => {
       } catch {
         assert.fail(`${file} contains an invalid encoded link target: ${target}`);
       }
-      await assert.doesNotReject(
-        access(resolve(dirname(file), localPath)),
-        `${file} contains a broken local link: ${target}`
-      );
+      await assertRepositoryFile(file, localPath, target);
     }
   }
 });
