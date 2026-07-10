@@ -2,6 +2,97 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
+test("README stays product-forward, portable, and free of roadmap drift", async () => {
+  const readme = await readFile("README.md", "utf8");
+  const installHeading = readme.indexOf("## Install");
+  assert.notEqual(installHeading, -1, "README should include an install section");
+  const firstScreen = readme.slice(0, installHeading);
+
+  assert.ok(firstScreen.includes("agent-first skill package manager"));
+  assert.ok(firstScreen.includes("CLI is the product backbone"));
+  assert.ok(firstScreen.includes("Git-backed catalog source"));
+  assert.ok(firstScreen.includes("Read-only commands"));
+
+  assert.ok(
+    readme.split("\n").length < 500,
+    "README should stay a concise product overview; long-form command detail belongs in docs"
+  );
+  assert.ok(
+    readme.includes("](docs/command-reference.md)"),
+    "README should route long-form command detail to the command reference"
+  );
+  assert.doesNotMatch(readme, /\/Users\//, "README examples must not contain maintainer-local paths");
+  assert.doesNotMatch(
+    readme,
+    /\b(?:roadmap|first milestone|future explicit flow|current target shape)\b/i,
+    "README should describe shipped behavior instead of planning milestones"
+  );
+});
+
+test("release readiness records verified shipped state and uses portable paths", async () => {
+  const releaseReadiness = await readFile("docs/release-readiness.md", "utf8");
+
+  // Release Please bumps package.json before publication. Keep the published
+  // version authoritative in npm/GitHub rather than duplicating a literal that
+  // will become stale or blocking the release PR on a not-yet-shipped version.
+  assert.ok(releaseReadiness.includes("npm view skill-suitcase version dist-tags --json"));
+  assert.ok(releaseReadiness.includes("gh release list"));
+  assert.ok(releaseReadiness.includes("--repo calvinnwq/skill-suitcase"));
+  assert.ok(releaseReadiness.includes("--exclude-drafts"));
+  assert.ok(releaseReadiness.includes("--exclude-pre-releases"));
+  assert.ok(releaseReadiness.includes("does not duplicate that version as a literal"));
+  assert.ok(releaseReadiness.includes("npm's `latest` tag"));
+  assert.ok(releaseReadiness.includes("repository is public"));
+  assert.ok(releaseReadiness.includes("npm Trusted Publishing"));
+  assert.doesNotMatch(releaseReadiness, /skill-suitcase@\d+\.\d+\.\d+/);
+  assert.doesNotMatch(
+    releaseReadiness,
+    /\/Users\//,
+    "release-readiness examples must not contain maintainer-local paths"
+  );
+});
+
+test("command reference matches shipped planning, diff, pack, and rollback boundaries", async () => {
+  const reference = await loadNormalized("docs/command-reference.md");
+
+  assert.ok(reference.includes("does not resolve target install paths"));
+  assert.ok(reference.includes("choose install modes"));
+  assert.ok(reference.includes("`create`, `update`, `unchanged`, `extra`, `missing`, or `blocked`"));
+  assert.ok(reference.includes("`diff` does not run the git source-hygiene check"));
+  assert.ok(reference.includes("beneath an absolute manifest-declared install root"));
+  assert.ok(reference.includes("does not expand home-relative strings"));
+  assert.ok(reference.includes("stored receipt version/hash is not revalidated"));
+  assert.ok(reference.includes("untracked, non-ignored source files"));
+  assert.ok(reference.includes("git-ignored regular files may still be materialized"));
+  assert.ok(reference.includes("`unknown`: status could not be proven"));
+  assert.ok(reference.includes("only the receiptless mismatched-directory case routes to `reconcile`"));
+  assert.ok(reference.includes("skills.sh declarations pin the installer package version but not the referenced repository content revision"));
+  assert.ok(reference.includes("current rollback command does not restore promotions"));
+  assert.ok(reference.includes("`source_untracked_files`"));
+  assert.ok(reference.includes("reported by pack and apply rather than `diff`"));
+  assert.ok(reference.includes("plan-lock creation enforces the same gate through a thrown error"));
+  assert.ok(reference.includes("`plan_lock_<reason>`"));
+  assert.ok(reference.includes("including structured `ok: false` results"));
+  assert.ok(reference.includes("parser/usage failures"));
+  assert.ok(reference.includes("`version`: the installed receipt version differs"));
+  assert.ok(reference.includes("those seven values are the complete status enum"));
+  assert.ok(reference.includes("`statuscount: 0` and no status entries"));
+  assert.ok(reference.includes("fallback inventory without a catalog assignment"));
+  assert.ok(reference.includes("custom provider path tied to a catalog assignment may produce ordinary status entries"));
+  assert.ok(reference.includes("per-path existence, and safety classification"));
+  assert.ok(reference.includes("### plan-lock creation (library api)"));
+  assert.ok(reference.includes("there is no cli command that creates a plan lock"));
+  assert.ok(reference.includes("buildplanlock"));
+  assert.ok(reference.includes("approval inputs do not currently provide identical guarantees"));
+  assert.ok(reference.includes("artifact `filehashes` are enforced only for the dirty-behind"));
+  assert.ok(reference.includes("ordinary missing/behind writes are rebuilt from current catalog source"));
+  assert.ok(reference.includes("do not use an older artifact as byte-for-byte authorization"));
+
+  assert.ok(!reference.includes("`source_untracked_path`"));
+  assert.ok(!reference.includes("`stale_plan_lock`"));
+  assert.ok(!reference.includes("source of each resolved path"));
+});
+
 /**
  * Operator guidance for the dirty-repair flow (NGX-487) must live in the docs an
  * operator actually reads: the README reference, the agent INSTALL runbook, and

@@ -53,5 +53,5 @@ the package and publishes it to npm through npm Trusted Publishing. Do not add a
 long-lived npm token.
 
 See [`docs/release-readiness.md`](docs/release-readiness.md) for the Release
-Please merge checklist, package policy, visibility tradeoffs, and public release
-checks.
+Please merge checklist, npm package/bin policy, repository controls, and the
+public-documentation gate.

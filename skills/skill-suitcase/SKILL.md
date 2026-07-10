@@ -32,6 +32,7 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
 - Use `reconcile --dry-run` before `reconcile --apply`, and only for selected
   catalog-owned skills.
 - Use `pack --output` then `apply --artifact` for missing or behind skills.
+  Re-pack immediately before apply because ordinary artifact-mode writes come from current catalog source, not the staged file payload.
 - Treat `dirty` as stop and inspect first. For a selected receipt-owned `dirty`
   skill, review `repair --dry-run`, then run `repair --apply` for that named
   skill only after explicit approval; use `rollback` to restore the pre-repair
@@ -48,6 +49,7 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
 - Never run `pack`, `apply`, `track`, `reconcile`, `repair`, or `import-target`
   to adopt OpenCode, Pi, or other provider-backed adapter roots, even when the
   catalog declares a custom manifest `assignmentPaths` entry for review.
+- The current `rollback` command reverses apply, reconcile, and repair state, but it does not restore promotions.
 
 ## Setup
 
@@ -104,8 +106,9 @@ writes live agent homes.
 ```
 
 The declaration file is `.skill-suitcase/upstream-lock.json` with schema
-`calvinnwq.skills.upstream-lock.v0`. `skills-sh` entries pin an exact package
-version. `git` entries pin `packageVersion` to a version tag such as `v3.8.1`
+`calvinnwq.skills.upstream-lock.v0`.
+`skills-sh` entries pin an exact package version, but the referenced repository content is not pinned to a source revision or content hash, so review every fetched diff.
+`git` entries pin `packageVersion` to a version tag such as `v3.8.1`
 or a full commit SHA and use a GitHub owner/repo plus repo-relative skill path.
 `upstream fetch` uses an isolated temp workspace/home and reports file-level
 catalog diffs.
@@ -139,10 +142,9 @@ repo/skill, imported hash, current catalog hash and drift, target status,
 receipt hash, and receipt commit without stitching together multiple reports.
 Target-scoped status should load lineage for reported skills only and should not hash unrelated upstream-managed catalog skills.
 
-Trust boundary: trust only the exact pinned upstream package or git ref in the
-isolated temp workspace/home for catalog source refresh. Do not trust upstream
-tooling to choose target roots, write receipts, prove rollback, or mutate live
-agent homes.
+Trust boundary: trust only the exact pinned upstream package or git ref in the isolated temp workspace/home for catalog source refresh.
+For skills.sh, that pin controls the installer package, not the referenced repository revision.
+Do not trust upstream tooling to choose target roots, write receipts, prove rollback, or mutate live agent homes.
 
 ## Read-Only Audit
 
@@ -212,6 +214,7 @@ For nested or provider-specific homes, inspect `targets` first and use only
 install roots that exist on the machine and are intended to be Suitcase-owned.
 Provider-backed OpenCode and Pi roots are not Suitcase-owned, so a
 `read_only_target` refusal is the correct outcome for pack or mutation flows.
+Provider fallback inventory without a catalog assignment has no status entries; a custom assigned provider path may have ordinary status entries while remaining read-only for pack and mutation flows.
 
 ## Sync Workflow
 
@@ -259,7 +262,7 @@ drift. Ordinary dirty edits still require `repair` or `import-target` after
 inspection:
 
 ```bash
-TMP="$(mktemp -d /tmp/skill-suitcase-codex.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-codex.XXXXXX")"
 "$CLI" pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$TMP" --json
 find "$TMP" -maxdepth 4 -type f | sort
 ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
@@ -268,11 +271,17 @@ ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
 "$CLI" status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 ```
 
+Artifact mode validates the bundle, but ordinary missing/behind writes are rebuilt from current catalog source and artifact hashes gate only the dirty-behind exception.
+Neither an artifact nor a plan lock binds local target overrides, the resolved install root, or copy versus symlink mode, so approve those invocation-time choices separately.
+Re-run `pack` and inspect the current `diff` immediately before artifact apply; do not treat an older artifact as byte-for-byte authorization.
+Pack guards only absolute manifest-declared target paths and does not account for CLI overrides or expand `~`, so keep staging outside the catalog and every resolved target root.
+
 For Git-backed catalogs, `pack`, plan-lock creation, and `apply` refuse selected
 source skills that contain untracked, non-ignored files. Track or remove scratch
 files in the selected skill before trying to materialize it. Manifest
 `sourcePolicy.exclude` can deliberately omit reviewed generated/cache paths;
 manifest `sourcePolicy.deny` and built-in secret-like denials block materialization.
+Plan-lock creation is available only through the compiled library API; there is no CLI command that writes a lock file.
 
 For another target, keep the same pattern and replace only the target id and
 override flags from the matrix.
@@ -298,12 +307,14 @@ version. A drift report must never trigger an implicit import.
 
 Status meanings:
 
-- `current`: installed content and receipt match the catalog.
-- `missing` or `behind`: stage with `pack --output`, then apply the artifact.
+- `current`: a copy install's receipt-owned files still match the receipt and catalog; preserved extras outside `installedFiles` may remain; a symlink points to the selected catalog source without revalidating its stored receipt version/hash, provided `sourcePolicy.exclude` is empty.
+- `missing`: the planned target is absent; stage with `pack --output`, then apply the artifact.
+- `behind`: the receipt-owned target is unchanged while the catalog is newer; stage with `pack --output`, then apply the artifact.
   A receipt-owned `dirty` skill whose receipt hash is also behind the catalog can
   use the same pack/apply path only when the approved artifact writes that skill
   and packed-file plus receipt metadata proves the written files still match the
   last install.
+- `version`: the receipt version differs from current `SKILL.md` frontmatter; inspect, stage, and apply the catalog update.
 - `unknown`: existing target lacks a usable Suitcase receipt. Use `track` for
   exact matches or selected `reconcile` for catalog-owned receiptless drift.
 - `dirty`: target differs from the last recorded Suitcase install. Stop and
@@ -312,8 +323,8 @@ Status meanings:
   edit (target → catalog); both run `--dry-run` then `--apply` after approval.
 - `blocked`: catalog compatibility intentionally refuses that target.
 
-Goal state for an intended target is zero `behind`, `dirty`, `missing`,
-`unknown`, and `blocked`.
+These seven values are the complete status enum.
+Goal state for an intended target is zero `behind`, `version`, `dirty`, `missing`, `unknown`, and `blocked`.
 
 ## Report
 
