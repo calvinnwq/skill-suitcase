@@ -77,7 +77,12 @@ test("packed payload validation rejects a missing bin, lost executable mode, and
   nonExecutableBin.files.find((file) => file.path === CLI_BIN_PATH).mode = 0o644;
   await assert.rejects(validatePackResult(process.cwd(), nonExecutableBin), /packed CLI bin is not executable/);
 
-  const unintendedFile = structuredClone(packResult);
-  unintendedFile.files.push({ path: ".env", size: 1, mode: 0o644 });
-  await assert.rejects(validatePackResult(process.cwd(), unintendedFile), /npm package payload mismatch.*\.env/);
+  for (const unexpectedPath of ["docs/internal-private.md", "skills/skill-suitcase/private.txt"]) {
+    const unintendedFile = structuredClone(packResult);
+    unintendedFile.files.push({ path: unexpectedPath, size: 1, mode: 0o644 });
+    await assert.rejects(
+      validatePackResult(process.cwd(), unintendedFile),
+      new RegExp(`npm package payload mismatch.*${unexpectedPath.replace(/[./]/g, "\\$&")}`)
+    );
+  }
 });

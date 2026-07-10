@@ -12,13 +12,17 @@ export const CLI_BIN_PATH = "dist/src/cli.js";
 const BUILD_MANIFEST_SCHEMA = "skill-suitcase.package-build.v1";
 const EXPECTED_FILES_ALLOWLIST = [
   "dist/src/**/*.js",
-  "skills/skill-suitcase",
+  "skills/skill-suitcase/SKILL.md",
+  "skills/skill-suitcase/agents/openai.yaml",
   "LICENSE",
   "VISION.md",
   "README.md",
   "INSTALL.md",
   "CHANGELOG.md",
-  "docs/*.md"
+  "docs/install-smoke.md",
+  "docs/portability-matrix.md",
+  "docs/release-readiness.md",
+  "docs/skills-sh-delegation.md"
 ];
 const EXPECTED_KEYWORDS = [
   "agent-skills",
@@ -187,16 +191,6 @@ async function expectedPackedPaths(root, manifest) {
   for (const entry of EXPECTED_FILES_ALLOWLIST) {
     if (entry === "dist/src/**/*.js") {
       paths.push(...manifest.entries.map((item) => item.output));
-      continue;
-    }
-    if (entry === "skills/skill-suitcase") {
-      const skillFiles = await listFiles(path.join(root, entry), () => true);
-      paths.push(...skillFiles.map((relativePath) => path.posix.join(entry, relativePath)));
-      continue;
-    }
-    if (entry === "docs/*.md") {
-      const docFiles = await listFiles(path.join(root, "docs"), (relativePath) => !relativePath.includes("/") && relativePath.endsWith(".md"));
-      paths.push(...docFiles.map((relativePath) => path.posix.join("docs", relativePath)));
       continue;
     }
     await access(path.join(root, entry), fsConstants.R_OK);
