@@ -74,8 +74,9 @@ decision; it is not inferred from routine Release Please output.
 
 `package.json` uses an explicit `files` whitelist. Published content is limited
 to the compiled CLI, packaged operator skill, license, product and setup docs,
-changelog, and `docs/*.md`. Tests, source TypeScript, local review artifacts,
-agent state, and workspace files are excluded from the npm payload.
+contributor and community guidance, changelog, and `docs/*.md`. Tests, source
+TypeScript, local review artifacts, agent state, and workspace files are
+excluded from the npm payload.
 
 Before publication, the release workflow runs
 `npm publish --dry-run --access public --json`. Inspecting that payload is a
@@ -191,6 +192,8 @@ Before publishing, verify:
   README roadmap or milestone narrative.
 - `INSTALL.md` covers packaged CLI and operator-skill setup.
 - `CONTRIBUTING.md` explains Release Please and Trusted Publishing boundaries.
+- The README links to contributor, development, support, security, and conduct
+  guidance, and every linked community file ships in the npm package.
 - No doc implies `skills.sh` runtime delegation is a managed installer path.
 - Upstream docs keep upstream-to-catalog drift separate from
   catalog-to-target drift.

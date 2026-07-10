@@ -33,7 +33,8 @@ source-refresh reports without touching target install paths or runtime homes.
 - Copy and symlink installs are tracked with receipts and recoverable workflows.
 
 Read [`VISION.md`](VISION.md) for the product north star and
-[`ARCHITECTURE.md`](ARCHITECTURE.md) for the CLI boundaries.
+[`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md)
+for the CLI boundaries.
 
 ## Install
 
