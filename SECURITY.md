@@ -11,9 +11,7 @@ when practical.
 
 Do not open a public issue for a suspected vulnerability.
 
-Use this repository's GitHub private vulnerability reporting form. If that form
-is unavailable, use the private contact method listed on the repository owner's
-GitHub profile and include `Skill Suitcase security report` in the subject.
+Email the maintainer at [calvinnwq@gmail.com](mailto:calvinnwq@gmail.com?subject=Skill%20Suitcase%20security%20report) and include `Skill Suitcase security report` in the subject.
 
 Include enough information to reproduce and assess the problem:
 

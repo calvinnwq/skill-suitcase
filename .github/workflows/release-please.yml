@@ -33,8 +33,6 @@ jobs:
       - name: Set up pnpm
         if: ${{ steps.release.outputs.release_created == 'true' }}
         uses: pnpm/action-setup@v6
-        with:
-          version: latest
 
       - name: Set up Node
         if: ${{ steps.release.outputs.release_created == 'true' }}

@@ -6,14 +6,26 @@ community expectations live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 ## Prerequisites
 
 - Node.js 20 or newer; CI currently uses Node.js 24
-- pnpm; use Corepack when your Node.js distribution includes it, or install
-  pnpm using its supported standalone instructions
+- pnpm 10.34.4, as pinned by `packageManager` in `package.json`
 - Git
+
+If Corepack is available, enable the pinned pnpm version:
+
+```bash
+corepack enable pnpm
+pnpm --version
+```
+
+If Corepack is not installed, install the same pnpm version with npm:
+
+```bash
+npm install --global pnpm@10.34.4
+pnpm --version
+```
 
 Install the locked dependencies:
 
 ```bash
-pnpm --version
 pnpm install --frozen-lockfile
 ```
 

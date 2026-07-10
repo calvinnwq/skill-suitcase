@@ -34,9 +34,8 @@ project in public.
 
 ## Reporting And Enforcement
 
-Report conduct concerns privately through the contact route in
-[`SECURITY.md`](SECURITY.md) and clearly label the report as a code-of-conduct
-matter. Do not include sensitive details in a public issue.
+Report conduct concerns privately by [emailing the maintainer](mailto:calvinnwq@gmail.com?subject=Skill%20Suitcase%20conduct%20report) with `Skill Suitcase conduct report` in the subject.
+Do not include sensitive details in a public issue.
 
 Maintainers will review reports in confidence, avoid conflicts of interest, and
 respond in proportion to the behavior and its impact. Possible actions include
