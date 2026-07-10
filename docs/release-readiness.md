@@ -73,13 +73,14 @@ decision; it is not inferred from routine Release Please output.
 - License: MIT
 - Repository: `calvinnwq/skill-suitcase`
 
-`package.json` uses an explicit `files` whitelist. Published content is limited
-to the compiled CLI, packaged operator skill, license, product and setup docs,
-changelog, and `docs/*.md`. Tests, source TypeScript, local review artifacts,
-agent state, and workspace files are excluded from the npm payload.
+`package.json` uses an explicit `files` whitelist.
+The public payload is approved through exact curated paths: `dist/src/**/*.js`; `skills/skill-suitcase/SKILL.md`; `skills/skill-suitcase/agents/openai.yaml`; `LICENSE`, `VISION.md`, `README.md`, `INSTALL.md`, and `CHANGELOG.md`; and `docs/install-smoke.md`, `docs/portability-matrix.md`, `docs/release-readiness.md`, and `docs/skills-sh-delegation.md`.
+Do not replace the exact documentation or operator-skill entries with broad directory globs because a newly added file must not become publish-approved without independent review.
+Tests, source TypeScript, local review artifacts, agent state, and workspace files are excluded from the npm payload.
 
 `scripts/package-validation.mjs` pins the MIT license, `Calvin Ng` author, repository/homepage/issues URLs, search keywords, Node `>=20` engine, pnpm `10.34.4` package-manager metadata, package name, and binary name.
 `prepack` remains routed through `package:prepare` so every supported npm pack or publish removes stale `dist` output, rebuilds the CLI, verifies its shebang and executable mode, and records source/output hashes in the ignored `dist/.package-build.json` manifest.
+`package:validate` is the non-rebuilding recheck of that manifest, so missing, additional, stale, changed, or non-executable compiled CLI output fails validation.
 `pnpm run package:smoke` parses `npm pack --json`, rejects missing or unintended payload entries, requires the installed CLI binary to remain executable, installs the generated tarball into an empty temporary project, and runs the read-only `targets` command.
 Both the package smoke and the Release Please workflow's pre-publish dry-run prevent local workflow artifacts from silently entering the package tarball.
 
