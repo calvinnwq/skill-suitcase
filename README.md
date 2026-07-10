@@ -2082,3 +2082,7 @@ The first milestone has no runtime package dependencies (only the TypeScript dev
 toolchain). The manifest reader is strict and intentionally scoped to the current
 `skill-suitcase.yaml` shape from `/Users/ngxcalvin/repos/skills`, including
 manifest-owned logical groups as reporting metadata.
+
+## License
+
+Skill Suitcase is available under the [MIT License](LICENSE).
