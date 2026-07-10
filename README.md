@@ -10,6 +10,20 @@ holds reviewed source, variants, assignments, target policy, and upstream
 metadata; Skill Suitcase turns that catalog into deterministic plans, diffs,
 artifacts, installs, receipts, and rollback state.
 
+## Community
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) to contribute and
+[`DEVELOPING.md`](DEVELOPING.md) for the local development workflow. Usage
+support, private vulnerability reporting, and community expectations are
+documented in [`SUPPORT.md`](SUPPORT.md), [`SECURITY.md`](SECURITY.md), and
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+
+Read-only commands (`plan`, `diff`, `pack --dry-run`, `import`, `validate`,
+`targets`, `status`, `upstream check`, and `upstream fetch`) read a catalog
+manifest, resolve assignments and assignment paths, and emit JSON plans, diffs,
+import findings, target discovery, bundle manifests, status reports, or upstream
+source-refresh reports without touching target install paths or runtime homes.
+
 - Git-backed catalog source stays reviewable before it reaches a runtime.
 - Read-only commands explain current state before any mutation.
 - Mutating commands require an explicit artifact, lock, `--apply`, or other

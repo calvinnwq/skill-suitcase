@@ -1,40 +1,18 @@
 # CLAUDE.md
 
-This repository is a TypeScript CLI. Follow [`AGENTS.md`](AGENTS.md) and treat
-[`ARCHITECTURE.md`](ARCHITECTURE.md) as the source of truth for implementation
-boundaries.
+This repository is a TypeScript CLI. Follow [`AGENTS.md`](AGENTS.md) and keep
+the implementation aligned with [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-## Implementation Rules
+Before adding or changing a command:
 
-- Keep `src/cli.ts` as a thin process entrypoint.
-- Put command parsing and validation in `src/commands/`.
-- Put durable behavior and state transitions in `src/core/`.
-- Keep filesystem and infrastructure details in adapters.
-- Render deterministic JSON on stdout; send usage, notices, warnings, and errors
-  to stderr.
-- Extend the command/core/adapter/renderer pattern instead of bypassing it.
+1. Read `ARCHITECTURE.md`.
+2. Keep `src/cli.ts` as a thin entrypoint.
+3. Put command-specific parsing and validation in `src/commands/`.
+4. Put durable behavior in domain or core modules, not command modules.
+5. Keep JSON stdout deterministic. Usage text, notices, warnings, and errors
+   belong on stderr.
 
-Preserve existing user changes and avoid generated `dist/`, dependency, local
-agent-state, or review-artifact files. Use portable paths such as `$HOME`, a
-temporary directory, or `/path/to/catalog` in documentation and tests.
-
-## Safety
-
-Prefer read-only commands and disposable fixtures. Do not mutate a real catalog
-or agent home without explicit approval for the target and mode. Keep secrets,
-credentials, private prompts, and unrelated local state out of source and tool
-output.
-
-## Verification
-
-Use the checks relevant to the change. The normal full set is:
-
-```bash
-pnpm test
-pnpm run lint
-pnpm run architecture:check
-git diff --check
-```
-
-See [`DEVELOPING.md`](DEVELOPING.md) for setup, focused tests, and local CLI
-examples.
+Extend the command/core/adapter/renderer pattern for new product work. Preserve
+unrelated working-tree changes, use temporary directories for mutation tests,
+and run the verification commands in [`DEVELOPING.md`](DEVELOPING.md) before
+handing off changes.

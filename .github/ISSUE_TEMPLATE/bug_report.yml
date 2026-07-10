@@ -1,69 +1,61 @@
 name: Bug report
-description: Report reproducible incorrect Skill Suitcase behavior.
+description: Report a reproducible problem in Skill Suitcase
 title: "bug: "
+labels:
+  - bug
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug. Search existing issues first and do not include secrets, private catalog content, or personal paths. Report vulnerabilities through SECURITY.md instead.
-  - type: input
-    id: version
+        Thanks for reporting a problem. Search existing issues first and remove secrets, private prompts, personal data, and contributor-specific paths from all examples.
+  - type: textarea
+    id: summary
     attributes:
-      label: Version or commit
-      description: Provide the released package version, commit SHA, or branch you tested.
-      placeholder: skill-suitcase 0.x.x or commit SHA
-    validations:
-      required: true
-  - type: input
-    id: environment
-    attributes:
-      label: Environment
-      description: Include the operating system, Node.js version, and installation method.
-      placeholder: macOS; Node.js 24; installed with npm
+      label: What happened?
+      description: Describe the observed behavior and why it is a problem.
     validations:
       required: true
   - type: textarea
-    id: command
+    id: reproduce
     attributes:
-      label: Command and inputs
-      description: Show the command shape and minimal portable fixture or manifest needed to reproduce it. Redact sensitive values.
-      render: shell
+      label: Reproduction
+      description: Provide the smallest safe sequence of commands, inputs, or fixture data that reproduces the problem.
+      placeholder: |
+        1. Run ...
+        2. Observe ...
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
       label: Expected behavior
-      description: What did you expect to happen?
+      description: What did you expect instead?
     validations:
       required: true
   - type: textarea
-    id: actual
+    id: environment
     attributes:
-      label: Actual behavior
-      description: What happened instead? Include relevant deterministic JSON output or stderr text.
+      label: Environment
+      description: Include the Skill Suitcase version, Node.js version, package manager version, and operating system.
+      placeholder: |
+        Skill Suitcase:
+        Node.js:
+        pnpm or npm:
+        Operating system:
     validations:
       required: true
   - type: textarea
-    id: reproduction
+    id: output
     attributes:
-      label: Reproduction steps
-      description: List the smallest reliable sequence that reproduces the problem.
-    validations:
-      required: true
-  - type: textarea
-    id: additional
-    attributes:
-      label: Additional context
-      description: Add any other non-sensitive logs, screenshots, or possible causes.
+      label: Relevant output
+      description: Paste sanitized stdout, stderr, or JSON output. Use a code block when possible.
+      render: shell
   - type: checkboxes
-    id: checks
+    id: safety
     attributes:
-      label: Checklist
+      label: Safety check
       options:
-        - label: I searched existing issues and tested the newest release when practical.
+        - label: I removed credentials, tokens, private prompts, personal data, and contributor-specific absolute paths.
           required: true
-        - label: I removed credentials, private prompts, personal paths, and private agent or catalog state.
-          required: true
-        - label: This is not a security vulnerability.
+        - label: This is not a security vulnerability. I will use the private process in SECURITY.md for vulnerabilities.
           required: true

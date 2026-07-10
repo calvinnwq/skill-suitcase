@@ -1,55 +1,54 @@
 # Code of Conduct
 
-## Our Commitment
+## Our pledge
 
-We want participation in Skill Suitcase to be safe, respectful, and productive
-for everyone, regardless of background, identity, experience, or ability.
-Contributors, maintainers, and community members are expected to act with
-empathy and professionalism.
+We pledge to make participation in this project a harassment-free experience
+for everyone, regardless of age, body size, disability, ethnicity, gender
+identity and expression, level of experience, education, socioeconomic status,
+nationality, personal appearance, race, religion, or sexual identity and
+orientation.
 
-## Expected Behavior
+We will act and interact in ways that contribute to an open, welcoming,
+diverse, inclusive, and healthy community.
 
-- Be respectful, specific, and constructive.
-- Assume good intent while addressing the actual impact of words and actions.
-- Welcome questions and differing levels of experience.
-- Give and accept technical feedback without personal attacks.
-- Respect privacy, consent, and project safety boundaries.
-- Take responsibility, apologize, and repair harm when mistakes happen.
+## Expected behavior
 
-## Unacceptable Behavior
+Examples of behavior that contributes to a positive community include:
 
-- Harassment, discrimination, threats, or intimidation
-- Sexualized language, imagery, or unwanted attention
-- Trolling, insults, sustained disruption, or deliberate humiliation
-- Publishing private information without permission
-- Retaliation against someone who raises a concern in good faith
-- Conduct that would reasonably be considered inappropriate in a professional
-  community
+- showing empathy and respect toward other people
+- giving and accepting constructive feedback
+- taking responsibility, apologizing, and learning from mistakes
+- focusing on what is best for the project and community
+
+Unacceptable behavior includes harassment, discrimination, threats, insults,
+sexualized attention, deliberate intimidation, publishing another person's
+private information, and other conduct that would reasonably be considered
+inappropriate in a professional setting.
 
 ## Scope
 
-This policy applies in repository discussions, issues, pull requests, reviews,
-and other project spaces. It also applies when someone is representing the
-project in public.
+This code applies in project spaces and when an individual officially
+represents the project in public spaces. Project spaces include the repository,
+issues, pull requests, reviews, and other project-hosted communication.
 
-## Reporting And Enforcement
+## Reporting and enforcement
 
-Report conduct concerns privately by [emailing the maintainer](mailto:calvinnwq@gmail.com?subject=Skill%20Suitcase%20conduct%20report) with `Skill Suitcase conduct report` in the subject.
-Do not include sensitive details in a public issue.
+Report conduct concerns privately to
+[calvinnwq@gmail.com](mailto:calvinnwq@gmail.com) with a subject that begins
+`[skill-suitcase conduct]`. Do not open a public issue containing sensitive
+details about a conduct incident.
 
-Maintainers will review reports in confidence, avoid conflicts of interest, and
-respond in proportion to the behavior and its impact. Possible actions include
-a private correction, warning, temporary restriction, removal from project
-spaces, or a permanent ban. Good-faith reporters and participants in an
-investigation must not be retaliated against.
+The maintainer is responsible for clarifying and enforcing these standards and
+may remove, edit, or reject comments, commits, code, issues, and other
+contributions that do not align with them. Reports will be reviewed as promptly
+and fairly as practical. The privacy and safety of reporters and affected people
+will be respected.
 
-If a maintainer is the subject of a report, or a repository-controlled channel
-would be unsafe, report relevant GitHub-hosted behavior directly to GitHub
-Support using GitHub's [reporting abuse or spam guidance](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam).
-For behavior on another platform, use that platform's independent abuse-reporting
-channel. These routes are outside the control of project maintainers.
+Responses may include a private correction, warning, temporary restriction, or
+permanent removal from project spaces, depending on the impact and pattern of
+the behavior.
 
 ## Attribution
 
-This policy is informed by the [Contributor Covenant](https://www.contributor-covenant.org/),
-version 2.1.
+This code is adapted from the [Contributor Covenant, version
+2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html).

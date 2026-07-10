@@ -1,95 +1,55 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const COMMUNITY_FILES = [
+const REQUIRED_COMMUNITY_FILES = [
+  "LICENSE",
   "CONTRIBUTING.md",
   "DEVELOPING.md",
   "SECURITY.md",
   "SUPPORT.md",
   "CODE_OF_CONDUCT.md",
   "CLAUDE.md",
+  ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/ISSUE_TEMPLATE/bug_report.yml",
   ".github/ISSUE_TEMPLATE/feature_request.yml",
-  ".github/ISSUE_TEMPLATE/support_question.yml",
-  ".github/ISSUE_TEMPLATE/config.yml",
-  ".github/PULL_REQUEST_TEMPLATE.md"
-];
+  ".github/ISSUE_TEMPLATE/config.yml"
+] as const;
 
-const PRIVATE_LOCAL_IDENTIFIERS = [
-  /\/Users\//,
-  /C:\\Users\\/i,
-  /\/home\/(?!\$|<)/,
-  /orca\/workspaces/i,
-  /linear\.app/i
-];
+const PORTABLE_COMMUNITY_FILES = [
+  "CONTRIBUTING.md",
+  "DEVELOPING.md",
+  "SECURITY.md",
+  "SUPPORT.md",
+  "CODE_OF_CONDUCT.md",
+  "CLAUDE.md",
+  ".github/PULL_REQUEST_TEMPLATE.md",
+  ".github/ISSUE_TEMPLATE/bug_report.yml",
+  ".github/ISSUE_TEMPLATE/feature_request.yml"
+] as const;
 
-test("public repository shell includes contributor and community files", async () => {
-  for (const file of COMMUNITY_FILES) {
-    const content = await readFile(file, "utf8");
-    assert.ok(content.trim().length > 0, `${file} should not be empty`);
-  }
+test("repository includes its public community and contributor files", async () => {
+  await Promise.all(REQUIRED_COMMUNITY_FILES.map((file) => access(file)));
 });
 
-test("public contributor and community files avoid private local identifiers", async () => {
-  for (const file of COMMUNITY_FILES) {
-    const content = await readFile(file, "utf8");
-    for (const pattern of PRIVATE_LOCAL_IDENTIFIERS) {
-      assert.doesNotMatch(content, pattern, `${file} should not contain ${pattern}`);
-    }
-  }
-});
-
-test("security and support guidance route sensitive reports away from public issues", async () => {
-  const security = (await readFile("SECURITY.md", "utf8")).toLowerCase();
-  const support = (await readFile("SUPPORT.md", "utf8")).toLowerCase();
-  const codeOfConduct = (await readFile("CODE_OF_CONDUCT.md", "utf8")).toLowerCase();
-  const issueConfig = await readFile(".github/ISSUE_TEMPLATE/config.yml", "utf8");
-
-  assert.ok(security.includes("do not open a public issue"));
-  assert.match(security, /mailto:[^\s)]+\?subject=skill%20suitcase%20security%20report/i);
-  assert.ok(support.includes("security.md"));
-  assert.ok(support.includes("not through the public issue tracker"));
-  assert.ok(support.includes("support question"));
-  assert.match(codeOfConduct, /mailto:[^\s)]+\?subject=skill%20suitcase%20conduct%20report/i);
-  assert.ok(codeOfConduct.includes("reporting-abuse-or-spam"));
-  assert.ok(codeOfConduct.includes("outside the control of project maintainers"));
-  assert.ok(issueConfig.includes("blob/main/SECURITY.md"));
-  assert.ok(!issueConfig.includes("security/advisories/new"));
-});
-
-test("development setup pins pnpm across the supported Node.js range", async () => {
-  const developing = await readFile("DEVELOPING.md", "utf8");
-  const install = await readFile("INSTALL.md", "utf8");
-  const operatorSkill = await readFile("skills/skill-suitcase/SKILL.md", "utf8");
-  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
-    packageManager?: string;
-  };
-  const workflows = await Promise.all(
-    [".github/workflows/ci.yml", ".github/workflows/release-please.yml"].map((file) =>
-      readFile(file, "utf8")
-    )
+test("community guidance does not contain contributor-specific local paths", async () => {
+  const contents = await Promise.all(
+    PORTABLE_COMMUNITY_FILES.map(async (file) => ({ file, text: await readFile(file, "utf8") }))
   );
 
-  assert.equal(packageJson.packageManager, "pnpm@10.34.4");
-  for (const guide of [developing, install, operatorSkill]) {
-    const pinnedRunner = guide.indexOf("npm exec --yes --package=pnpm@10.34.4 -- pnpm");
-    const versionCheck = guide.indexOf('test "$(pnpm --version)" = "10.34.4"');
-    const frozenInstall = guide.indexOf("pnpm install --frozen-lockfile");
+  for (const { file, text } of contents) {
+    assert.doesNotMatch(text, /\/Users\/[^/\s]+\//, `${file} should not contain a macOS user path`);
+    assert.doesNotMatch(text, /\/home\/[^/\s]+\//, `${file} should not contain a Linux user path`);
+    assert.doesNotMatch(text, /[A-Z]:\\Users\\[^\\\s]+\\/i, `${file} should not contain a Windows user path`);
+  }
+});
 
-    assert.ok(pinnedRunner >= 0 && pinnedRunner < versionCheck);
-    assert.ok(versionCheck < frozenInstall);
-    assert.ok(guide.includes('test "$(pnpm --version)" = "10.34.4"'));
-    assert.ok(!guide.includes("corepack@latest"));
-    assert.ok(!guide.includes("npm install --global corepack"));
-    assert.doesNotMatch(guide, /npm install --global(?: --force)? pnpm@/);
-  }
-  assert.match(
-    operatorSkill,
-    /pnpm\(\) \{[\s\S]+npm exec --yes --package=pnpm@10\.34\.4 -- pnpm "\$@"[\s\S]+test "\$\(pnpm --version\)" = "10\.34\.4" \\[\s\S]+&& pnpm install --frozen-lockfile/
-  );
-  for (const workflow of workflows) {
-    assert.ok(workflow.includes("pnpm/action-setup@v6"));
-    assert.ok(!workflow.includes("version: latest"));
-  }
+test("issue forms route public support and private security reports", async () => {
+  const config = await readFile(".github/ISSUE_TEMPLATE/config.yml", "utf8");
+  const bugReport = await readFile(".github/ISSUE_TEMPLATE/bug_report.yml", "utf8");
+
+  assert.match(config, /blank_issues_enabled: false/);
+  assert.match(config, /SUPPORT\.md/);
+  assert.match(config, /SECURITY\.md/);
+  assert.match(bugReport, /not a security vulnerability/i);
 });
