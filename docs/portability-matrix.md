@@ -61,6 +61,9 @@ They do not create or infer a variant model. If a platform needs a different
 source shape, add that model to `variants` in the source catalog first, then
 generate a pack from that catalog state.
 
+Artifact apply does not use that snapshot as byte-for-byte authorization for ordinary missing/behind writes; it rebuilds them from current catalog source and enforces artifact hashes only for the dirty-behind exception.
+Re-pack immediately before apply and separately approve the resolved target override and copy/symlink mode, neither of which is bound by the artifact or plan lock.
+
 For Git-backed catalogs, pack and apply materialization refuse untracked,
 non-ignored files inside the selected variant source path. Track or remove those
 files before generating a pack so the snapshot only contains reviewed source

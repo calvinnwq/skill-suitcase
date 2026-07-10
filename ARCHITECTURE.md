@@ -77,14 +77,13 @@ switch statements.
 
 `src/commands/` owns user-visible commands. A command module should:
 
-- define the command's args, flags, aliases, and help metadata
-- validate and normalize user input
-- build a command input object
-- call a domain/core function
-- render the result through a renderer
-- map known command errors to exit codes
+- declare its command name and acceptance predicate
+- validate and normalize command-specific input
+- build a core input object
+- call a domain/core function and return its structured result
 
-Command modules should stay thin. They adapt the outside world to core code.
+The command registry owns shared parsing and exit-code mapping, while `cli.ts` owns final rendering.
+Command modules should stay thin because they adapt parsed CLI arguments to core code.
 
 `src/core/` owns durable behavior:
 
@@ -119,9 +118,9 @@ about CLI parsing or rendering.
 - known error rendering
 - stdout/stderr discipline
 
-Skill Suitcase is JSON-first. JSON stdout is a contract. Human usage text,
-warnings, and errors belong on stderr unless an issue explicitly changes that
-contract.
+Skill Suitcase is JSON-first.
+Structured command results, including findings and `ok: false` errors, belong on stdout.
+Parser/usage failures, uncaught fatal diagnostics, and non-JSON notices belong on stderr.
 
 `src/config/` owns defaults:
 
@@ -135,10 +134,9 @@ into a junk drawer.
 
 ## Source Of Truth
 
-Skill Suitcase is the source-of-truth manager for approved skill installs. The
-catalog repository, such as `/Users/ngxcalvin/repos/skills`, owns skill source
-files, variant metadata, assignments, and target policy. Agent homes are install
-targets, not canonical source directories.
+Skill Suitcase is the source-of-truth manager for approved skill installs.
+The catalog repository at a caller-selected path such as `/path/to/skills-catalog` owns skill source files, variant metadata, assignments, and target policy.
+Agent homes are install targets, not canonical source directories.
 
 The durable state model belongs to Skill Suitcase:
 
@@ -154,8 +152,8 @@ The durable state model belongs to Skill Suitcase:
 - manifest `validationPolicy.skillify.skip` records reviewed exceptions for referenced skills that strict validation must not score against the local Skillify-10 authoring contract
 - receipts record ownership, source provenance, install mode, file hashes, and
   rollback state
-- status decides whether a target is current, missing, dirty, blocked, unknown,
-  or intentionally unmanaged
+- status uses the complete `current`, `missing`, `version`, `behind`, `dirty`, `blocked`, and `unknown` enum for catalog-planned entries
+- provider fallback inventory without a catalog assignment has no status entries; read-only is target metadata, not a status value
 - rollback restores or removes what Skill Suitcase installed
 
 External installers or registries may provide useful compatibility data, but
@@ -334,13 +332,14 @@ workspace/home for source refresh, then validates the fetched directory is
 inside that sandbox and contains `SKILL.md`. It does not trust upstream tooling
 to choose live target roots, write receipts, prove rollback state, or mutate
 agent homes.
+The skills.sh pin fixes the installer package version, not the referenced repository revision or content hash, so every fetched diff remains review-required.
+Git upstream declarations instead pin the fetched tag or commit.
 
 ## Install Modes
 
-Skill Suitcase supports copy and native symlink installs. Install modes should
-be selected explicitly by approved apply input and recorded in receipts, status,
-and rollback. Do not infer an install mode from filesystem shape alone when a
-receipt can state it directly.
+Skill Suitcase supports copy and native symlink installs.
+Install modes are selected explicitly at apply time and recorded in receipts, status, and rollback; the plan lock or artifact does not bind `--mode`.
+Do not infer an install mode from filesystem shape alone when a receipt can state it directly.
 
 The intended symlink direction is:
 
@@ -351,7 +350,7 @@ agent skill path -> catalog repo source path
 Example:
 
 ```txt
-~/.codex/skills/my-skill -> /Users/ngxcalvin/repos/skills/skills/my-skill
+$HOME/.codex/skills/my-skill -> /path/to/skills-catalog/skills/my-skill
 ```
 
 The reverse direction is not allowed for managed installs. The catalog repo must
@@ -378,6 +377,10 @@ Keep the command verbs separate:
 - `track` adopts an existing target that already matches the selected catalog
   source. It writes receipts only and does not rewrite skill files.
 - `apply` installs or updates skills from an approved plan lock or artifact.
+  Plan-lock creation is a compiled library API; no CLI command writes the lock file.
+  A lock reassesses current plan entries and hashes, but neither input binds the resolved target root, local target overrides, or install mode, so those invocation-time choices require separate approval.
+  Artifact mode validates the bundle metadata and staged payload, but ordinary missing/behind writes are rebuilt from current catalog source and artifact hashes gate only the dirty-behind exception.
+  Re-pack immediately before artifact apply and do not treat an older artifact as byte-for-byte authorization.
   Symlink support belongs here as an explicit `--mode symlink` install mode,
   not as an implicit side effect. Apply normally refuses dirty targets, but it
   may update a receipt-owned dirty skill when the receipt hash is behind the
@@ -416,6 +419,7 @@ Keep the command verbs separate:
   report.
 - `rollback` reverses prior `apply`, `reconcile`, or `repair` mutations using
   receipt rollback state.
+  It does not restore promotions; promotion receipts are safe no-ops in the current rollback command.
 - `promote` turns a target-created skill (for example a skill an agent wrote
   into an agent home directory) into a repo-owned catalog skill. `--dry-run`
   runs a read-only plan; `--apply` runs the approval-gated live promotion.
@@ -442,10 +446,10 @@ an agent home, the promote workflow:
 5. write a receipt that records source provenance, install mode, and rollback
    state
 
-Promotion must preserve a rollback path. Do not remove the original target
-directory before the repo copy has been verified. If a conflict exists, such as
-an existing repo skill name or unsafe path, report it as a machine-readable
-planning error before mutation.
+Promotion must preserve the original target in a backup path.
+The current rollback command does not restore that backup, so promotion recovery remains a separate manual decision.
+Do not remove the original target directory before the repo copy has been verified.
+If a conflict exists, such as an existing repo skill name or unsafe path, report it as a machine-readable planning error before mutation.
 
 ## Mutation Boundaries
 
@@ -456,6 +460,9 @@ when a catalog declares a custom `assignmentPaths` entry for review. Broad
 materialization flows such as `pack`, `apply`, `track`, `reconcile`, `repair`,
 and `import-target` must refuse them instead of converting provider-owned homes
 into Suitcase-managed install roots.
+
+Pack output must stay outside the catalog and every resolved target root.
+The shipped guard rejects output beneath absolute manifest-declared path fields, but it does not account for CLI target overrides or expand `~`, so callers remain responsible for choosing a safe staging directory.
 
 Live mutations require explicit approval input or an approved command mode:
 
@@ -517,13 +524,18 @@ the repo shippable.
 Each command module should follow this pattern:
 
 ```ts
-export function registerPlanCommand(registry: CommandRegistry): void {
-  registry.command("plan", async (args, deps) => {
-    const input = parsePlanArgs(args);
-    const result = await plan(input, deps);
-    return renderJsonResult(result);
-  });
-}
+export const planCommand: CommandModule = {
+  name: "plan",
+  accepts(args) {
+    return args.command === "plan" && hasSource(args) && hasTarget(args) && hasJson(args);
+  },
+  async run(args) {
+    return plan({
+      source: requireStringValue("source", args.source),
+      target: requireStringValue("target", args.target)
+    });
+  }
+};
 ```
 
 The exact API can change, but the separation should not:
@@ -541,12 +553,13 @@ otherwise.
 For command results:
 
 - success JSON should remain deterministic
-- error JSON should use stable fields when introduced
+- structured `ok: false` JSON and finding arrays should use stable fields
 - usage errors should exit with code `2`
 - command execution failures should exit with code `1`
 - successful commands should exit with code `0`
 
-Do not print notices, usage text, or warnings to stdout when `--json` is used.
+Do not print free-form notices, usage text, or fatal diagnostics to stdout when `--json` is used.
+Warnings that are part of a command's structured result remain in the JSON stdout payload.
 
 ## Adding New CLI Features
 
