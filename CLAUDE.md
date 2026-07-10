@@ -1,18 +1,18 @@
-# AGENTS.md
+# CLAUDE.md
 
-This repo is a TypeScript CLI. Keep the CLI architecture aligned with
-[`ARCHITECTURE.md`](ARCHITECTURE.md).
+This repository is a TypeScript CLI. Follow [`AGENTS.md`](AGENTS.md) and treat
+[`ARCHITECTURE.md`](ARCHITECTURE.md) as the source of truth for implementation
+boundaries.
 
-Before adding or changing a command:
+## Implementation Rules
 
-1. Read `ARCHITECTURE.md`.
-2. Keep `src/cli.ts` as a thin entrypoint.
-3. Put command-specific parsing and validation in `src/commands/`.
-4. Put durable behavior in domain/core modules, not command modules.
-5. Keep JSON stdout deterministic. Usage text, notices, and errors belong on stderr.
-
-New product work should extend the command/core/adapter/renderer pattern instead
-of adding behavior directly to `src/cli.ts`.
+- Keep `src/cli.ts` as a thin process entrypoint.
+- Put command parsing and validation in `src/commands/`.
+- Put durable behavior and state transitions in `src/core/`.
+- Keep filesystem and infrastructure details in adapters.
+- Render deterministic JSON on stdout; send usage, notices, warnings, and errors
+  to stderr.
+- Extend the command/core/adapter/renderer pattern instead of bypassing it.
 
 Preserve existing user changes and avoid generated `dist/`, dependency, local
 agent-state, or review-artifact files. Use portable paths such as `$HOME`, a

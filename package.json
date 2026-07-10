@@ -4,6 +4,7 @@
   "description": "Skill install planner and transactional installer for portable agent skill catalogs.",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@10.34.4",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/calvinnwq/skill-suitcase.git"

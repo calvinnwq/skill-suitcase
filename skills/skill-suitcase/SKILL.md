@@ -65,8 +65,12 @@ Prefer the global binary when it exists. Otherwise use the built source CLI:
 
 ```bash
 cd "$HOME/repos/skill-suitcase"
-pnpm install
-pnpm build
+pnpm() {
+  npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
+}
+test "$(pnpm --version)" = "10.34.4" \
+  && pnpm install --frozen-lockfile \
+  && pnpm run build
 
 export SRC="$HOME/repos/skills"
 export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"

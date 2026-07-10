@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/calvinnwq/skill-suitcase/blob/main/SECURITY.md
+    about: Review the private reporting instructions; do not open a public issue.
+  - name: Support guide
+    url: https://github.com/calvinnwq/skill-suitcase/blob/main/SUPPORT.md
+    about: Review the support boundary and information to include before filing.

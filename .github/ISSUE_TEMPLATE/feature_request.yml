@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a user-facing capability or workflow improvement.
+title: "feat: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the implementation. Skill Suitcase keeps catalog ownership, explicit approval, deterministic output, and rollback boundaries central to product behavior.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or operator problem needs to be solved? Include the current workaround.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable behavior you want, without requiring a particular implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and ownership boundaries
+      description: Could this read or write catalogs, target installs, receipts, agent homes, or remote services? What should require approval?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What existing commands, workflows, or simpler approaches have you tried?
+  - type: textarea
+    id: examples
+    attributes:
+      label: Example interface or output
+      description: Optional portable command examples or deterministic JSON shapes are welcome.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for the same request.
+          required: true
+        - label: I removed credentials, personal paths, and private agent or catalog state.
+          required: true
