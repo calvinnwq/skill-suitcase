@@ -3,3 +3,7 @@ coverage/
 .DS_Store
 dist/
 *.log
+
+# Local agent review artifacts
+.artshelf/
+.lavish/

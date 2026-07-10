@@ -2,6 +2,7 @@
   "name": "skill-suitcase",
   "version": "0.15.0",
   "description": "Skill install planner and transactional installer for portable agent skill catalogs.",
+  "license": "MIT",
   "type": "module",
   "repository": {
     "type": "git",
@@ -17,6 +18,7 @@
   "files": [
     "dist/src/**/*.js",
     "skills/skill-suitcase",
+    "LICENSE",
     "VISION.md",
     "README.md",
     "INSTALL.md",
