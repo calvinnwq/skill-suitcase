@@ -4,10 +4,10 @@ This reference describes the current `skill-suitcase` command surface. The
 README is the product overview and safe starting path; this document carries
 the longer operational detail.
 
-All commands are JSON-first. Result objects go to stdout, including structured
-`ok: false` results with machine-readable errors. Parser/usage failures and
-uncaught fatal diagnostics go to stderr. Examples use portable paths; set `SRC`
-and target overrides for the machine running the CLI.
+All CLI command forms require `--json`.
+Result objects go to stdout, including structured `ok: false` results with machine-readable errors.
+Parser/usage failures and uncaught fatal diagnostics go to stderr.
+Examples use portable paths; set `SRC` and target overrides for the machine running the CLI.
 
 ```bash
 SRC="/path/to/skills-catalog"
@@ -98,9 +98,7 @@ skill-suitcase status \
 Classifies planned installs using catalog content, live content, receipts, and
 install mode. States include:
 
-- `current`: for copy installs, target, catalog, and receipt content agree; for
-  symlink installs, the live link points to the selected catalog source (the
-  stored receipt version/hash is not revalidated on that path)
+- `current`: for copy installs, receipt-owned target files still match the receipt and the receipt hash/version match catalog source; preserved target extras outside `installedFiles` do not make the skill dirty; for symlink installs, the live link points to the selected catalog source and `sourcePolicy.exclude` is empty (the stored receipt version/hash is not revalidated on that path)
 - `missing`: planned target is absent
 - `version`: the installed receipt version differs from current `SKILL.md`
   frontmatter; review the change, then stage and `apply` the catalog update
@@ -168,14 +166,12 @@ bundle below the explicit directory and returns its artifact manifest. It does
 not touch the live target. The manifest records source provenance, selected
 skills, file hashes, planned target entries, and blocked entries.
 
-Pack refuses output beneath an absolute manifest-declared install root. The
-shipped guard does not expand home-relative strings such as `~`, so it is not a
-substitute for choosing a safe output. Pack also refuses selected untracked,
-non-ignored source files, `sourcePolicy.deny` matches, and provider-managed
-read-only targets. Git-ignored regular files may still be materialized unless
-`sourcePolicy` excludes or denies them, so inspect the staged artifact. Always
-use a temporary output directory outside both the catalog and target roots so
-staging does not dirty either workspace.
+Pack refuses output beneath an absolute manifest-declared install root.
+The shipped guard checks manifest paths only: it does not account for CLI target overrides and does not expand home-relative strings such as `~`, so it is not a substitute for choosing a safe output.
+Pack also refuses selected untracked, non-ignored source files, `sourcePolicy.deny` matches, and provider-managed read-only targets.
+Git-ignored regular files may still be materialized unless `sourcePolicy` excludes or denies them, so inspect the staged artifact.
+Always use a temporary output directory outside both the catalog and every resolved target root so staging does not dirty either workspace.
+Skill Suitcase does not prune old artifact directories automatically.
 
 ### Plan-lock creation (library API)
 
@@ -203,14 +199,11 @@ const assessment = await assessPlanLock({
 // assessment: { valid: boolean, reasons: string[], current: lock | null }
 ```
 
-`buildPlanLock` returns schema `calvinnwq.skills.plan-lock.v0` with source
-provenance, target and assignment identity, selected skills, planned entries,
-per-file hashes, and a deterministic `planId`. It refuses selected untracked,
-non-ignored source files through a thrown error; ignored regular files can still
-enter the lock hashes. `assessPlanLock` rebuilds current facts and returns drift
-reason strings such as `source_commit_changed`,
-`plan_entries_changed`, or `file_hashes_changed`. The module does not write the
-lock file itself.
+`buildPlanLock` returns schema `calvinnwq.skills.plan-lock.v0` with source provenance, target and assignment identity, selected skills, planned entries, per-file hashes, and a deterministic `planId`.
+It refuses selected untracked, non-ignored source files through a thrown error; ignored regular files can still enter the lock hashes.
+`assessPlanLock` rebuilds current facts and returns drift reason strings such as `source_commit_changed`, `plan_entries_changed`, or `file_hashes_changed`.
+The lock does not resolve or bind a target install root, local target overrides, or copy versus symlink mode; approve those apply-time choices separately.
+The module does not write the lock file itself.
 
 ## Explicit Mutation Commands
 
@@ -238,15 +231,13 @@ performs writes transactionally and emits a receipt per installed skill. Copy is
 the default mode. Symlink mode links selected source paths inside the catalog
 source root.
 
-The two approval inputs do not currently provide identical guarantees. Lock
-mode reassesses the current plan and file hashes against the lock. Artifact mode
-validates artifact schema, source/target metadata, and staging provenance, but
-ordinary missing/behind writes are rebuilt from current catalog source. Artifact
-`fileHashes` are enforced only for the dirty-behind update exception. A tracked
-catalog change or newly planned skill after packing may therefore be written by
-artifact apply without matching the staged bytes/plan. Re-run `pack` immediately
-before artifact apply and inspect the current `diff`; do not use an older
-artifact as byte-for-byte authorization.
+The two approval inputs do not currently provide identical guarantees.
+Lock mode reassesses the current plan and file hashes against the lock.
+Artifact mode validates artifact schema, source/target metadata, and staging provenance, but ordinary missing/behind writes are rebuilt from current catalog source.
+Artifact `fileHashes` are enforced only for the dirty-behind update exception.
+A tracked catalog change or newly planned skill after packing may therefore be written by artifact apply without matching the staged bytes/plan.
+Neither approval input binds local target overrides, the resolved install root, or `--mode`; approve the exact source, target path, and copy/symlink mode at invocation time.
+Re-run `pack` immediately before artifact apply and inspect the current `diff`; do not use an older artifact as byte-for-byte authorization.
 
 Important refusals include stale or malformed approval input, blocked variants,
 unmanaged existing targets, unapproved dirty content, source-policy failures,
@@ -263,9 +254,9 @@ skill-suitcase track \
   --json
 ```
 
-Adopts an already-correct copy or symlink install by writing a receipt. It never
-rewrites skill files. Repeat `--skill` for targeted adoption; omit it for the
-all-planned-skills mode.
+Adopts an already-correct copy or symlink install by writing a receipt.
+It never rewrites skill files.
+Repeat `--skill` for targeted adoption; omit it for the all-planned-skills mode.
 
 ### `reconcile`
 
@@ -287,9 +278,10 @@ skill-suitcase reconcile \
   --json
 ```
 
-Targets selected `unknown` catalog-planned skills. Dry-run reports target and
-catalog differences plus the backup path. Apply preserves the prior target as
-rollback state, installs catalog source, writes a receipt, and verifies status.
+Targets selected `unknown` catalog-planned skills.
+At least one `--skill` is required, and the flag is repeatable.
+Dry-run reports target and catalog differences plus the backup path.
+Apply preserves the prior target as rollback state, installs catalog source, writes a receipt, and verifies status.
 
 ### `repair`
 
@@ -311,10 +303,10 @@ skill-suitcase repair \
   --json
 ```
 
-Targets selected `dirty`, receipt-owned copy installs when catalog source
-should win. Dry-run reports receipt/catalog/live hashes, file changes, and the
-backup plan. Apply backs up live content, installs catalog source, refreshes the
-receipt, and verifies `current` status.
+Targets selected `dirty`, receipt-owned copy installs when catalog source should win.
+At least one `--skill` is required, and the flag is repeatable.
+Dry-run reports receipt/catalog/live hashes, file changes, and the backup plan.
+Apply backs up live content, installs catalog source, refreshes the receipt, and verifies `current` status.
 
 ### `rollback`
 
@@ -372,9 +364,9 @@ skill-suitcase import-target \
 ```
 
 Targets intentional edits to selected dirty, receipt-owned catalog skills.
-Dry-run reports receipt, catalog, and target hashes plus planned repository
-writes. Apply copies target content into the catalog atomically, refreshes the
-receipt, and leaves normal Git changes for review.
+At least one `--skill` is required, and the flag is repeatable.
+Dry-run reports receipt, catalog, and target hashes plus planned repository writes.
+Apply copies target content into the catalog atomically, refreshes the receipt, and leaves normal Git changes for review.
 
 ### `upstream import`
 
@@ -389,6 +381,39 @@ skill-suitcase upstream import \
 Repeats the pinned isolated fetch, refuses dirty selected catalog source, and
 writes only `skills/<name>` plus `.skill-suitcase/upstream-lock.json`. It never
 installs into a live target and never commits the resulting Git diff.
+
+## Receipt Library API
+
+The compiled `dist/src/receipt.js` module exports helpers for building, reading, merging, and writing schema `calvinnwq.skills.receipt.v0` receipts.
+
+```js
+import {
+  buildInstallRecord,
+  buildInstalledFiles,
+  upsertAndWriteReceipt
+} from "./dist/src/receipt.js";
+
+const installedFiles = await buildInstalledFiles("/target/root/my-skill");
+const installRecord = buildInstallRecord({
+  agent: "claude",
+  mode: "copy",
+  sourcePath: "/path/to/skills-catalog/skills/my-skill",
+  targetPath: "/target/root/my-skill",
+  version: "1.2.0",
+  installedFiles
+});
+
+await upsertAndWriteReceipt({
+  installRoot: "/target/root",
+  skillName: "my-skill",
+  installRecord
+});
+```
+
+`buildInstalledFiles` hashes regular files while skipping `__pycache__` directories and `.pyc` files; its optional `{ exclude }` iterable omits selected paths.
+`buildReceipt` creates a receipt shell, `upsertInstallRecord` merges an install record in memory, and `upsertAndWriteReceipt` merges against disk before writing `.skill-suitcase-receipt.json`.
+`readReceipt` reads modern receipts or migrates legacy `.skills-sync.json` data in memory without writing, while `writeReceipt` replaces the full receipt payload.
+Custom receipt paths must remain inside `installRoot`, and multiple installs for one skill are represented as an array under that skill name.
 
 ## Common Refusal Codes
 

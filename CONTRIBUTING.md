@@ -38,5 +38,5 @@ package must have a trusted publisher configured for `calvinnwq/skill-suitcase`
 and workflow filename `release-please.yml`; do not add long-lived npm tokens.
 
 See [`docs/release-readiness.md`](docs/release-readiness.md) for the Release
-Please merge checklist, npm package/bin policy, GitHub visibility tradeoffs, and
-the public-readiness checklist.
+Please merge checklist, npm package/bin policy, repository controls, and the
+public-documentation gate.

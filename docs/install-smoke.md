@@ -94,7 +94,8 @@ For upstream-managed skills, `status --json` should carry the same lineage and
 add target status, receipt hash, and receipt commit from the selected target
 receipt.
 Target-scoped status should load lineage for reported skills only and should not hash unrelated upstream-managed catalog skills.
-Trust only the exact pinned provider in the isolated temp workspace/home.
+For skills.sh, trust only the exact pinned installer package in the isolated temp workspace/home, but remember that the referenced repository content is not pinned to a revision or content hash.
+Review every skills.sh fetch diff; Git declarations pin the fetched tag or commit.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.
 
@@ -126,6 +127,9 @@ artifact path as copy installs and add `--mode symlink` to `apply`. The target
 skill root should become a symlink pointing back to the selected catalog source
 path, `status` should report it as `current`, and `rollback` should remove only
 a symlink that `apply --mode symlink` created.
+The lock or artifact does not bind the resolved target override or install mode, so the smoke approval must name both separately.
+For artifact mode, re-pack immediately before apply because ordinary missing/behind writes come from current catalog source and artifact hashes gate only the dirty-behind exception.
+When writing a pack, keep its output outside the catalog and every resolved target root; the built-in guard checks absolute manifest paths only, not CLI overrides or `~` expansion.
 
 When smoke testing a selected unknown target reconcile, create a disposable target
 skill directory that differs from the catalog and has no receipt, then run
@@ -186,3 +190,4 @@ fixtures or an intentionally approved target-created skill; live promotion
 copies the skill into `skills/<name>`, replaces the target with a symlink back to
 that catalog source, writes a receipt, and preserves the original target in a
 hidden backup path.
+The current `rollback` command treats that promotion receipt as a no-op and does not restore the backup.

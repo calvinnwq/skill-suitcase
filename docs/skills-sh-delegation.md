@@ -27,8 +27,7 @@ live agent homes.
 - The documented CLI surface does not expose a stable JSON install plan,
   receipt output, rollback contract, or exact post-install manifest suitable for
   direct Skill Suitcase ownership.
-- The existing catalog repo compatibility path at
-  `/Users/ngxcalvin/repos/skills/scripts/sync.py` shells out to
+- The evaluated catalog's compatibility script at `scripts/sync.py` shells out to
   `npx skills add <repo> --skill <skill> -g -a <agent> -y`, optionally with
   `--copy`. That path is useful as a compatibility adapter, but it does not
   create Skill Suitcase receipts or prove rollback ownership.
@@ -124,10 +123,10 @@ Lifecycle cases:
 | Upstream removed or renamed | Report the missing upstream skill and preserve the current catalog source plus lock until an operator chooses keep, fork/adopt, rename, or delete. |
 | Target drift | Use ordinary target status semantics and receipts. Never call `npx skills` against live homes as a shortcut. |
 
-The trust boundary stays narrow: exact pinned package, isolated temp
-workspace/home, fetched path inside the sandbox, required `SKILL.md`, and
-catalog-only writes. Upstream tooling is not trusted to choose target roots,
-write receipts, prove rollback state, or mutate live agent homes.
+The trust boundary stays narrow: exact pinned package, isolated temp workspace/home, fetched path inside the sandbox, required `SKILL.md`, and catalog-only writes.
+For skills.sh, the pin fixes the installer package version but not the referenced repository revision or content hash, so every fetched diff still needs review.
+Git declarations instead pin the fetched tag or commit.
+Upstream tooling is not trusted to choose target roots, write receipts, prove rollback state, or mutate live agent homes.
 
 `upstream check --json` and `status --json` expose lineage metadata for
 upstream-managed skills.

@@ -113,9 +113,11 @@ The public repository runs `.github/workflows/ci.yml` for pull requests and
 pushes to `main`. Its `test` job installs the frozen pnpm lockfile on Node 24 and
 runs `pnpm test`.
 
-Repository rules should require the CI `test` job, restrict direct pushes to
-`main`, and require up-to-date branches when practical. Release Please and npm
-trusted-publishing permissions remain scoped to the release workflow.
+The active repository ruleset is named `Protect main` and targets `main`.
+It requires pull requests, stale-review dismissal after new pushes, review-thread resolution, the CI `test` check, deletion protection, and non-fast-forward protection.
+It currently requires zero approving reviews and does not require the checked branch to be up to date.
+Raise the required approving-review count to at least one before treating repository protection as complete; require up-to-date branches when practical.
+Release Please and npm trusted-publishing permissions remain scoped to the release workflow.
 
 Making the repository public is complete and no longer an outstanding release
 decision.
@@ -183,7 +185,7 @@ catalog as an implicit release fixture.
 Before publishing, verify:
 
 - The README first screen describes the agent-first product that ships now.
-- README examples use `$HOME`, `/path/to/...`, or explicit target overrides;
+- Public examples use `$HOME`, `/path/to/...`, or explicit target overrides;
   they do not require a maintainer-specific absolute path.
 - Long-form command behavior lives in `docs/command-reference.md`, not in a
   README roadmap or milestone narrative.

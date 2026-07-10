@@ -179,8 +179,8 @@ Lifecycle policy:
   dirty targets for `repair` or `import-target`.
   Do not call `npx skills` against live homes as a shortcut.
 
-Trust only the exact pinned upstream package in the isolated temp workspace/home
-for catalog source refresh.
+For skills.sh declarations, the exact package version is pinned but the referenced repository content is not pinned to a source revision or content hash.
+Review every fetched diff; Git declarations instead pin a tag or commit.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.
 
@@ -207,6 +207,7 @@ surfaces, even when the catalog declares a custom `assignmentPaths` review root.
 Treat `read_only_target` from `pack`, `apply`, `track`, `reconcile`, `repair`,
 or `import-target` as the expected boundary instead of trying to adopt that
 provider-owned home.
+Provider fallback inventory without a catalog assignment has no status entries; a custom assigned provider path may have ordinary status entries, but it remains read-only for materialization and mutation.
 
 ## 5. Mutate Only After Approval
 
@@ -259,10 +260,13 @@ plan, and run `import-target --apply` only after **explicit approval** that the
 drift is intentional and should become the repo version. A drift report must
 never trigger an implicit import.
 
+The current `rollback` command reverses receipt-backed apply, reconcile, and repair state, including links created by `apply --mode symlink`.
+It does not restore a promotion; a promotion receipt is a safe no-op and its preserved backup requires a separate manual recovery decision.
+
 Use staged artifacts for missing or behind skills:
 
 ```bash
-TMP="$(mktemp -d /tmp/skill-suitcase-codex.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-codex.XXXXXX")"
 skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$TMP" --json
 find "$TMP" -maxdepth 4 -type f | sort
 ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
@@ -270,29 +274,40 @@ ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
 skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
 ```
 
-For Git-backed catalogs, staged artifacts and plan locks refuse selected source
-skills with untracked, non-ignored files. Track or remove scratch files inside a
-selected skill before packing or applying it.
+Artifact apply validates the stored bundle, but ordinary missing/behind writes are rebuilt from current catalog source and packed hashes gate only the dirty-behind exception.
+Re-run `pack` immediately before `apply`, inspect the current `diff`, and approve the exact target override and install mode instead of treating an older artifact as byte-for-byte authorization.
+Pack refuses output beneath absolute install paths declared in the manifest, but that guard does not account for CLI target overrides or expand `~`.
+Keep output in a temporary directory outside the catalog and every resolved target root.
+
+For Git-backed catalogs, staged artifacts and plan locks refuse selected source skills with untracked, non-ignored files.
+Track or remove scratch files inside a selected skill before packing or applying it.
+Plan-lock creation is a library API, not a CLI command; see [`docs/command-reference.md`](docs/command-reference.md#plan-lock-creation-library-api).
 
 For Claude, use:
 
 ```bash
-skill-suitcase pack --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --output "$TMP" --json
-skill-suitcase apply --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --artifact "$ARTIFACT" --json
+CLAUDE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-claude.XXXXXX")"
+skill-suitcase pack --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --output "$CLAUDE_TMP" --json
+CLAUDE_ARTIFACT="$(find "$CLAUDE_TMP" -name skill-suitcase-bundle.json -print -quit)"
+skill-suitcase apply --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --artifact "$CLAUDE_ARTIFACT" --json
 ```
 
 For the shared agents root, use:
 
 ```bash
-skill-suitcase pack --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --output "$TMP" --json
-skill-suitcase apply --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --artifact "$ARTIFACT" --json
+AGENTS_TMP="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-agents.XXXXXX")"
+skill-suitcase pack --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --output "$AGENTS_TMP" --json
+AGENTS_ARTIFACT="$(find "$AGENTS_TMP" -name skill-suitcase-bundle.json -print -quit)"
+skill-suitcase apply --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --artifact "$AGENTS_ARTIFACT" --json
 ```
 
 For Grok, use:
 
 ```bash
-skill-suitcase pack --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --output "$TMP" --json
-skill-suitcase apply --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --artifact "$ARTIFACT" --json
+GROK_TMP="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-grok.XXXXXX")"
+skill-suitcase pack --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --output "$GROK_TMP" --json
+GROK_ARTIFACT="$(find "$GROK_TMP" -name skill-suitcase-bundle.json -print -quit)"
+skill-suitcase apply --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --artifact "$GROK_ARTIFACT" --json
 ```
 
 ## 6. Verify And Report
