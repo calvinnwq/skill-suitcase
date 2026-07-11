@@ -298,11 +298,23 @@ That setup leaves Corepack and global package-manager shims unchanged.
 ```bash
 pnpm test
 pnpm run typecheck
+pnpm run build
+pnpm run package:smoke
+pnpm run format:check
 pnpm run architecture:check
 git diff --check
 ```
 
-The current implementation has no runtime package dependencies. Keep
+`build` removes `dist`, compiles the TypeScript sources, and marks `dist/src/cli.js` executable so stale generated output cannot survive a package build.
+`test` rebuilds first, then runs Node's built-in test runner against `dist/tests/*.test.js` and the packaging tests under `scripts/*.test.mjs`.
+`package:smoke` runs the supported local pack verification: npm invokes `prepack` to create a clean build and record build-input, source, and output hashes in the ignored `dist/.package-build.json`, then the smoke script parses `npm pack --json`, validates the pinned public metadata and exact allowed payload, installs the tarball into an empty temporary project, and runs the read-only `targets` command through the installed executable.
+`architecture:check` runs `scripts/check-architecture.mjs` to enforce the module boundaries described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+CI uses the package's pinned pnpm `10.34.4` toolchain.
+The main test job runs on Node 24, while the package smoke job verifies the packed and installed CLI on Node 20 and Node 24.
+
+The current implementation has no runtime package dependencies.
+Keep
 `src/cli.ts` thin, put parsing and validation in `src/commands/`, durable
 behavior in `src/core/`, infrastructure in `src/adapters/`, and output contracts
 in `src/renderers/`. See the module boundaries in

@@ -66,6 +66,7 @@ jobs:
           pnpm run lint
           pnpm run format:check
           pnpm run architecture:check
+          pnpm run package:smoke
           npm publish --dry-run --access public --json
 
       - name: Publish to npm

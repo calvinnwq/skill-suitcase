@@ -1,7 +1,7 @@
 # Release Readiness
 
-This document records the release controls and verified shipped state for Skill
-Suitcase. It is an operational checklist, not a roadmap.
+This document records the release controls and verified shipped state for Skill Suitcase, including the package hardening from `NGX-618`.
+It is an operational checklist, not a roadmap.
 
 ## Verified Shipped State
 
@@ -27,6 +27,7 @@ Current durable release facts:
 - The GitHub repository is public.
 - The installed binary name is `skill-suitcase`.
 - The package requires Node.js 20 or newer.
+- CI runs the test suite on Node 24 and the packed-package smoke test on Node 20 and Node 24.
 - GitHub releases and release notes are managed by Release Please.
 - npm publication runs only after Release Please creates a GitHub release.
 - npm publication uses GitHub Actions OIDC Trusted Publishing with provenance;
@@ -72,11 +73,16 @@ decision; it is not inferred from routine Release Please output.
 - License: MIT
 - Repository: `calvinnwq/skill-suitcase`
 
-`package.json` uses an explicit `files` whitelist. Published content is limited
-to the compiled CLI, packaged operator skill, license, product and setup docs,
-contributor and community guidance, changelog, and `docs/*.md`. Tests, source
-TypeScript, local review artifacts, agent state, and workspace files are
-excluded from the npm payload.
+`package.json` uses an explicit `files` whitelist.
+The public payload is approved through exact curated paths: npm's required `package.json`; `dist/src/**/*.js`; `skills/skill-suitcase/SKILL.md`; `skills/skill-suitcase/agents/openai.yaml`; `LICENSE`, `VISION.md`, `README.md`, `INSTALL.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `DEVELOPING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, and `CLAUDE.md`; and `docs/command-reference.md`, `docs/install-smoke.md`, `docs/portability-matrix.md`, `docs/release-readiness.md`, and `docs/skills-sh-delegation.md`.
+Do not replace the exact documentation or operator-skill entries with broad directory globs because a newly added file must not become publish-approved without independent review.
+Tests, source TypeScript, local review artifacts, agent state, and workspace files are excluded from the npm payload.
+
+`scripts/package-validation.mjs` pins the MIT license, `Calvin Ng` author, repository/homepage/issues URLs, search keywords, Node `>=20` engine, pnpm `10.34.4` package-manager metadata, package name, and binary name.
+`prepack` remains routed through `package:prepare` so every supported npm pack or publish removes stale `dist` output, rebuilds the CLI, verifies its shebang and executable mode, and records hashes for `package.json`, `pnpm-lock.yaml`, `tsconfig.json`, source files, and compiled output in the ignored `dist/.package-build.json` manifest.
+`package:validate` is the non-rebuilding recheck of that manifest, so changed compiler configuration or dependency inputs and missing, additional, stale, changed, or non-executable compiled CLI output fail validation.
+`pnpm run package:smoke` parses `npm pack --json`, rejects missing or unintended payload entries, requires the installed CLI binary to remain executable, installs the generated tarball into an empty temporary project, and runs the read-only `targets` command.
+Both the package smoke and the Release Please workflow's pre-publish dry-run prevent local workflow artifacts from silently entering the package tarball.
 
 Before publication, the release workflow runs
 `npm publish --dry-run --access public --json`. Inspecting that payload is a
@@ -95,8 +101,9 @@ The npm trusted publisher is configured for:
 The workflow requirements are present:
 
 - `permissions.id-token: write`
-- GitHub-hosted `ubuntu-latest`
-- `actions/setup-node` with Node 24
+- GitHub-hosted `ubuntu-latest` runner
+- Node 24 through `actions/setup-node`
+- pnpm `10.34.4`
 - npm CLI `>=11.5.1`
 - `registry-url: https://registry.npmjs.org`
 - final `npm publish --access public --provenance`
@@ -105,14 +112,15 @@ Publish steps are guarded by
 `steps.release.outputs.release_created == 'true'`. Opening or updating a
 Release Please PR does not publish. Once a release PR merge creates a GitHub
 release, the workflow checks out that release commit, installs the locked
-dependencies, runs the release gates, inspects the package payload, and
-publishes with provenance.
+dependencies, runs the release gates, smoke-packs and installs the tarball,
+checks the package payload with `npm publish --dry-run --access public --json`,
+and publishes with provenance.
 
 ## CI And Repository Controls
 
-The public repository runs `.github/workflows/ci.yml` for pull requests and
-pushes to `main`. Its `test` job installs the frozen pnpm lockfile on Node 24 and
-runs `pnpm test`.
+The public repository runs `.github/workflows/ci.yml` for pull requests and pushes to `main`.
+Its `test` job installs the frozen pnpm lockfile on Node 24 and runs `pnpm test`.
+Its `package-smoke` job verifies the packed and installed CLI on Node 20 and Node 24.
 
 The active repository ruleset is named `Protect main` and targets `main`.
 It requires pull requests, stale-review dismissal after new pushes, review-thread resolution, the CI `test` check, deletion protection, and non-fast-forward protection.
@@ -134,6 +142,7 @@ or global package-manager shims.
 pnpm install --frozen-lockfile
 pnpm test
 pnpm run typecheck
+pnpm run package:smoke
 pnpm run architecture:check
 git diff --check
 npm publish --dry-run --access public --json
@@ -195,6 +204,8 @@ Before publishing, verify:
   README roadmap or milestone narrative.
 - `INSTALL.md` covers packaged CLI and operator-skill setup.
 - `CONTRIBUTING.md` explains Release Please and Trusted Publishing boundaries.
+- Package validation checks the exact approved public payload, including the
+  documentation and packaged operator-skill paths.
 - The README links to contributor, development, support, security, and conduct
   guidance, and every linked community file ships in the npm package.
 - No doc implies `skills.sh` runtime delegation is a managed installer path.

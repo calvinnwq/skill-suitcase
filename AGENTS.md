@@ -34,6 +34,7 @@ Use the checks relevant to the change. The normal full set is:
 ```bash
 pnpm test
 pnpm run lint
+pnpm run package:smoke
 pnpm run architecture:check
 git diff --check
 ```

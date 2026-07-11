@@ -54,6 +54,8 @@ package and publishes it through npm Trusted Publishing. The npm package must
 keep its trusted publisher configured for repository
 `calvinnwq/skill-suitcase` and workflow `release-please.yml`; never introduce a
 long-lived npm token.
+The release gate smoke-packs and installs the tarball, then checks
+`npm publish --dry-run --access public --json` before provenance publishing.
 
 See [`docs/release-readiness.md`](docs/release-readiness.md) for the Release
 Please merge checklist, npm package/bin policy, repository controls, and the

@@ -3,6 +3,14 @@
   "version": "0.15.0",
   "description": "Skill install planner and transactional installer for portable agent skill catalogs.",
   "license": "MIT",
+  "author": "Calvin Ng",
+  "keywords": [
+    "agent-skills",
+    "ai-agents",
+    "cli",
+    "skill-manager",
+    "skills"
+  ],
   "type": "module",
   "packageManager": "pnpm@10.34.4",
   "repository": {
@@ -18,7 +26,8 @@
   },
   "files": [
     "dist/src/**/*.js",
-    "skills/skill-suitcase",
+    "skills/skill-suitcase/SKILL.md",
+    "skills/skill-suitcase/agents/openai.yaml",
     "LICENSE",
     "VISION.md",
     "README.md",
@@ -30,16 +39,24 @@
     "SUPPORT.md",
     "CODE_OF_CONDUCT.md",
     "CLAUDE.md",
-    "docs/*.md"
+    "docs/command-reference.md",
+    "docs/install-smoke.md",
+    "docs/portability-matrix.md",
+    "docs/release-readiness.md",
+    "docs/skills-sh-delegation.md"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && chmod +x dist/src/cli.js",
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/src/cli.js",
+    "package:prepare": "pnpm run build && node scripts/package-validation.mjs record",
+    "package:validate": "node scripts/package-validation.mjs validate",
+    "package:smoke": "node scripts/package-smoke.mjs",
+    "prepack": "pnpm --silent run package:prepare",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "pnpm run typecheck",
-    "test": "rm -rf dist && pnpm run build && node --test dist/tests/*.test.js",
+    "test": "pnpm run build && node --test dist/tests/*.test.js scripts/*.test.mjs",
     "format:check": "git diff --check",
     "architecture:check": "node scripts/check-architecture.mjs"
   },

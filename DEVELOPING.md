@@ -63,16 +63,22 @@ pnpm test
 pnpm run lint
 pnpm run typecheck
 pnpm run build
+pnpm run package:smoke
 pnpm run format:check
 pnpm run architecture:check
 ```
 
 `pnpm test` rebuilds the project and runs Node's built-in test runner against
 the compiled test suite, including deterministic checks for the community files,
-issue forms, and local documentation links. `lint` currently aliases the
-TypeScript typecheck. `format:check` runs `git diff --check`, and
-`architecture:check` enforces the module boundaries documented in
-`ARCHITECTURE.md`.
+issue forms, local documentation links, and packaging validation.
+`package:smoke` clean-builds through npm's `prepack` hook, validates the public
+metadata and exact tarball payload, installs that tarball in an empty temporary
+project, and runs its read-only `targets` command. `package:prepare` is the
+lower-level clean-build and hash-recording step used by `prepack`, while
+`package:validate` rechecks the recorded build without rebuilding it. `lint`
+currently aliases the TypeScript typecheck. `format:check` runs
+`git diff --check`, and `architecture:check` enforces the module boundaries
+documented in `ARCHITECTURE.md`.
 
 For a focused test, build first and run the compiled test file directly:
 

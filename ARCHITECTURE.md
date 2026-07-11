@@ -570,8 +570,7 @@ When adding a new product feature:
 3. Put filesystem or target install IO behind an adapter.
 4. Render JSON through `src/renderers/`.
 5. Add command-boundary tests and core behavior tests.
-6. Run `pnpm test`, `pnpm typecheck`, `pnpm build`, `pnpm run architecture:check`,
-   and `git diff --check`.
+6. Run `pnpm test`, `pnpm typecheck`, `pnpm build`, `pnpm run package:smoke`, `pnpm run architecture:check`, and `git diff --check`.
 
 The blunt rule: do not fatten `src/cli.ts`.
 
