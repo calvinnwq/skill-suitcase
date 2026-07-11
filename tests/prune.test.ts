@@ -9,6 +9,7 @@ import {
   buildInstallRecord,
   buildInstalledFiles,
   readReceipt,
+  upsertAndWriteReceipt,
   writeReceipt
 } from "../src/receipt.js";
 
@@ -166,6 +167,31 @@ test("prune refuses malformed target assignments instead of treating them as emp
   assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
 });
 
+test("prune returns a structured refusal when assignment planning throws", async (t) => {
+  const fixture = await createFixture(t);
+  const manifestPath = path.join(fixture.sourceRoot, "skill-suitcase.yaml");
+  const manifest = await readFile(manifestPath, "utf8");
+  await writeFile(manifestPath, manifest.replace("      - core", "      - missing"));
+
+  const result = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "assignment_unverifiable"), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+});
+
+test("prune refuses malformed receipt install entries", async (t) => {
+  const fixture = await createFixture(t);
+  const receiptPath = path.join(fixture.targetRoot, ".skill-suitcase-receipt.json");
+  const receipt = await readReceipt({ installRoot: fixture.targetRoot });
+  receipt.installs!["dir-old"] = null as never;
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+
+  const result = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "invalid_receipt"), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+});
+
 test("prune apply refuses drift after review", async (t) => {
   const fixture = await createFixture(t);
   const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
@@ -241,6 +267,45 @@ test("prune revalidates each candidate immediately before mutation", async (t) =
   assert.equal(result.ok, false);
   assert.equal(result.errors.some((error) => error.code === "prune_apply_failed"), true);
   assert.equal(await readFile(path.join(fixture.directoryTarget, "late-drift.txt"), "utf8"), "drift\n");
+});
+
+test("prune preserves a receipt update that starts during apply", async (t) => {
+  const fixture = await createFixture(t);
+  const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.ok(dryRun.plan.id);
+  let concurrentWrite: Promise<string> | null = null;
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    planId: dryRun.plan.id,
+    apply: true,
+    __test: {
+      beforeMutationForSkill: () => {
+        concurrentWrite = upsertAndWriteReceipt({
+          installRoot: fixture.targetRoot,
+          skillName: "other",
+          installRecord: buildInstallRecord({
+            skill: "other",
+            agent: "codex",
+            target: "codex",
+            mode: "copy",
+            sourcePath: path.join(fixture.sourceRoot, "skills", "other"),
+            targetPath: path.join(fixture.targetRoot, "other"),
+            sourceHash: "other-source",
+            installedFiles: []
+          })
+        });
+      }
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.ok(concurrentWrite);
+  await concurrentWrite;
+  const receipt = await readReceipt({ installRoot: fixture.targetRoot });
+  assert.equal(receipt.installs?.["dir-old"], undefined);
+  assert.ok(receipt.installs?.["other"]);
 });
 
 test("prune never follows the old deterministic receipt temp path", async (t) => {

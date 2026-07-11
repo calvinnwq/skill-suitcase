@@ -18,6 +18,7 @@ import type { TargetOverrides } from "../catalog/index.js";
 import {
   readReceipt,
   RECEIPT_FILE,
+  RECEIPT_LOCK_FILE,
   RECEIPT_SCHEMA,
   type Receipt,
   type ReceiptInstallRecord
@@ -167,7 +168,16 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
   }
   if (installRoot === null) errors.push({ code: "missing_install_root", message: `Could not resolve install root for ${input.target}.` });
 
-  const assignmentPlan = await plan({ source, target: assignment ?? input.target });
+  let assignmentPlan: Awaited<ReturnType<typeof plan>>;
+  try {
+    assignmentPlan = await plan({ source, target: assignment ?? input.target });
+  } catch (error) {
+    errors.push({
+      code: "assignment_unverifiable",
+      message: `Cannot verify target assignment: ${errorMessage(error)}`
+    });
+    assignmentPlan = { ok: false, source, target: assignment ?? input.target, planned: [], blocked: [], errors: [] };
+  }
   for (const error of assignmentPlan.errors.filter((item) => item.skill === undefined)) {
     errors.push({ code: "assignment_unverifiable", message: `Cannot verify target assignment: ${error.message}` });
   }
@@ -193,7 +203,12 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
       }
       const receiptText = await readFile(receiptPath, "utf8");
       receiptHash = sha256(receiptText);
-      receipt = await readReceipt({ installRoot });
+      const loadedReceipt = await readReceipt({ installRoot });
+      const invalidRecord = invalidReceiptRecord(loadedReceipt);
+      if (invalidRecord !== null) {
+        throw new Error(invalidRecord);
+      }
+      receipt = loadedReceipt;
     } catch (error) {
       errors.push({ code: "invalid_receipt", message: `Could not read prune receipt ${receiptPath}: ${errorMessage(error)}`, path: receiptPath });
     }
@@ -330,7 +345,7 @@ async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<P
   const transactionPath = path.join(quarantineRoot, "transaction.json");
   const receiptBackupPath = path.join(quarantineRoot, "receipt.before.json");
   const receiptTempPath = path.join(quarantineRoot, "receipt.after.tmp");
-  const lockPath = path.join(installRoot, ".skill-suitcase-prune.lock");
+  const lockPath = path.join(installRoot, RECEIPT_LOCK_FILE);
   const movedDirectories: PruneCandidate[] = [];
   const removedSymlinks: PruneCandidate[] = [];
   let receiptReplaced = false;
@@ -473,6 +488,20 @@ function recordMatches(
     && (recordTarget === null || recordTarget === targetIdentity)
     && PRUNABLE_INSTALL_MODES.has(normalize(record.mode) ?? "")
     && path.resolve(installRoot, value) === path.resolve(targetPath);
+}
+
+function invalidReceiptRecord(receipt: Receipt): string | null {
+  if (receipt.installs === undefined) return null;
+  if (!receipt.installs || typeof receipt.installs !== "object" || Array.isArray(receipt.installs)) {
+    return "Receipt installs must be an object.";
+  }
+  for (const [skill, raw] of Object.entries(receipt.installs)) {
+    const records = Array.isArray(raw) ? raw : [raw];
+    if (records.length === 0 || records.some((record) => !record || typeof record !== "object" || Array.isArray(record))) {
+      return `Receipt install records for ${skill} must be objects.`;
+    }
+  }
+  return null;
 }
 
 async function revalidateCandidate(planned: PlannedPrune, candidate: PruneCandidate): Promise<void> {

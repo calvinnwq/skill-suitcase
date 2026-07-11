@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const RECEIPT_SCHEMA = "calvinnwq.skills.receipt.v0";
 export const RECEIPT_FILE = ".skill-suitcase-receipt.json";
 export const LEGACY_RECEIPT_SCHEMA = "calvinnwq.skills.sync-lock.v0";
 export const LEGACY_RECEIPT_FILE = ".skills-sync.json";
+export const RECEIPT_LOCK_FILE = ".skill-suitcase-receipt.lock";
+
+const RECEIPT_LOCK_RETRY_MS = 25;
+const RECEIPT_LOCK_TIMEOUT_MS = 10_000;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -65,6 +69,12 @@ type WriteReceiptInput = {
   receiptPath?: string;
 };
 
+type UpdateAndWriteReceiptInput = {
+  installRoot: string;
+  receiptPath?: string;
+  update: (receipt: Receipt) => Receipt | Promise<Receipt>;
+};
+
 type UpsertInstallRecordInput = {
   skillName: string;
   installRecord: ReceiptInstallRecord;
@@ -108,11 +118,10 @@ export async function writeReceipt({
     installRoot: normalizedRoot,
     receiptPath: normalizedReceiptPath
   });
-  await mkdir(normalizedRoot, { recursive: true });
-
   const payload = normalizeReceiptPayload(receipt);
-  await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await withReceiptLock({ installRoot: normalizedRoot }, async () => {
+    await writeReceiptUnlocked(outputPath, payload);
+  });
   return outputPath;
 }
 
@@ -154,16 +163,6 @@ export async function upsertAndWriteReceipt({
     throw new Error("installRecord must be an object.");
   }
 
-  const currentReceipt = receipt === undefined
-    ? await readReceipt({
-      installRoot: normalizedRoot,
-      receiptPath: normalizedReceiptPath
-    })
-    : receipt;
-  if (!isRecord(currentReceipt)) {
-    throw new Error("Receipt payload must be an object.");
-  }
-
   const normalizedTargetPath = normalizeTargetPathForInstallRoot({
     installRoot: normalizedRoot,
     targetPath: installRecord.targetPath
@@ -172,23 +171,91 @@ export async function upsertAndWriteReceipt({
     ? { ...installRecord, targetPath: normalizedTargetPath }
     : installRecord;
 
-  const nextReceipt = upsertInstallRecord(
-    {
-      ...currentReceipt,
-      installs: cloneReceiptInstalls(currentReceipt)
-    },
-    {
-      skillName,
-      installRecord: nextInstallRecord,
-      installRoot: normalizedRoot
+  await withReceiptLock({ installRoot: normalizedRoot }, async () => {
+    const currentReceipt = receipt === undefined
+      ? await readReceipt({
+        installRoot: normalizedRoot,
+        receiptPath: normalizedReceiptPath
+      })
+      : receipt;
+    if (!isRecord(currentReceipt)) {
+      throw new Error("Receipt payload must be an object.");
     }
-  );
 
-  return writeReceipt({
+    const nextReceipt = upsertInstallRecord(
+      {
+        ...currentReceipt,
+        installs: cloneReceiptInstalls(currentReceipt)
+      },
+      {
+        skillName,
+        installRecord: nextInstallRecord,
+        installRoot: normalizedRoot
+      }
+    );
+    await writeReceiptUnlocked(outputPath, normalizeReceiptPayload(nextReceipt));
+  });
+  return outputPath;
+}
+
+export async function updateAndWriteReceipt({
+  installRoot,
+  receiptPath = RECEIPT_FILE,
+  update
+}: UpdateAndWriteReceiptInput): Promise<string> {
+  const normalizedRoot = normalizeInstallRoot(installRoot);
+  const normalizedReceiptPath = receiptPath ?? RECEIPT_FILE;
+  const outputPath = resolveReceiptPath({
     installRoot: normalizedRoot,
-    receipt: nextReceipt,
     receiptPath: normalizedReceiptPath
   });
+  await withReceiptLock({ installRoot: normalizedRoot }, async () => {
+    const currentReceipt = await readReceipt({
+      installRoot: normalizedRoot,
+      receiptPath: normalizedReceiptPath
+    });
+    const nextReceipt = await update(currentReceipt);
+    await writeReceiptUnlocked(outputPath, normalizeReceiptPayload(nextReceipt));
+  });
+  return outputPath;
+}
+
+export async function withReceiptLock<T>({ installRoot }: { installRoot: string }, action: () => Promise<T>): Promise<T> {
+  const normalizedRoot = normalizeInstallRoot(installRoot);
+  await mkdir(normalizedRoot, { recursive: true });
+  const lockPath = path.join(normalizedRoot, RECEIPT_LOCK_FILE);
+  const deadline = Date.now() + RECEIPT_LOCK_TIMEOUT_MS;
+  let handle;
+  while (true) {
+    try {
+      handle = await open(lockPath, "wx");
+      break;
+    } catch (error) {
+      if ((error as { code?: string }).code !== "EEXIST" || Date.now() >= deadline) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, RECEIPT_LOCK_RETRY_MS));
+    }
+  }
+  try {
+    await handle.writeFile(`${process.pid}\n`, "utf8");
+    return await action();
+  } finally {
+    await handle.close().catch(() => undefined);
+    await rm(lockPath, { force: true }).catch(() => undefined);
+  }
+}
+
+async function writeReceiptUnlocked(outputPath: string, receipt: Receipt): Promise<void> {
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  const tempPath = `${outputPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await writeFile(tempPath, `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    await rename(tempPath, outputPath);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function readReceiptForUpsert({ receiptPath, legacyReceiptPath }: {

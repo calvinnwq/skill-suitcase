@@ -11,10 +11,8 @@ import {
 import {
   buildInstallRecord,
   buildInstalledFiles,
-  readReceipt,
   upsertInstallRecord,
-  writeReceipt,
-  type Receipt
+  updateAndWriteReceipt
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
 
@@ -252,25 +250,7 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
   }
 
   let trackedFiles = 0;
-  let nextReceipt: Receipt;
-  try {
-    nextReceipt = await readReceipt({ installRoot });
-  } catch (error) {
-    return failure({
-      source: diffResult.source,
-      target,
-      assignment: diffResult.assignment,
-      installRoot,
-      planned: plannedForTrack.length,
-      blocked: blockedForTrack,
-      selected: selectedSkills,
-      errors: [trackError({
-        code: "invalid_receipt",
-        message: `Could not read receipt for track: ${errorMessage(error)}`
-      })]
-    });
-  }
-
+  const installRecords: Array<{ skill: string; record: ReturnType<typeof buildInstallRecord> }> = [];
   for (const record of records) {
     trackedFiles += record.installedFiles.length;
     const installRecord: Record<string, unknown> = {
@@ -298,17 +278,20 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
     if (record.version !== null) {
       installRecord.version = record.version;
     }
-    nextReceipt = upsertInstallRecord(nextReceipt, {
-      installRoot,
-      skillName: record.skill,
-      installRecord: buildInstallRecord(installRecord)
-    });
+    installRecords.push({ skill: record.skill, record: buildInstallRecord(installRecord) });
   }
 
   try {
-    await writeReceipt({
+    await updateAndWriteReceipt({
       installRoot,
-      receipt: nextReceipt
+      update: (receipt) => installRecords.reduce(
+        (nextReceipt, item) => upsertInstallRecord(nextReceipt, {
+          installRoot,
+          skillName: item.skill,
+          installRecord: item.record
+        }),
+        receipt
+      )
     });
   } catch (error) {
     return failure({
