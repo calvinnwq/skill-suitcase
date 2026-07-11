@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -133,6 +133,57 @@ test("prune apply quarantines directories, removes symlinks, and updates receipt
   assert.equal(transaction.schema, PRUNE_TRANSACTION_SCHEMA);
   assert.equal(transaction.status, "committed");
   assert.ok(result.receiptBackupPath);
+});
+
+test("prune apply preserves restrictive receipt permissions for replacement and backup", async (t) => {
+  const fixture = await createFixture(t);
+  const receiptPath = path.join(fixture.targetRoot, ".skill-suitcase-receipt.json");
+  await chmod(receiptPath, 0o640);
+  const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.ok(dryRun.plan.id);
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    planId: dryRun.plan.id,
+    apply: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.receiptBackupPath);
+  assert.equal((await stat(receiptPath)).mode & 0o777, 0o640);
+  assert.equal((await stat(result.receiptBackupPath)).mode & 0o777, 0o640);
+});
+
+test("prune dry-run refuses unreadable candidate files without mutation", async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("root can read files regardless of mode bits");
+    return;
+  }
+  const fixture = await createFixture(t);
+  const skillFile = path.join(fixture.directoryTarget, "SKILL.md");
+  await chmod(skillFile, 0o000);
+  t.after(() => chmod(skillFile, 0o600).catch(() => undefined));
+
+  const result = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "target_unreadable"), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+  assert.equal(result.transactionPath, null);
+});
+
+test("prune dry-run reports readable candidate content drift without mutation", async (t) => {
+  const fixture = await createFixture(t);
+  await writeFile(path.join(fixture.directoryTarget, "SKILL.md"), "drift\n");
+
+  const result = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "target_drift"), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+  assert.equal(result.transactionPath, null);
 });
 
 test("prune refuses assigned skills", async (t) => {

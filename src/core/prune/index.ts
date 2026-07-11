@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  chmod,
   lstat,
   mkdir,
   readdir,
@@ -295,47 +296,51 @@ async function inspectCandidate(
   catch (error) {
     return { error: { code: "target_missing", message: `Cannot prune missing target ${targetPath}: ${errorMessage(error)}`, skill, path: targetPath } };
   }
-  const receiptRecordHash = sha256(stableJson(record));
-  if (info.isSymbolicLink()) {
-    if (record.mode !== SYMLINK_MODE) {
-      return { error: { code: "receipt_kind_mismatch", message: `${targetPath} is a symlink but its receipt mode is ${String(record.mode)}.`, skill, path: targetPath } };
+  try {
+    const receiptRecordHash = sha256(stableJson(record));
+    if (info.isSymbolicLink()) {
+      if (record.mode !== SYMLINK_MODE) {
+        return { error: { code: "receipt_kind_mismatch", message: `${targetPath} is a symlink but its receipt mode is ${String(record.mode)}.`, skill, path: targetPath } };
+      }
+      const linkTarget = await readlink(targetPath);
+      const sourcePath = receiptSourcePath(record);
+      if (sourcePath === null || path.resolve(path.dirname(targetPath), linkTarget) !== path.resolve(sourcePath)) {
+        return { error: { code: "target_drift", message: `Symlink ${targetPath} no longer matches its receipt source.`, skill, path: targetPath } };
+      }
+      return { value: { skill, kind: "symlink", targetPath, fingerprint: sha256(linkTarget), receiptRecordHash, symlinkTarget: linkTarget, quarantinePath: null } };
     }
-    const linkTarget = await readlink(targetPath);
-    const sourcePath = receiptSourcePath(record);
-    if (sourcePath === null || path.resolve(path.dirname(targetPath), linkTarget) !== path.resolve(sourcePath)) {
-      return { error: { code: "target_drift", message: `Symlink ${targetPath} no longer matches its receipt source.`, skill, path: targetPath } };
+    if (!info.isDirectory()) {
+      return { error: { code: "unsupported_target_kind", message: `${targetPath} is neither a directory nor symlink.`, skill, path: targetPath } };
     }
-    return { value: { skill, kind: "symlink", targetPath, fingerprint: sha256(linkTarget), receiptRecordHash, symlinkTarget: linkTarget, quarantinePath: null } };
+    if (record.mode === SYMLINK_MODE) {
+      return { error: { code: "receipt_kind_mismatch", message: `${targetPath} is a directory but its receipt expects a symlink.`, skill, path: targetPath } };
+    }
+    const resolvedRoot = await realpath(installRoot);
+    const resolvedTarget = await realpath(targetPath);
+    if (!isInside(resolvedTarget, resolvedRoot)) {
+      return { error: { code: "unsafe_target_path", message: `Directory ${targetPath} resolves outside ${installRoot}.`, skill, path: targetPath } };
+    }
+    const tree = await inspectDirectoryTree(targetPath);
+    if ("error" in tree) {
+      return { error: { code: "unsupported_target_entry", message: `${targetPath} contains ${tree.error}.`, skill, path: targetPath } };
+    }
+    const actualFiles = tree.entries.flatMap((entry) => entry.kind === "file"
+      ? [{ path: entry.path, hash: entry.hash! }]
+      : []);
+    const expectedFiles = normalizeInstalledFiles(record.installedFiles);
+    const expectedDirectories = expectedFiles === null ? [] : installedFileDirectories(expectedFiles);
+    const actualDirectories = tree.entries.flatMap((entry) => entry.kind === "directory" ? [entry.path] : []);
+    if (
+      expectedFiles === null
+      || stableJson(actualFiles) !== stableJson(expectedFiles)
+      || stableJson(actualDirectories) !== stableJson(expectedDirectories)
+    ) {
+      return { error: { code: "target_drift", message: `Directory ${targetPath} no longer matches receipt-owned files.`, skill, path: targetPath } };
+    }
+    return { value: { skill, kind: "directory", targetPath, fingerprint: sha256(stableJson(tree.entries)), receiptRecordHash, symlinkTarget: null, quarantinePath: null } };
+  } catch (error) {
+    return { error: { code: "target_unreadable", message: `Could not inspect target ${targetPath}: ${errorMessage(error)}`, skill, path: targetPath } };
   }
-  if (!info.isDirectory()) {
-    return { error: { code: "unsupported_target_kind", message: `${targetPath} is neither a directory nor symlink.`, skill, path: targetPath } };
-  }
-  if (record.mode === SYMLINK_MODE) {
-    return { error: { code: "receipt_kind_mismatch", message: `${targetPath} is a directory but its receipt expects a symlink.`, skill, path: targetPath } };
-  }
-  const resolvedRoot = await realpath(installRoot);
-  const resolvedTarget = await realpath(targetPath);
-  if (!isInside(resolvedTarget, resolvedRoot)) {
-    return { error: { code: "unsafe_target_path", message: `Directory ${targetPath} resolves outside ${installRoot}.`, skill, path: targetPath } };
-  }
-  const tree = await inspectDirectoryTree(targetPath);
-  if ("error" in tree) {
-    return { error: { code: "unsupported_target_entry", message: `${targetPath} contains ${tree.error}.`, skill, path: targetPath } };
-  }
-  const actualFiles = tree.entries.flatMap((entry) => entry.kind === "file"
-    ? [{ path: entry.path, hash: entry.hash! }]
-    : []);
-  const expectedFiles = normalizeInstalledFiles(record.installedFiles);
-  const expectedDirectories = expectedFiles === null ? [] : installedFileDirectories(expectedFiles);
-  const actualDirectories = tree.entries.flatMap((entry) => entry.kind === "directory" ? [entry.path] : []);
-  if (
-    expectedFiles === null
-    || stableJson(actualFiles) !== stableJson(expectedFiles)
-    || stableJson(actualDirectories) !== stableJson(expectedDirectories)
-  ) {
-    return { error: { code: "target_drift", message: `Directory ${targetPath} no longer matches receipt-owned files.`, skill, path: targetPath } };
-  }
-  return { value: { skill, kind: "directory", targetPath, fingerprint: sha256(stableJson(tree.entries)), receiptRecordHash, symlinkTarget: null, quarantinePath: null } };
 }
 
 async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<PruneApplyResult> {
@@ -381,7 +386,9 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
     if (sha256(receiptText) !== planned.plan.receiptHash) {
       throw new Error("Receipt changed after prune preflight.");
     }
-    await writeFile(receiptBackupPath, receiptText, { encoding: "utf8", flag: "wx" });
+    const receiptMode = (receiptInfo.mode & 0o777) || 0o600;
+    await writeFile(receiptBackupPath, receiptText, { encoding: "utf8", flag: "wx", mode: receiptMode });
+    await chmod(receiptBackupPath, receiptMode);
     await writeTransaction(transactionPath, planned, "prepared");
     for (const candidate of planned.candidates) {
       await input.__test?.beforeMutationForSkill?.(candidate.skill);
@@ -402,7 +409,8 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       planned.targetIdentity,
       installRoot
     );
-    await writeFile(receiptTempPath, `${JSON.stringify(nextReceipt, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    await writeFile(receiptTempPath, `${JSON.stringify(nextReceipt, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: receiptMode });
+    await chmod(receiptTempPath, receiptMode);
     await rename(receiptTempPath, receiptPath);
     receiptReplaced = true;
     await writeTransaction(transactionPath, planned, "committed");
