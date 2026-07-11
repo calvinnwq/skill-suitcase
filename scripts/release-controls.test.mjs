@@ -45,9 +45,15 @@ test("CI preserves the required aggregate gate and supported Node runtimes", asy
   assert.equal(workflow.jobs.test.name, "test");
   assert.equal(workflow.jobs.test.if, "${{ always() }}");
   assert.deepEqual(workflow.jobs.test.needs, ["verify", "package-smoke"]);
-  const aggregateRun = stepByName(workflow.jobs.test, "Confirm required CI gates passed").run;
-  assert.match(aggregateRun, /VERIFY_RESULT/);
-  assert.match(aggregateRun, /PACKAGE_SMOKE_RESULT/);
+  const aggregate = stepByName(workflow.jobs.test, "Confirm required CI gates passed");
+  assert.deepEqual(aggregate.env, {
+    VERIFY_RESULT: "${{ needs.verify.result }}",
+    PACKAGE_SMOKE_RESULT: "${{ needs.package-smoke.result }}",
+  });
+  assert.equal(
+    aggregate.run,
+    'test "$VERIFY_RESULT" = "success"\ntest "$PACKAGE_SMOKE_RESULT" = "success"\n',
+  );
 });
 
 test("Release Please keeps plain v-prefixed tags and trusted publishing safeguards", async () => {
@@ -70,7 +76,18 @@ test("Release Please keeps plain v-prefixed tags and trusted publishing safeguar
     stepByName(job, "Set up Node").with["registry-url"],
     "https://registry.npmjs.org",
   );
-  assert.match(stepByName(job, "Verify npm supports trusted publishing").run, /require >=11\.5\.1/);
+  assert.equal(
+    stepByName(job, "Verify npm supports trusted publishing").run,
+    `npm_version="$(npm --version)"
+node -e '
+  const version = process.env.npm_config_user_agent?.match(/npm\\/([0-9.]+)/)?.[1] ?? process.argv[1];
+  const [major, minor, patch] = version.split(".").map(Number);
+  if (major < 11 || (major === 11 && minor < 5) || (major === 11 && minor === 5 && patch < 1)) {
+    throw new Error(\`npm \${version} is too old for trusted publishing; require >=11.5.1\`);
+  }
+\' "$npm_version"
+`,
+  );
 
   const publish = stepByName(job, "Publish to npm");
   assert.equal(publish.if, "${{ steps.release.outputs.release_created == 'true' }}");
