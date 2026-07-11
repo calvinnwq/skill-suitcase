@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -531,7 +531,7 @@ test("upsertAndWriteReceipt rejects records with invalid installed file list", a
     sourceCommit: "cafebabe"
   });
 
-  assert.rejects(
+  await assert.rejects(
     async () =>
       upsertAndWriteReceipt({
         installRoot,
@@ -1371,6 +1371,60 @@ test("receipt writers recover an old empty legacy prune lock", async (t) => {
 
   const receipt = await readReceipt({ installRoot: root });
   assert.deepEqual(receipt.installs, {});
+});
+
+test("receipt writers recover a lock left by a terminated owner", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-crash-lock-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(
+    path.join(root, RECEIPT_LOCK_FILE),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token: "terminated-owner",
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+});
+
+test("receipt writers recover a legacy file lock left by a terminated owner", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-legacy-crash-lock-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, RECEIPT_LOCK_FILE), "2147483647\n", {
+    encoding: "utf8",
+    mode: 0o600
+  });
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+});
+
+test("receipt replacement preserves existing permissions", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-mode-existing-"));
+  const receiptPath = path.join(root, RECEIPT_FILE);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(receiptPath, `${JSON.stringify({ schema: RECEIPT_SCHEMA, installs: {} })}\n`);
+  await chmod(receiptPath, 0o640);
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.equal((await stat(receiptPath)).mode & 0o777, 0o640);
+});
+
+test("new receipt files use restrictive permissions", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-mode-new-"));
+  const receiptPath = path.join(root, RECEIPT_FILE);
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.equal((await stat(receiptPath)).mode & 0o777, 0o600);
 });
 
 test("custom receipt writers lock beside the receipt file", async (t) => {

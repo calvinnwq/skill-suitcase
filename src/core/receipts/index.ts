@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const RECEIPT_SCHEMA = "calvinnwq.skills.receipt.v0";
@@ -12,6 +12,8 @@ const RECEIPT_LOCK_RETRY_MS = 25;
 const RECEIPT_LOCK_TIMEOUT_MS = 10_000;
 const RECEIPT_LEGACY_LOCK_STALE_MS = 86_400_000;
 const RECEIPT_LOCK_TOKEN = Symbol("receipt-lock");
+const RECEIPT_LOCK_SCHEMA = "calvinnwq.skills.receipt-lock.v1";
+const RECEIPT_FILE_DEFAULT_MODE = 0o600;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -92,6 +94,13 @@ export type ReceiptLock = {
 export type ReceiptMutation = {
   previousText: string | null;
   writtenText: string;
+};
+
+type ReceiptLockOwner = {
+  schema: typeof RECEIPT_LOCK_SCHEMA;
+  pid: number;
+  token: string;
+  createdAt: string;
 };
 
 type RollbackReceiptMutationsInput = {
@@ -301,33 +310,117 @@ export async function withReceiptLock<T>(
   await mkdir(normalizedRoot, { recursive: true });
   const lockPath = path.join(normalizedRoot, RECEIPT_LOCK_FILE);
   const deadline = Date.now() + RECEIPT_LOCK_TIMEOUT_MS;
-  let handle;
-  while (true) {
-    try {
-      handle = await open(lockPath, "wx");
-      break;
-    } catch (error) {
-      if ((error as { code?: string }).code !== "EEXIST") throw error;
-      if (await removeStaleLegacyReceiptLock(lockPath)) continue;
-      if (Date.now() >= deadline) throw new Error(`Timed out waiting for receipt lock at ${lockPath}.`);
-      await new Promise((resolve) => setTimeout(resolve, RECEIPT_LOCK_RETRY_MS));
-    }
+  const owner: ReceiptLockOwner = {
+    schema: RECEIPT_LOCK_SCHEMA,
+    pid: process.pid,
+    token: randomUUID(),
+    createdAt: new Date().toISOString()
+  };
+  const lockText = `${JSON.stringify(owner)}\n`;
+  const pendingPath = `${lockPath}.${owner.token}.pending`;
+  const pendingHandle = await open(pendingPath, "wx", RECEIPT_FILE_DEFAULT_MODE);
+  try {
+    await pendingHandle.writeFile(lockText, "utf8");
+    await pendingHandle.sync();
+  } finally {
+    await pendingHandle.close();
   }
-  const lockText = `${process.pid}\n`;
+  try {
+    while (true) {
+      try {
+        await link(pendingPath, lockPath);
+        break;
+      } catch (error) {
+        if ((error as { code?: string }).code !== "EEXIST") throw error;
+        if (await removeStaleReceiptLock(lockPath)) continue;
+        if (Date.now() >= deadline) throw new Error(`Timed out waiting for receipt lock at ${lockPath}.`);
+        await new Promise((resolve) => setTimeout(resolve, RECEIPT_LOCK_RETRY_MS));
+      }
+    }
+  } finally {
+    await rm(pendingPath, { force: true }).catch(() => undefined);
+  }
   const receiptLock: ReceiptLock = {
     installRoot: normalizedRoot,
     active: true,
     [RECEIPT_LOCK_TOKEN]: true
   };
   try {
-    await handle.writeFile(lockText, "utf8");
     return await action(receiptLock);
   } finally {
     receiptLock.active = false;
-    await handle.close().catch(() => undefined);
     try {
       if (await readFile(lockPath, "utf8") === lockText) await rm(lockPath);
     } catch {}
+  }
+}
+
+async function removeStaleReceiptLock(lockPath: string): Promise<boolean> {
+  if (await removeStaleLegacyReceiptLock(lockPath)) return true;
+  const initial = await readReceiptLockOwner(lockPath);
+  if (initial === null || isProcessAlive(initial.owner.pid)) return false;
+  const current = await readReceiptLockOwner(lockPath);
+  if (
+    current === null
+    || current.text !== initial.text
+    || current.info.dev !== initial.info.dev
+    || current.info.ino !== initial.info.ino
+    || isProcessAlive(current.owner.pid)
+  ) {
+    return false;
+  }
+  try {
+    await rm(lockPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readReceiptLockOwner(
+  lockPath: string
+): Promise<{ owner: ReceiptLockOwner; text: string; info: import("node:fs").Stats } | null> {
+  try {
+    const info = await lstat(lockPath);
+    if (!info.isFile()) return null;
+    const text = await readFile(lockPath, "utf8");
+    const legacyPid = Number(text.trim());
+    if (Number.isSafeInteger(legacyPid) && legacyPid > 0) {
+      return {
+        owner: {
+          schema: RECEIPT_LOCK_SCHEMA,
+          pid: legacyPid,
+          token: `legacy-${info.dev}-${info.ino}`,
+          createdAt: info.mtime.toISOString()
+        },
+        text,
+        info
+      };
+    }
+    const value = JSON.parse(text) as Partial<ReceiptLockOwner>;
+    if (
+      value.schema !== RECEIPT_LOCK_SCHEMA
+      || !Number.isSafeInteger(value.pid)
+      || (value.pid ?? 0) <= 0
+      || typeof value.token !== "string"
+      || value.token.length === 0
+      || typeof value.createdAt !== "string"
+      || !Number.isFinite(Date.parse(value.createdAt))
+    ) {
+      return null;
+    }
+    return { owner: value as ReceiptLockOwner, text, info };
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as { code?: string }).code !== "ESRCH";
   }
 }
 
@@ -386,8 +479,12 @@ async function writeReceiptTextUnlocked(outputPath: string, text: string | null)
   }
   await mkdir(path.dirname(outputPath), { recursive: true });
   const tempPath = `${outputPath}.${process.pid}.${Date.now()}.tmp`;
+  const current = await lstatSafe(outputPath);
+  const mode = current?.isFile()
+    ? current.mode & 0o777
+    : RECEIPT_FILE_DEFAULT_MODE;
   try {
-    await writeFile(tempPath, text, { encoding: "utf8", flag: "wx" });
+    await writeFile(tempPath, text, { encoding: "utf8", flag: "wx", mode });
     await rename(tempPath, outputPath);
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => undefined);
