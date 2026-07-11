@@ -104,6 +104,41 @@ test("prune dry-run plans explicit obsolete directory and symlink without mutati
   assert.equal(result.transactionPath, null);
 });
 
+test("prune refuses provider read-only policy with a writable adapter", async (t) => {
+  const fixture = await createFixture(t);
+  const manifestPath = path.join(fixture.sourceRoot, "skill-suitcase.yaml");
+  const manifest = await readFile(manifestPath, "utf8");
+  await writeFile(
+    manifestPath,
+    manifest
+      .replaceAll("codex", "opencode")
+      .replace(
+        `    kind: opencode-home\n    assignment: opencode\n    opencodeHome: ${path.dirname(fixture.targetRoot)}\n    skillsPath: ${fixture.targetRoot}`,
+        `    kind: agents-skills-root\n    assignment: opencode\n    path: ${fixture.targetRoot}`
+      )
+  );
+  const receipt = await readReceipt({ installRoot: fixture.targetRoot });
+  for (const value of Object.values(receipt.installs ?? {})) {
+    for (const record of Array.isArray(value) ? value : [value]) {
+      record.agent = "opencode";
+      record.target = "opencode";
+    }
+  }
+  await writeReceipt({ installRoot: fixture.targetRoot, receipt });
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "opencode",
+    skills: ["dir-old"],
+    dryRun: true
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.plan.id, null);
+  assert.equal(result.errors.some((error) => error.code === "read_only_target"), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+});
+
 test("prune apply quarantines directories, removes symlinks, and updates receipt", async (t) => {
   const fixture = await createFixture(t);
   const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old", "link-old"], dryRun: true });

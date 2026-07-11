@@ -123,6 +123,22 @@ test("rollback accepts a receipt through a symlinked install root", async (t) =>
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"old\");\n");
 });
 
+test("rollback accepts a receipt through an earlier symlinked path component", async (t) => {
+  const { receiptPath, targetRoot, targetSkill } = await createAppliedUpdate(t);
+  const aliasRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-parent-alias-"));
+  const parentAlias = path.join(aliasRoot, "parent");
+  t.after(() => rm(aliasRoot, { recursive: true, force: true }));
+  await symlink(path.dirname(targetRoot), parentAlias);
+
+  const result = await rollback({
+    receipt: path.join(parentAlias, path.basename(targetRoot), path.basename(receiptPath))
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.restored, 1);
+  assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"old\");\n");
+});
+
 test("apply captures pre-existing symlink files as restore-impossible", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-target-"));
