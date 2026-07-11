@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile, realpath, stat } from "node:fs/promises";
+import { access, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep, win32 } from "node:path";
 import { test } from "node:test";
 import { parseDocument } from "yaml";
@@ -247,6 +247,37 @@ test("issue forms conform to the expected GitHub schemas", async () => {
     safetyOptions.some((option) => /not a security vulnerability/i.test(expectString(expectRecord(option, "safety option").label, "safety option label"))),
     `${bugFile} must direct security vulnerabilities to the private reporting process`
   );
+});
+
+test("repository exposes one canonical support issue form", async () => {
+  const templateFiles = await readdir(".github/ISSUE_TEMPLATE");
+  assert.deepEqual(
+    templateFiles.filter((file) => /^support[_-].+\.ya?ml$/i.test(file)).sort(),
+    ["support_request.yml"]
+  );
+});
+
+test("development setup uses the pinned pnpm version without global shims", async () => {
+  const developing = await readFile("DEVELOPING.md", "utf8");
+  const packageJson = expectRecord(JSON.parse(await readFile("package.json", "utf8")), "package.json");
+  const packageManager = expectString(packageJson.packageManager, "package.json.packageManager");
+  const match = /^pnpm@(\d+\.\d+\.\d+)$/.exec(packageManager);
+  assert.ok(match, "package.json.packageManager must pin an exact pnpm version");
+  const pinnedVersion = expectString(match[1], "package.json.packageManager version");
+
+  assert.match(
+    developing,
+    new RegExp(`npm exec --yes --package=pnpm@${pinnedVersion.replaceAll(".", "\\.")} -- pnpm`),
+    "DEVELOPING.md must use the pnpm version pinned by packageManager"
+  );
+  assert.doesNotMatch(developing, /\bcorepack enable\b/, "DEVELOPING.md must not require global shim writes");
+});
+
+test("conduct reports have an independent escalation route", async () => {
+  const conduct = await readFile("CODE_OF_CONDUCT.md", "utf8");
+  assert.match(conduct, /maintainer is the subject of a report/i);
+  assert.match(conduct, /https:\/\/docs\.github\.com\/en\/communities\/maintaining-your-safety-on-github\/reporting-abuse-or-spam/);
+  assert.match(conduct, /another platform.*independent reporting\s+channel/is);
 });
 
 test("issue template config routes support and security contacts", async () => {

@@ -38,6 +38,12 @@ Report conduct concerns privately to
 `[skill-suitcase conduct]`. Do not open a public issue containing sensitive
 details about a conduct incident.
 
+If the maintainer is the subject of a report, or reporting to the project would
+be unsafe, report GitHub-hosted behavior through GitHub's
+[abuse or spam reporting process](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam).
+For behavior on another platform, use that platform's independent reporting
+channel. These routes are outside the project maintainer's control.
+
 The maintainer is responsible for clarifying and enforcing these standards and
 may remove, edit, or reject comments, commits, code, issues, and other
 contributions that do not align with them. Reports will be reviewed as promptly

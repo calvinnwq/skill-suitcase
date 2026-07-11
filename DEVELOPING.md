@@ -6,7 +6,7 @@ and pull request expectations live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 ## Prerequisites
 
 - Node.js 20 or newer
-- Corepack and pnpm
+- npm
 - Git
 
 ## Set up the repository
@@ -14,9 +14,15 @@ and pull request expectations live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 ```bash
 git clone https://github.com/calvinnwq/skill-suitcase.git
 cd skill-suitcase
-corepack enable
+pnpm() {
+  npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
+}
+test "$(pnpm --version)" = "10.34.4"
 pnpm install --frozen-lockfile
 ```
+
+This shell-local wrapper runs the pnpm version pinned by `packageManager` in
+`package.json` without modifying Corepack or global package-manager shims.
 
 Build and run the CLI from source:
 
