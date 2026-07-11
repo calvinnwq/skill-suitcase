@@ -10,6 +10,20 @@ holds reviewed source, variants, assignments, target policy, and upstream
 metadata; Skill Suitcase turns that catalog into deterministic plans, diffs,
 artifacts, installs, receipts, and rollback state.
 
+## Community
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) to contribute and
+[`DEVELOPING.md`](DEVELOPING.md) for the local development workflow. Usage
+support, private vulnerability reporting, and community expectations are
+documented in [`SUPPORT.md`](SUPPORT.md), [`SECURITY.md`](SECURITY.md), and
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+
+Read-only commands (`plan`, `diff`, `pack --dry-run`, `import`, `validate`,
+`targets`, `status`, `upstream check`, and `upstream fetch`) read a catalog
+manifest, resolve assignments and assignment paths, and emit JSON plans, diffs,
+import findings, target discovery, bundle manifests, status reports, or upstream
+source-refresh reports without touching target install paths or runtime homes.
+
 - Git-backed catalog source stays reviewable before it reaches a runtime.
 - Read-only commands explain current state before any mutation.
 - Mutating commands require an explicit artifact, lock, `--apply`, or other
@@ -19,7 +33,8 @@ artifacts, installs, receipts, and rollback state.
 - Copy and symlink installs are tracked with receipts and recoverable workflows.
 
 Read [`VISION.md`](VISION.md) for the product north star and
-[`ARCHITECTURE.md`](ARCHITECTURE.md) for the CLI boundaries.
+[`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md)
+for the CLI boundaries.
 
 ## Install
 
@@ -276,8 +291,11 @@ the authoritative machine contract. For portability and smoke-test guidance, see
 
 ## Development
 
+Complete the shell-local, `packageManager`-pinned pnpm setup in
+[`DEVELOPING.md`](DEVELOPING.md) before running the development checks.
+That setup leaves Corepack and global package-manager shims unchanged.
+
 ```bash
-pnpm install
 pnpm test
 pnpm run typecheck
 pnpm run build
@@ -296,7 +314,16 @@ CI uses the package's pinned pnpm `10.34.4` toolchain.
 The main test job runs on Node 24, while the package smoke job verifies the packed and installed CLI on Node 20 and Node 24.
 
 The current implementation has no runtime package dependencies.
-Keep `src/cli.ts` thin, put parsing and validation in `src/commands/`, durable behavior in `src/core/`, infrastructure in `src/adapters/`, and output contracts in `src/renderers/`.
+Keep
+`src/cli.ts` thin, put parsing and validation in `src/commands/`, durable
+behavior in `src/core/`, infrastructure in `src/adapters/`, and output contracts
+in `src/renderers/`. See the module boundaries in
+[`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md).
+
+Development dependencies support TypeScript compilation, Node.js types, and
+issue-form YAML validation. The manifest reader is strict and intentionally
+scoped to the current `skill-suitcase.yaml` schema, including manifest-owned
+logical groups as reporting metadata.
 
 Release automation, npm Trusted Publishing, public-repository controls, and the
 current shipped version are documented in
