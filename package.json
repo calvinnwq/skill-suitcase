@@ -24,6 +24,12 @@
     "README.md",
     "INSTALL.md",
     "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "DEVELOPING.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "CODE_OF_CONDUCT.md",
+    "CLAUDE.md",
     "docs/*.md"
   ],
   "publishConfig": {
@@ -39,7 +45,8 @@
   },
   "devDependencies": {
     "@types/node": "25.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=20"

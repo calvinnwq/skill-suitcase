@@ -1,49 +1,43 @@
 name: Feature request
-description: Propose a user-facing capability or workflow improvement.
-title: "feat: "
+description: Propose an improvement to Skill Suitcase
+title: "feature: "
+labels:
+  - enhancement
 body:
   - type: markdown
     attributes:
       value: |
-        Describe the problem before the implementation. Skill Suitcase keeps catalog ownership, explicit approval, deterministic output, and rollback boundaries central to product behavior.
+        Start with the user problem and desired outcome. Implementation ideas are welcome after the problem is clear.
   - type: textarea
     id: problem
     attributes:
       label: Problem
-      description: What user or operator problem needs to be solved? Include the current workaround.
+      description: What workflow is difficult or impossible today, and who encounters it?
     validations:
       required: true
   - type: textarea
     id: outcome
     attributes:
       label: Desired outcome
-      description: Describe the observable behavior you want, without requiring a particular implementation.
-    validations:
-      required: true
-  - type: textarea
-    id: safety
-    attributes:
-      label: Safety and ownership boundaries
-      description: Could this read or write catalogs, target installs, receipts, agent homes, or remote services? What should require approval?
+      description: Describe the behavior or result you want without assuming a particular implementation.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
       label: Alternatives considered
-      description: What existing commands, workflows, or simpler approaches have you tried?
+      description: What workarounds or alternative designs have you tried?
   - type: textarea
-    id: examples
+    id: contract
     attributes:
-      label: Example interface or output
-      description: Optional portable command examples or deterministic JSON shapes are welcome.
-      render: shell
+      label: CLI and safety considerations
+      description: Note any effects on JSON output, stderr, target writes, approvals, receipts, rollback, or portability.
   - type: checkboxes
     id: checks
     attributes:
-      label: Checklist
+      label: Before submitting
       options:
-        - label: I searched existing issues for the same request.
+        - label: I searched existing issues and documentation for this request.
           required: true
-        - label: I removed credentials, personal paths, and private agent or catalog state.
+        - label: I removed credentials, private prompts, personal data, and contributor-specific absolute paths.
           required: true

@@ -1,0 +1,45 @@
+name: Support request
+description: Ask for help installing or using Skill Suitcase
+title: "support: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for installation and usage questions that are not reproducible bugs or feature requests. Remove secrets, private prompts, personal data, and contributor-specific paths from all examples.
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you need help with?
+      description: Describe the workflow, command, or documented behavior you are trying to understand.
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Include the documentation and commands you tried, plus sanitized output when useful.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the Skill Suitcase version, Node.js version, package manager version, and operating system.
+      placeholder: |
+        Skill Suitcase:
+        Node.js:
+        pnpm or npm:
+        Operating system:
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, tokens, private prompts, personal data, and contributor-specific absolute paths.
+          required: true
+        - label: This is not a security vulnerability. I will use the private process in SECURITY.md for vulnerabilities.
+          required: true

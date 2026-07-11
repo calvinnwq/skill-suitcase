@@ -1,39 +1,39 @@
 # Security Policy
 
-## Supported Versions
+## Supported versions
 
-Security fixes are made on the default branch and released in the newest
-published version. Older releases are not maintained as separate security
-branches. Confirm a report against the latest release or the default branch
-when practical.
+Security fixes are made against the latest released version and the default
+branch. Upgrade to the newest release before reporting a problem that may
+already be fixed.
 
-## Reporting A Vulnerability
+## Reporting a vulnerability
 
 Do not open a public issue for a suspected vulnerability.
 
-Email the maintainer at [calvinnwq@gmail.com](mailto:calvinnwq@gmail.com?subject=Skill%20Suitcase%20security%20report) and include `Skill Suitcase security report` in the subject.
+GitHub private vulnerability reporting is not currently enabled for this
+repository. Email the maintainer at
+[calvinnwq@gmail.com](mailto:calvinnwq@gmail.com) with a subject that begins
+`[skill-suitcase security]`. If private vulnerability reporting is enabled
+later, prefer the repository's **Security** tab.
 
-Include enough information to reproduce and assess the problem:
+Include, when possible:
 
-- affected version or commit
-- operating system and Node.js version
-- commands or inputs that trigger the issue
-- expected and observed impact
-- a minimal reproduction or proof of concept, when safe
-- any suggested mitigation
+- the affected version or commit
+- the operating system and Node.js version
+- the security impact and affected trust boundary
+- minimal reproduction steps or a proof of concept
+- any known mitigations
 
-Remove credentials, private prompts, personal paths, catalog contents, and agent
-state that are not required for the report. Never send a live token or secret;
-use an obviously fake placeholder.
+Remove credentials, tokens, private prompts, personal data, and unrelated local
+paths from the report. Please allow time for the report to be investigated and
+coordinated before public disclosure. The maintainer will acknowledge reports
+on a best-effort basis and will communicate remediation and disclosure timing
+through the private report.
 
-Maintainers will confirm receipt, assess scope and severity, and coordinate a
-fix and disclosure when the report is valid. Please allow time for a release
-before publishing details that would put users at risk.
+## Scope notes
 
-## Security-Relevant Scope
-
-Reports are especially useful when they involve unintended writes outside an
-approved catalog or target, path traversal, symlink or rollback safety,
-credential exposure, unsafe archive handling, source-policy bypasses, or output
-that leaks private data. General questions and non-security defects belong in
-the normal issue chooser described in [`SUPPORT.md`](SUPPORT.md).
+Reports are especially useful when they involve unsafe target writes, path
+escape, receipt or approval bypass, archive extraction, source-policy bypass,
+or accidental disclosure through CLI output. Vulnerabilities in third-party
+agent runtimes or upstream skill providers should also be reported to the
+affected upstream project.

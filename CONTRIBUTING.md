@@ -1,55 +1,58 @@
-# Contributing
+# Contributing to Skill Suitcase
 
-Thanks for helping improve Skill Suitcase. By participating, you agree to
-follow the [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+Thank you for helping improve Skill Suitcase. Contributions of bug reports,
+documentation, tests, and code are welcome.
 
-## Before You Start
+By participating, you agree to follow the
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). For usage questions, start with
+[`SUPPORT.md`](SUPPORT.md). Report vulnerabilities through the private process
+in [`SECURITY.md`](SECURITY.md), not a public issue.
 
-- Use the repository issue chooser for reproducible bugs and feature proposals.
-- Read [`SUPPORT.md`](SUPPORT.md) before opening a general support request.
-- Report suspected vulnerabilities privately as described in
-  [`SECURITY.md`](SECURITY.md), not in a public issue.
-- For a non-trivial change, open or find an issue first so the intended behavior
-  and safety boundary can be agreed before implementation.
+## Before opening an issue
 
-## Development
+- Search the existing issues and documentation first.
+- Use the support request form for installation and usage questions.
+- Use the bug report form for reproducible defects.
+- Use the feature request form to describe a user problem before proposing an
+  implementation.
+- Remove credentials, private prompts, absolute home-directory paths, and other
+  machine-specific data from logs and examples.
 
-Follow [`DEVELOPING.md`](DEVELOPING.md) for setup, architecture, test commands,
-and local CLI workflows. Read [`ARCHITECTURE.md`](ARCHITECTURE.md) before
-changing a command, core module, adapter, or renderer.
+## Pull requests
 
-Keep contributions focused. Add tests for behavior changes, update the
-operator-facing documentation when a workflow changes, and use portable example
-paths such as `$HOME` or `/path/to/catalog` instead of personal machine paths.
+1. Read [`DEVELOPING.md`](DEVELOPING.md) and the repository's
+   [`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md).
+2. Keep each pull request focused on one problem.
+3. Add or update tests for behavior changes.
+4. Update user-facing documentation when commands, output, or safety boundaries
+   change.
+5. Run the verification commands in `DEVELOPING.md` before requesting review.
+6. Complete the pull request template, including risk and rollback notes.
 
-## Pull Requests
+Skill Suitcase is JSON-first. Keep JSON stdout deterministic. Structured command
+results, including findings, warnings, and `ok: false` errors, belong on stdout.
+Parser/usage failures, uncaught fatal diagnostics, and non-JSON notices belong
+on stderr. Command modules should own parsing and validation, while durable
+behavior belongs in core modules.
 
-In the pull request:
+## Commit and release conventions
 
-1. Explain the user-visible outcome and any important design decision.
-2. Link the relevant issue when one exists.
-3. List the verification you ran.
-4. Describe risk and rollback, including whether the change can write to a
-   catalog or target install path.
+Use Conventional Commit prefixes:
 
-Do not include generated `dist/` output, dependencies, credentials, local agent
-state, or review artifacts. Keep unrelated changes in separate pull requests.
-
-## Commits And Releases
-
-GitHub releases are managed by Release Please. Use Conventional Commits for
-changes that should appear in release notes:
-
-- `feat:` for new release-worthy behavior
+- `feat:` for release-worthy features
 - `fix:` for bug fixes
-- `docs:`, `test:`, `refactor:`, and `ci:` for non-release maintenance
+- `docs:`, `test:`, `refactor:`, and `ci:` for maintenance
 
-Merging the Release Please PR updates `package.json`,
+GitHub releases and npm publishing are managed by Release Please after changes
+land on the default branch. Contributors should not update package versions or
+the changelog for ordinary pull requests unless a maintainer requests it.
+
+Merging the Release Please pull request updates `package.json`,
 `.release-please-manifest.json`, and `CHANGELOG.md`, then creates the GitHub
-release and tag.
-
-When the Release Please run creates a GitHub release, the same workflow verifies
-the package and publishes it to npm through npm Trusted Publishing. Do not add a
+release and tag. When a release is created, the same workflow verifies the
+package and publishes it through npm Trusted Publishing. The npm package must
+keep its trusted publisher configured for repository
+`calvinnwq/skill-suitcase` and workflow `release-please.yml`; never introduce a
 long-lived npm token.
 
 See [`docs/release-readiness.md`](docs/release-readiness.md) for the Release
