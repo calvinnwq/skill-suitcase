@@ -311,7 +311,10 @@ git diff --check
 `architecture:check` runs `scripts/check-architecture.mjs` to enforce the module boundaries described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 CI uses the package's pinned pnpm `10.34.4` toolchain.
-The main test job runs on Node 24, while the package smoke job verifies the packed and installed CLI on Node 20 and Node 24.
+The `verify` job runs the tests, lint/typecheck, architecture check, and
+formatting check on Node 24.
+The `package-smoke` job verifies the packed and installed CLI on Node 20 and
+Node 24, and the required `test` check aggregates both jobs.
 
 The current implementation has no runtime package dependencies.
 Keep

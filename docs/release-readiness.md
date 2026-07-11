@@ -27,7 +27,8 @@ Current durable release facts:
 - The GitHub repository is public.
 - The installed binary name is `skill-suitcase`.
 - The package requires Node.js 20 or newer.
-- CI runs the test suite on Node 24 and the packed-package smoke test on Node 20 and Node 24.
+- CI runs tests, lint/typecheck, architecture, and formatting checks on Node 24,
+  plus the packed-package smoke test on Node 20 and Node 24.
 - GitHub releases and release notes are managed by Release Please.
 - npm publication runs only after Release Please creates a GitHub release.
 - npm publication uses GitHub Actions OIDC Trusted Publishing with provenance;
@@ -50,6 +51,8 @@ homes.
 Release Please is the source of truth for version changes, changelog entries,
 Git tags, and GitHub releases. The release workflow is
 `.github/workflows/release-please.yml`.
+Release tags and release names use the plain `vX.Y.Z` form without a package
+component prefix.
 
 Merge a Release Please PR only when:
 
@@ -119,13 +122,24 @@ and publishes with provenance.
 ## CI And Repository Controls
 
 The public repository runs `.github/workflows/ci.yml` for pull requests and pushes to `main`.
-Its `test` job installs the frozen pnpm lockfile on Node 24 and runs `pnpm test`.
-Its `package-smoke` job verifies the packed and installed CLI on Node 20 and Node 24.
+Its `verify` job installs the frozen pnpm lockfile on Node 24 and runs the tests,
+lint/typecheck, architecture check, and formatting check. Its `package-smoke`
+job verifies the packed and installed CLI on Node 20 and Node 24. The required
+`test` check aggregates both jobs, so the stable ruleset context passes only
+after every CI gate and both supported-runtime smoke runs succeed.
 
-The active repository ruleset is named `Protect main` and targets `main`.
+The active repository ruleset was verified through the GitHub API on 2026-07-11.
+It is named `Protect main` and targets `main`.
 It requires pull requests, stale-review dismissal after new pushes, review-thread resolution, the CI `test` check, deletion protection, and non-fast-forward protection.
 It currently requires zero approving reviews and does not require the checked branch to be up to date.
-Raise the required approving-review count to at least one before treating repository protection as complete; require up-to-date branches when practical.
+Raise the required approving-review count to at least one before treating repository protection as complete; require up-to-date branches when practical. These are GitHub ruleset changes and cannot be enforced from repository source.
+
+GitHub Actions currently requires approval for workflows opened by first-time
+contributors. The Release Please PR is authored by `github-actions[bot]`, and
+its CI run was held with `action_required` on 2026-07-11. Approve that run before
+merging the release PR, or change the repository Actions approval policy to
+require approval only for first-time contributors who are new to GitHub. Keep
+the broader policy if approving the infrequent release PR run is preferred.
 Release Please and npm trusted-publishing permissions remain scoped to the release workflow.
 
 Making the repository public is complete and no longer an outstanding release

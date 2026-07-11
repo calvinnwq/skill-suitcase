@@ -13,7 +13,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test:
+  verify:
+    name: verify
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,6 +34,15 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Check architecture
+        run: pnpm run architecture:check
+
+      - name: Check formatting
+        run: pnpm run format:check
 
   package-smoke:
     runs-on: ubuntu-latest
@@ -60,3 +70,19 @@ jobs:
 
       - name: Pack and install smoke
         run: pnpm run package:smoke
+
+  test:
+    name: test
+    if: ${{ always() }}
+    needs:
+      - verify
+      - package-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm required CI gates passed
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          PACKAGE_SMOKE_RESULT: ${{ needs.package-smoke.result }}
+        run: |
+          test "$VERIFY_RESULT" = "success"
+          test "$PACKAGE_SMOKE_RESULT" = "success"
