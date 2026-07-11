@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const RECEIPT_SCHEMA = "calvinnwq.skills.receipt.v0";
@@ -485,6 +485,7 @@ async function writeReceiptTextUnlocked(outputPath: string, text: string | null)
     : RECEIPT_FILE_DEFAULT_MODE;
   try {
     await writeFile(tempPath, text, { encoding: "utf8", flag: "wx", mode });
+    await chmod(tempPath, mode);
     await rename(tempPath, outputPath);
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => undefined);

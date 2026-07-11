@@ -41,6 +41,8 @@ type PruneInput = {
     failAfterMutationForSkill?: string;
     failBeforeReceipt?: boolean;
     beforeMutationForSkill?: (skill: string) => Promise<void> | void;
+    failAfterReceipt?: boolean;
+    afterReceiptWrite?: () => Promise<void> | void;
   };
 };
 
@@ -372,6 +374,7 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
   const transactionPath = path.join(quarantineRoot, "transaction.json");
   const receiptBackupPath = path.join(quarantineRoot, "receipt.before.json");
   const receiptTempPath = path.join(quarantineRoot, "receipt.after.tmp");
+  const receiptRestorePath = path.join(quarantineRoot, "receipt.restore.tmp");
   const movedDirectories: PruneCandidate[] = [];
   const removedSymlinks: PruneCandidate[] = [];
   let receiptReplaced = false;
@@ -392,6 +395,7 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
     await writeTransaction(transactionPath, planned, "prepared");
     for (const candidate of planned.candidates) {
       await input.__test?.beforeMutationForSkill?.(candidate.skill);
+      await revalidateAssignment(input, planned, candidate.skill);
       await revalidateCandidate(planned, candidate);
       if (candidate.kind === "directory") {
         await rename(candidate.targetPath, candidate.quarantinePath!);
@@ -413,6 +417,8 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
     await chmod(receiptTempPath, receiptMode);
     await rename(receiptTempPath, receiptPath);
     receiptReplaced = true;
+    await input.__test?.afterReceiptWrite?.();
+    if (input.__test?.failAfterReceipt) throw new Error("Injected failure after receipt write");
     await writeTransaction(transactionPath, planned, "committed");
     return {
       ...stripReceipt(planned),
@@ -430,7 +436,14 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
   } catch (error) {
     const rollbackErrors: string[] = [];
     if (receiptReplaced) {
-      try { await rename(receiptBackupPath, receiptPath); }
+      try {
+        const backup = await readFile(receiptBackupPath);
+        const backupInfo = await lstat(receiptBackupPath);
+        const backupMode = (backupInfo.mode & 0o777) || 0o600;
+        await writeFile(receiptRestorePath, backup, { flag: "wx", mode: backupMode });
+        await chmod(receiptRestorePath, backupMode);
+        await rename(receiptRestorePath, receiptPath);
+      }
       catch (rollbackError) { rollbackErrors.push(`receipt restore: ${errorMessage(rollbackError)}`); }
     } else {
       await rm(receiptTempPath, { force: true }).catch(() => undefined);
@@ -444,6 +457,12 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       catch (rollbackError) { rollbackErrors.push(`${candidate.skill} directory restore: ${errorMessage(rollbackError)}`); }
     }
     if (rollbackErrors.length === 0) await rm(quarantineRoot, { recursive: true, force: true }).catch(() => undefined);
+    const retainedTransactionPath = rollbackErrors.length > 0 && await pathExists(transactionPath)
+      ? transactionPath
+      : null;
+    const retainedReceiptBackupPath = rollbackErrors.length > 0 && await pathExists(receiptBackupPath)
+      ? receiptBackupPath
+      : null;
     const failed = stripReceipt(planned);
     failed.ok = false;
     failed.errors = [...failed.errors, {
@@ -455,9 +474,40 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       dryRun: false,
       readOnly: false,
       pruned: { skills: [], directories: 0, symlinks: 0 },
-      transactionPath: rollbackErrors.length === 0 ? null : transactionPath,
-      receiptBackupPath: rollbackErrors.length === 0 ? null : receiptBackupPath
+      transactionPath: retainedTransactionPath,
+      receiptBackupPath: retainedReceiptBackupPath
     };
+  }
+}
+
+async function revalidateAssignment(input: PruneInput, planned: PlannedPrune, skill: string): Promise<void> {
+  const targetReport = await targets({ source: planned.source, targetOverrides: input.targetOverrides });
+  const target = targetReport.targets.find((item) => item.id === planned.target);
+  if (
+    target === undefined
+    || target.assignment !== planned.assignment
+    || target.platform?.installRoot !== planned.installRoot
+    || target.platform.metadata["readOnly"] === true
+    || target.safety.classification !== "live-install-root"
+  ) {
+    throw new Error(`Target assignment changed for ${skill} during prune transaction.`);
+  }
+  let assignmentPlan: Awaited<ReturnType<typeof plan>>;
+  try {
+    assignmentPlan = await plan({ source: planned.source, target: planned.assignment ?? planned.target });
+  } catch (error) {
+    throw new Error(`Cannot revalidate assignment for ${skill}: ${errorMessage(error)}`);
+  }
+  if (assignmentPlan.errors.some((error) => error.skill === undefined)) {
+    throw new Error(`Cannot revalidate assignment for ${skill} during prune transaction.`);
+  }
+  const assigned = new Set([
+    ...assignmentPlan.planned.map((item) => item.skill),
+    ...assignmentPlan.blocked.map((item) => item.skill),
+    ...assignmentPlan.errors.flatMap((error) => error.skill === undefined ? [] : [error.skill])
+  ]);
+  if (assigned.has(skill)) {
+    throw new Error(`Skill ${skill} became assigned during prune transaction.`);
   }
 }
 
@@ -682,6 +732,14 @@ function isDirectChild(candidate: string, root: string): boolean {
 function isInside(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+async function pathExists(candidate: string): Promise<boolean> {
+  try {
+    await lstat(candidate);
+    return true;
+  } catch {
+    return false;
+  }
 }
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");

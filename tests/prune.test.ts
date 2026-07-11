@@ -320,6 +320,33 @@ test("prune revalidates each candidate immediately before mutation", async (t) =
   assert.equal(await readFile(path.join(fixture.directoryTarget, "late-drift.txt"), "utf8"), "drift\n");
 });
 
+test("prune refuses a skill assigned after planning but before mutation", async (t) => {
+  const fixture = await createFixture(t);
+  const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.ok(dryRun.plan.id);
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    planId: dryRun.plan.id,
+    apply: true,
+    __test: {
+      beforeMutationForSkill: async () => {
+        const manifestPath = path.join(fixture.sourceRoot, "skill-suitcase.yaml");
+        const manifest = await readFile(manifestPath, "utf8");
+        await writeFile(manifestPath, manifest.replace("      - current", "      - current\n      - dir-old"));
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.message.includes("became assigned")), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+  const receipt = await readReceipt({ installRoot: fixture.targetRoot });
+  assert.ok(receipt.installs?.["dir-old"]);
+});
+
 test("prune preserves a receipt update that starts during apply", async (t) => {
   const fixture = await createFixture(t);
   const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
@@ -402,6 +429,35 @@ test("prune rolls back a mixed batch when apply fails", async (t) => {
   assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
   assert.equal(await readlink(fixture.symlinkTarget), path.join(fixture.sourceRoot, "skills", "link-old"));
   assert.equal(await readFile(path.join(fixture.targetRoot, ".skill-suitcase-receipt.json"), "utf8"), receiptBefore);
+});
+
+test("prune retains receipt backup when later rollback work fails", async (t) => {
+  const fixture = await createFixture(t);
+  const receiptPath = path.join(fixture.targetRoot, ".skill-suitcase-receipt.json");
+  const receiptBefore = await readFile(receiptPath, "utf8");
+  const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["link-old"], dryRun: true });
+  assert.ok(dryRun.plan.id);
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["link-old"],
+    planId: dryRun.plan.id,
+    apply: true,
+    __test: {
+      afterReceiptWrite: async () => {
+        await writeFile(fixture.symlinkTarget, "blocks symlink rollback\n");
+      },
+      failAfterReceipt: true
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(await readFile(receiptPath, "utf8"), receiptBefore);
+  assert.ok(result.receiptBackupPath);
+  assert.equal(await readFile(result.receiptBackupPath, "utf8"), receiptBefore);
+  assert.ok(result.transactionPath);
+  assert.equal((await stat(result.transactionPath)).isFile(), true);
 });
 
 test("prune removes only the selected target record from a multi-target receipt", async (t) => {

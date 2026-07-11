@@ -1417,6 +1417,21 @@ test("receipt replacement preserves existing permissions", async (t) => {
   assert.equal((await stat(receiptPath)).mode & 0o777, 0o640);
 });
 
+test("receipt replacement preserves permissions under a restrictive umask", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-mode-umask-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const receiptPath = path.join(root, RECEIPT_FILE);
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+  await chmod(receiptPath, 0o640);
+  const previousUmask = process.umask(0o077);
+  try {
+    await writeReceipt({ installRoot: root, receipt: { installs: {}, updated: true } });
+  } finally {
+    process.umask(previousUmask);
+  }
+  assert.equal((await stat(receiptPath)).mode & 0o777, 0o640);
+});
+
 test("new receipt files use restrictive permissions", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-mode-new-"));
   const receiptPath = path.join(root, RECEIPT_FILE);
