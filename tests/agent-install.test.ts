@@ -5,7 +5,8 @@ import { test } from "node:test";
 test("npm package includes the operator skill and install guide", async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files?: string[] };
 
-  assert.ok(packageJson.files?.includes("skills/skill-suitcase"));
+  assert.ok(packageJson.files?.includes("skills/skill-suitcase/SKILL.md"));
+  assert.ok(packageJson.files?.includes("skills/skill-suitcase/agents/openai.yaml"));
   assert.ok(packageJson.files?.includes("INSTALL.md"));
 });
 

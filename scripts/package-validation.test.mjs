@@ -27,16 +27,25 @@ test("public package metadata and files allowlist stay pinned", async () => {
   );
 });
 
-test("build validation rejects missing, stale, and non-executable CLI output", async (t) => {
+test("build validation rejects changed inputs and missing, stale, or non-executable CLI output", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-package-validation-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await cp("package.json", path.join(root, "package.json"));
+  for (const inputPath of ["package.json", "pnpm-lock.yaml", "tsconfig.json"]) {
+    await cp(inputPath, path.join(root, inputPath));
+  }
   await cp("src", path.join(root, "src"), { recursive: true });
   await cp("dist/src", path.join(root, "dist/src"), { recursive: true });
 
   await recordPackageBuild(root);
   await validatePackageBuild(root);
 
+  const tsconfigPath = path.join(root, "tsconfig.json");
+  const originalTsconfig = await readFile(tsconfigPath, "utf8");
+  await writeFile(tsconfigPath, `${originalTsconfig}\n`);
+  await assert.rejects(validatePackageBuild(root), /stale package build: build input changed.*tsconfig\.json/);
+
+  await writeFile(tsconfigPath, originalTsconfig);
+  await recordPackageBuild(root);
   const cliSourcePath = path.join(root, "src", "cli.ts");
   const originalSource = await readFile(cliSourcePath, "utf8");
   await writeFile(cliSourcePath, `${originalSource}\n`);

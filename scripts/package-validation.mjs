@@ -9,7 +9,12 @@ import { fileURLToPath } from "node:url";
 export const BUILD_MANIFEST_PATH = "dist/.package-build.json";
 export const CLI_BIN_PATH = "dist/src/cli.js";
 
-const BUILD_MANIFEST_SCHEMA = "skill-suitcase.package-build.v1";
+const BUILD_MANIFEST_SCHEMA = "skill-suitcase.package-build.v2";
+const BUILD_INPUT_PATHS = [
+  "package.json",
+  "pnpm-lock.yaml",
+  "tsconfig.json"
+];
 const EXPECTED_FILES_ALLOWLIST = [
   "dist/src/**/*.js",
   "skills/skill-suitcase/SKILL.md",
@@ -79,6 +84,10 @@ export function parsePackJson(stdout) {
 export async function recordPackageBuild(root = process.cwd()) {
   const packageJson = await readPackageJson(root);
   validatePackageMetadata(packageJson);
+  const inputs = await Promise.all(BUILD_INPUT_PATHS.map(async (inputPath) => ({
+    path: inputPath,
+    sha256: await sha256File(path.join(root, inputPath))
+  })));
 
   const sourcePaths = await listFiles(path.join(root, "src"), (relativePath) => relativePath.endsWith(".ts"));
   assert(sourcePaths.length > 0, "package build has no TypeScript source files");
@@ -102,6 +111,7 @@ export async function recordPackageBuild(root = process.cwd()) {
 
   const manifest = {
     schema: BUILD_MANIFEST_SCHEMA,
+    inputs,
     entries
   };
   await writeFile(path.join(root, BUILD_MANIFEST_PATH), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -112,6 +122,14 @@ export async function validatePackageBuild(root = process.cwd()) {
   const packageJson = await readPackageJson(root);
   validatePackageMetadata(packageJson);
   const manifest = await readBuildManifest(root);
+  assertSamePaths(manifest.inputs.map((input) => input.path), BUILD_INPUT_PATHS, "package build input manifest");
+
+  for (const input of manifest.inputs) {
+    assert(
+      await sha256File(path.join(root, input.path)) === input.sha256,
+      `stale package build: build input changed after compilation (${input.path})`
+    );
+  }
 
   const currentSources = (await listFiles(path.join(root, "src"), (relativePath) => relativePath.endsWith(".ts")))
     .map((relativePath) => path.posix.join("src", relativePath));
@@ -209,6 +227,15 @@ async function readBuildManifest(root) {
     throw new Error(`package build manifest is missing or invalid (${BUILD_MANIFEST_PATH}): ${messageFrom(error)}`);
   }
   assert(isRecord(parsed) && parsed.schema === BUILD_MANIFEST_SCHEMA, "package build manifest has an unsupported schema");
+  assert(Array.isArray(parsed.inputs) && parsed.inputs.length > 0, "package build manifest has no inputs");
+  for (const input of parsed.inputs) {
+    assert(
+      isRecord(input)
+        && typeof input.path === "string"
+        && typeof input.sha256 === "string",
+      "package build manifest contains an invalid input"
+    );
+  }
   assert(Array.isArray(parsed.entries) && parsed.entries.length > 0, "package build manifest has no entries");
   for (const entry of parsed.entries) {
     assert(
