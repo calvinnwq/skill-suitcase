@@ -125,7 +125,10 @@ decision.
 
 ## Required Verification
 
-Run the same local product gates before shipping:
+Complete the shell-local, `packageManager`-pinned pnpm setup in
+[`DEVELOPING.md`](../DEVELOPING.md) before running the local product gates.
+Keep that wrapper in the current shell so verification does not modify Corepack
+or global package-manager shims.
 
 ```bash
 pnpm install --frozen-lockfile

@@ -291,8 +291,11 @@ the authoritative machine contract. For portability and smoke-test guidance, see
 
 ## Development
 
+Complete the shell-local, `packageManager`-pinned pnpm setup in
+[`DEVELOPING.md`](DEVELOPING.md) before running the development checks.
+That setup leaves Corepack and global package-manager shims unchanged.
+
 ```bash
-pnpm install
 pnpm test
 pnpm run typecheck
 pnpm run architecture:check
