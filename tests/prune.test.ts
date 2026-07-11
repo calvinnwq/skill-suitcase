@@ -431,6 +431,34 @@ test("prune rolls back a mixed batch when apply fails", async (t) => {
   assert.equal(await readFile(path.join(fixture.targetRoot, ".skill-suitcase-receipt.json"), "utf8"), receiptBefore);
 });
 
+test("prune preserves a pre-existing quarantine root when setup fails", async (t) => {
+  const fixture = await createFixture(t);
+  const receiptPath = path.join(fixture.targetRoot, ".skill-suitcase-receipt.json");
+  const receiptBefore = await readFile(receiptPath, "utf8");
+  const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.ok(dryRun.plan.id);
+  assert.ok(dryRun.plan.quarantineRoot);
+  const sentinelPath = path.join(dryRun.plan.quarantineRoot, "sentinel.txt");
+  await mkdir(dryRun.plan.quarantineRoot);
+  await writeFile(sentinelPath, "preserve\n");
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    planId: dryRun.plan.id,
+    apply: true
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "prune_apply_failed"), true);
+  assert.equal(await readFile(sentinelPath, "utf8"), "preserve\n");
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+  assert.equal(await readFile(receiptPath, "utf8"), receiptBefore);
+  assert.equal(result.transactionPath, null);
+  assert.equal(result.receiptBackupPath, null);
+});
+
 test("prune retains receipt backup when later rollback work fails", async (t) => {
   const fixture = await createFixture(t);
   const receiptPath = path.join(fixture.targetRoot, ".skill-suitcase-receipt.json");

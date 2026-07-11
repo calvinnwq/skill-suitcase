@@ -377,9 +377,11 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
   const receiptRestorePath = path.join(quarantineRoot, "receipt.restore.tmp");
   const movedDirectories: PruneCandidate[] = [];
   const removedSymlinks: PruneCandidate[] = [];
+  let ownsQuarantineRoot = false;
   let receiptReplaced = false;
   try {
     await mkdir(quarantineRoot, { recursive: false });
+    ownsQuarantineRoot = true;
     await mkdir(path.join(quarantineRoot, "quarantine"), { recursive: false });
     const receiptInfo = await lstat(receiptPath);
     if (!receiptInfo.isFile() || receiptInfo.isSymbolicLink()) {
@@ -456,7 +458,9 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       try { await rename(candidate.quarantinePath!, candidate.targetPath); }
       catch (rollbackError) { rollbackErrors.push(`${candidate.skill} directory restore: ${errorMessage(rollbackError)}`); }
     }
-    if (rollbackErrors.length === 0) await rm(quarantineRoot, { recursive: true, force: true }).catch(() => undefined);
+    if (ownsQuarantineRoot && rollbackErrors.length === 0) {
+      await rm(quarantineRoot, { recursive: true, force: true }).catch(() => undefined);
+    }
     const retainedTransactionPath = rollbackErrors.length > 0 && await pathExists(transactionPath)
       ? transactionPath
       : null;
