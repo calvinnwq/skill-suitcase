@@ -178,13 +178,14 @@ provider/read-only targets, path escapes, receipt/file drift, and symlinks whose
 current target differs from their receipt source. The plan includes the receipt
 hash, per-object fingerprint, quarantine paths, and a stable plan ID.
 
-After approval, repeat the exact skill list with `--plan-id <reviewed-id>
---apply`. Apply recomputes the plan before mutation, quarantines physical
+After approval, repeat the exact skill list with
+`--plan-id <reviewed-id> --apply`. Apply recomputes the plan before mutation,
+refuses and preserves any pre-existing plan quarantine root, quarantines physical
 directories, removes exact verified symlinks, writes a plan-scoped transaction
 journal and receipt backup, then atomically replaces the live receipt. Any
-pre-receipt failure restores the original directories and symlinks. Retain and
-review the reported quarantine root and receipt backup; do not manually delete
-them or use broad rollback.
+failed apply attempts to restore the prior receipt, directories, and symlinks.
+Retain and review any reported quarantine root, transaction journal, and receipt
+backup; do not manually delete them or use broad rollback.
 
 ## `import-target` Output
 

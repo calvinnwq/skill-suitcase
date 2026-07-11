@@ -254,7 +254,9 @@ skill-suitcase prune --source "$SRC" --target codex --codex-home "$HOME/.codex" 
 ```
 
 Keep the reported quarantine root, transaction journal, and receipt backup for
-review. Do not manually delete obsolete paths or use broad rollback.
+review. If the plan-scoped quarantine root already exists, apply refuses the
+collision and preserves that root. Do not manually delete obsolete paths or use
+broad rollback.
 
 Use `import-target` for the opposite of `repair`: a selected receipt-owned,
 catalog-owned skill that went `dirty` because you edited it **intentionally** in

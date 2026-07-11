@@ -153,7 +153,8 @@ The durable state model belongs to Skill Suitcase:
   refuse with path-level evidence before any target write
 - manifest `validationPolicy.skillify.skip` records reviewed exceptions for referenced skills that strict validation must not score against the local Skillify-10 authoring contract
 - receipts record ownership, source provenance, install mode, file hashes, and
-  rollback state
+  rollback state; receipt writers use atomic replacement and a receipt-local
+  transaction lock so concurrent workflows cannot discard one another's state
 - status uses the complete `current`, `missing`, `version`, `behind`, `dirty`, `blocked`, and `unknown` enum for catalog-planned entries
 - provider fallback inventory without a catalog assignment has no status entries; read-only is target metadata, not a status value
 - rollback restores or removes what Skill Suitcase installed
@@ -411,8 +412,9 @@ Keep the command verbs separate:
   receipt and each directory or symlink into a stable plan ID. `--apply`
   requires that exact ID, recomputes the plan, quarantines directories, removes
   only verified symlinks, journals the transaction, and atomically updates the
-  receipt. Assigned, unreceipted, drifted, provider-managed, and path-escaping
-  candidates are refusals rather than cleanup guesses.
+  receipt. Apply never reuses or removes a pre-existing plan quarantine root.
+  Assigned, unreceipted, drifted, provider-managed, and path-escaping candidates
+  are refusals rather than cleanup guesses.
 - `import-target` imports an intentionally-edited receipt-owned copy-mode target
   skill back into the catalog as the source-of-truth inverse of `repair`:
   `repair` discards the local edit (catalog -> target), while `import-target`

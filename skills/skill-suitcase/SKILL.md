@@ -261,7 +261,8 @@ any receipt, directory, or symlink drift invalidates the plan ID:
 Prune quarantines physical directories, removes only symlinks whose live target
 matches their receipt source, atomically updates the receipt, and reports a
 transaction journal plus receipt backup. Register retained quarantine/backup
-paths with the active artifact-retention workflow. Do not manually delete them.
+paths with the active artifact-retention workflow. If the plan quarantine root
+already exists, apply refuses and preserves it. Do not manually delete it.
 
 For a selected receipt-owned, catalog-owned skill that went `dirty` from an
 intentional local edit you want in the repo, import it the other direction

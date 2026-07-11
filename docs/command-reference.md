@@ -338,7 +338,9 @@ ID, then recomputes all state before mutation.
 Physical directories move into a plan-scoped quarantine. Symlinks are removed
 only when their current target still matches their receipt source. Apply writes
 a transaction journal and receipt backup, updates the receipt atomically, and
-restores completed mutations when a pre-commit step fails. Assigned,
+attempts to restore the prior receipt and completed filesystem mutations after
+any failure. Apply refuses and preserves a pre-existing plan quarantine root
+instead of reusing or cleaning it. Assigned,
 unreceipted, drifted, read-only/provider-backed, and path-escaping candidates
 are refused. Retain the reported quarantine and backup paths for reviewed
 cleanup; never replace prune with manual deletion or broad rollback.
@@ -448,6 +450,11 @@ await upsertAndWriteReceipt({
 `buildInstalledFiles` hashes regular files while skipping `__pycache__` directories and `.pyc` files; its optional `{ exclude }` iterable omits selected paths.
 `buildReceipt` creates a receipt shell, `upsertInstallRecord` merges an install record in memory, and `upsertAndWriteReceipt` merges against disk before writing `.skill-suitcase-receipt.json`.
 `readReceipt` reads modern receipts or migrates legacy `.skills-sync.json` data in memory without writing, while `writeReceipt` replaces the full receipt payload.
+All receipt writers serialize through a receipt-local lock, replace receipt files atomically, preserve an existing receipt's permissions, and create new receipts with mode `0600`.
+`updateAndWriteReceipt` performs an arbitrary read-modify-write while holding that lock.
+Use `withReceiptLock` to serialize a multi-step transaction, and pass its callback token to nested receipt writers so they reuse the active lock.
+Writers can report `ReceiptMutation` values through `onWritten`; `rollbackReceiptMutations` reverses only those writes and returns `false` rather than overwriting a conflicting concurrent update.
+The lock is released when its callback ends, and orphaned locks from terminated processes are recovered automatically.
 Custom receipt paths must remain inside `installRoot`, and multiple installs for one skill are represented as an array under that skill name.
 
 ## Common Refusal Codes
@@ -466,6 +473,8 @@ codes include:
   `plan_lock_source_mismatch`
 - `symlink_source_escape`: requested link would leave the approved catalog root
 - `symlink_target_conflict`: live target shape cannot be replaced implicitly
+- `receipt_lock_failed`: a mutating workflow could not acquire or use the
+  serialized receipt transaction lock
 - state-specific repair/reconcile/import refusals when the selected skill does
   not meet that workflow's ownership and drift contract
 
