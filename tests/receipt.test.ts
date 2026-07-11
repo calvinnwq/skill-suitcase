@@ -1,19 +1,25 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
   LEGACY_RECEIPT_SCHEMA,
   RECEIPT_FILE,
+  RECEIPT_LOCK_FILE,
   RECEIPT_SCHEMA,
   Receipt,
   ReceiptInstallRecord,
   buildInstallRecord,
   buildReceipt,
   buildInstalledFiles,
+  readReceipt,
+  rollbackReceiptMutations,
+  type ReceiptLock,
+  type ReceiptMutation,
   upsertAndWriteReceipt,
+  withReceiptLock,
   writeReceipt,
   upsertInstallRecord
 } from "../src/receipt.js";
@@ -1202,5 +1208,195 @@ test("receipt writers reject custom receipt paths outside install root", async (
         installRecord
       }),
     /receiptPath must stay within installRoot/
+  );
+});
+
+test("receipt rollback removes transaction writes without discarding concurrent records", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-concurrent-rollback-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const mutations: ReceiptMutation[] = [];
+
+  await upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: "transaction-skill",
+    installRecord: buildInstallRecord({
+      skill: "transaction-skill",
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, "transaction-skill"),
+      sourcePath: "/repo/skills/transaction-skill",
+      sourceHash: "transaction-hash"
+    }),
+    onWritten: (mutation) => mutations.push(mutation)
+  });
+  await upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: "concurrent-skill",
+    installRecord: buildInstallRecord({
+      skill: "concurrent-skill",
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, "concurrent-skill"),
+      sourcePath: "/repo/skills/concurrent-skill",
+      sourceHash: "concurrent-hash"
+    })
+  });
+
+  assert.equal(await rollbackReceiptMutations({ installRoot: root, mutations }), true);
+  const receipt = await readReceipt({ installRoot: root });
+  assert.equal(receipt.installs?.["transaction-skill"], undefined);
+  assert.ok(receipt.installs?.["concurrent-skill"]);
+});
+
+test("receipt rollback preserves a concurrent update to the same record", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-concurrent-conflict-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const mutations: ReceiptMutation[] = [];
+
+  await upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: "shared-skill",
+    installRecord: buildInstallRecord({
+      skill: "shared-skill",
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, "shared-skill"),
+      sourcePath: "/repo/skills/shared-skill",
+      version: "1.0.0"
+    }),
+    onWritten: (mutation) => mutations.push(mutation)
+  });
+  await upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: "shared-skill",
+    installRecord: buildInstallRecord({
+      skill: "shared-skill",
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, "shared-skill"),
+      sourcePath: "/repo/skills/shared-skill",
+      version: "2.0.0"
+    })
+  });
+
+  assert.equal(await rollbackReceiptMutations({ installRoot: root, mutations }), false);
+  const receipt = await readReceipt({ installRoot: root });
+  assert.equal(getSingleInstallRecord(receipt.installs?.["shared-skill"], "shared-skill").version, "2.0.0");
+});
+
+test("receipt transaction lock delays concurrent writers until rollback completes", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-transaction-lock-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let concurrentWrite: Promise<string> | null = null;
+  let concurrentFinished = false;
+
+  await withReceiptLock({ installRoot: root }, async (receiptLock) => {
+    const mutations: ReceiptMutation[] = [];
+    await upsertAndWriteReceipt({
+      installRoot: root,
+      skillName: "transaction-skill",
+      installRecord: buildInstallRecord({
+        skill: "transaction-skill",
+        agent: "codex",
+        mode: "copy",
+        targetPath: path.join(root, "transaction-skill"),
+        sourcePath: "/repo/skills/transaction-skill",
+        sourceHash: "transaction-hash"
+      }),
+      onWritten: (mutation) => mutations.push(mutation),
+      receiptLock
+    });
+    concurrentWrite = upsertAndWriteReceipt({
+      installRoot: root,
+      skillName: "concurrent-skill",
+      installRecord: buildInstallRecord({
+        skill: "concurrent-skill",
+        agent: "codex",
+        mode: "copy",
+        targetPath: path.join(root, "concurrent-skill"),
+        sourcePath: "/repo/skills/concurrent-skill",
+        sourceHash: "concurrent-hash"
+      })
+    }).finally(() => {
+      concurrentFinished = true;
+    });
+    await Promise.resolve();
+    assert.equal(concurrentFinished, false);
+    assert.equal(await rollbackReceiptMutations({ installRoot: root, mutations, receiptLock }), true);
+  });
+
+  assert.ok(concurrentWrite);
+  await concurrentWrite;
+  const receipt = await readReceipt({ installRoot: root });
+  assert.equal(receipt.installs?.["transaction-skill"], undefined);
+  assert.ok(receipt.installs?.["concurrent-skill"]);
+});
+
+test("receipt lock tokens expire after their callback", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-expired-receipt-token-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let expiredToken: ReceiptLock | null = null;
+  await withReceiptLock({ installRoot: root }, async (receiptLock) => {
+    expiredToken = receiptLock;
+  });
+  assert.ok(expiredToken);
+  let writer: Promise<string> | null = null;
+  let writerFinished = false;
+
+  await withReceiptLock({ installRoot: root }, async () => {
+    writer = writeReceipt({
+      installRoot: root,
+      receipt: { installs: {} },
+      receiptLock: expiredToken!
+    }).finally(() => {
+      writerFinished = true;
+    });
+    await Promise.resolve();
+    assert.equal(writerFinished, false);
+  });
+
+  assert.ok(writer);
+  await writer;
+});
+
+test("receipt writers recover an old empty legacy prune lock", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-legacy-lock-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const lockPath = path.join(root, RECEIPT_LOCK_FILE);
+  await mkdir(lockPath);
+  const old = new Date(Date.now() - 2 * 86_400_000);
+  await utimes(lockPath, old, old);
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  const receipt = await readReceipt({ installRoot: root });
+  assert.deepEqual(receipt.installs, {});
+});
+
+test("custom receipt writers lock beside the receipt file", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-custom-receipt-lock-"));
+  const receiptDirectory = path.join(root, "state");
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(receiptDirectory);
+  let writer: Promise<string> | null = null;
+  let writerFinished = false;
+
+  await withReceiptLock({ installRoot: receiptDirectory }, async () => {
+    writer = writeReceipt({
+      installRoot: root,
+      receiptPath: "state/receipt.json",
+      receipt: { installs: {} }
+    }).finally(() => {
+      writerFinished = true;
+    });
+    await Promise.resolve();
+    assert.equal(writerFinished, false);
+  });
+
+  assert.ok(writer);
+  await writer;
+  assert.deepEqual(
+    (await readReceipt({ installRoot: root, receiptPath: "state/receipt.json" })).installs,
+    {}
   );
 });

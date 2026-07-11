@@ -18,8 +18,8 @@ import type { TargetOverrides } from "../catalog/index.js";
 import {
   readReceipt,
   RECEIPT_FILE,
-  RECEIPT_LOCK_FILE,
   RECEIPT_SCHEMA,
+  withReceiptLock,
   type Receipt,
   type ReceiptInstallRecord
 } from "../receipts/index.js";
@@ -340,19 +340,37 @@ async function inspectCandidate(
 
 async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<PruneApplyResult> {
   const installRoot = planned.installRoot!;
+  try {
+    return await withReceiptLock({ installRoot }, () => executePruneLocked(input, planned));
+  } catch (error) {
+    const failed = stripReceipt(planned);
+    return {
+      ...failed,
+      ok: false,
+      dryRun: false,
+      readOnly: false,
+      pruned: { skills: [], directories: 0, symlinks: 0 },
+      transactionPath: null,
+      receiptBackupPath: null,
+      errors: [...failed.errors, {
+        code: "receipt_lock_failed",
+        message: errorMessage(error)
+      }]
+    };
+  }
+}
+
+async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Promise<PruneApplyResult> {
+  const installRoot = planned.installRoot!;
   const receiptPath = planned.plan.receiptPath!;
   const quarantineRoot = planned.plan.quarantineRoot!;
   const transactionPath = path.join(quarantineRoot, "transaction.json");
   const receiptBackupPath = path.join(quarantineRoot, "receipt.before.json");
   const receiptTempPath = path.join(quarantineRoot, "receipt.after.tmp");
-  const lockPath = path.join(installRoot, RECEIPT_LOCK_FILE);
   const movedDirectories: PruneCandidate[] = [];
   const removedSymlinks: PruneCandidate[] = [];
   let receiptReplaced = false;
-  let lockAcquired = false;
   try {
-    await mkdir(lockPath, { recursive: false });
-    lockAcquired = true;
     await mkdir(quarantineRoot, { recursive: false });
     await mkdir(path.join(quarantineRoot, "quarantine"), { recursive: false });
     const receiptInfo = await lstat(receiptPath);
@@ -432,8 +450,6 @@ async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<P
       transactionPath: rollbackErrors.length === 0 ? null : transactionPath,
       receiptBackupPath: rollbackErrors.length === 0 ? null : receiptBackupPath
     };
-  } finally {
-    if (lockAcquired) await rm(lockPath, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 

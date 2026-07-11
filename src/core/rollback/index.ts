@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
 import {
   buildInstalledFiles,
   RECEIPT_FILE,
   RECEIPT_SCHEMA,
+  updateAndWriteReceipt,
+  withReceiptLock,
   type Receipt,
   type ReceiptInstallRecord
 } from "../receipts/index.js";
@@ -130,6 +133,8 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     errors: []
   };
 
+  try {
+    return await withReceiptLock({ installRoot }, async (receiptLock) => {
   let receiptPayload: Receipt;
   try {
     receiptPayload = await readReceipt(receiptPath);
@@ -148,6 +153,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     result.errors.push({ code: "invalid_receipt", message: "Receipt installs must be an object." });
     return result;
   }
+  const originalInstalls = structuredClone(installs);
 
   let changedReceipt = false;
   const receiptChangedSkills = new Set<string>();
@@ -468,7 +474,25 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
 
   if (changedReceipt) {
     try {
-      await writeFile(receiptPath, `${JSON.stringify(receiptPayload, null, 2)}\n`, "utf8");
+      await access(receiptPath, constants.W_OK);
+      await updateAndWriteReceipt({
+        installRoot: path.dirname(receiptPath),
+        receiptPath: path.basename(receiptPath),
+        receiptLock,
+        update: (currentReceipt) => {
+          const currentInstalls = isRecord(currentReceipt.installs)
+            ? { ...currentReceipt.installs }
+            : {};
+          for (const skill of receiptChangedSkills) {
+            if (JSON.stringify(currentInstalls[skill]) !== JSON.stringify(originalInstalls[skill])) {
+              throw new Error(`Receipt record for ${skill} changed during rollback.`);
+            }
+            if (installs[skill] === undefined) delete currentInstalls[skill];
+            else currentInstalls[skill] = installs[skill] as ReceiptInstallRecord | ReceiptInstallRecord[];
+          }
+          return { ...currentReceipt, installs: currentInstalls };
+        }
+      });
     } catch (error) {
       result.ok = false;
       let affectedItems = 0;
@@ -492,6 +516,16 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     result.ok = false;
   }
   return result;
+    });
+  } catch (error) {
+    result.ok = false;
+    result.errors.push({
+      code: "receipt_lock_failed",
+      message: errorMessage(error),
+      path: receiptPath
+    });
+    return result;
+  }
 }
 
 async function resolveReceiptPath(receipt: string): Promise<string> {

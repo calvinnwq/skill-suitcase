@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const RECEIPT_SCHEMA = "calvinnwq.skills.receipt.v0";
@@ -10,6 +10,8 @@ export const RECEIPT_LOCK_FILE = ".skill-suitcase-receipt.lock";
 
 const RECEIPT_LOCK_RETRY_MS = 25;
 const RECEIPT_LOCK_TIMEOUT_MS = 10_000;
+const RECEIPT_LEGACY_LOCK_STALE_MS = 86_400_000;
+const RECEIPT_LOCK_TOKEN = Symbol("receipt-lock");
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -56,6 +58,8 @@ type UpsertAndWriteReceiptInput = {
   skillName: string;
   installRecord: ReceiptInstallRecord;
   receiptPath?: string;
+  onWritten?: (mutation: ReceiptMutation) => void;
+  receiptLock?: ReceiptLock;
 };
 
 type ReadReceiptInput = {
@@ -67,12 +71,34 @@ type WriteReceiptInput = {
   installRoot: string;
   receipt: Receipt;
   receiptPath?: string;
+  onWritten?: (mutation: ReceiptMutation) => void;
+  receiptLock?: ReceiptLock;
 };
 
 type UpdateAndWriteReceiptInput = {
   installRoot: string;
   receiptPath?: string;
   update: (receipt: Receipt) => Receipt | Promise<Receipt>;
+  onWritten?: (mutation: ReceiptMutation) => void;
+  receiptLock?: ReceiptLock;
+};
+
+export type ReceiptLock = {
+  installRoot: string;
+  active: boolean;
+  [RECEIPT_LOCK_TOKEN]: true;
+};
+
+export type ReceiptMutation = {
+  previousText: string | null;
+  writtenText: string;
+};
+
+type RollbackReceiptMutationsInput = {
+  installRoot: string;
+  receiptPath?: string;
+  mutations: ReceiptMutation[];
+  receiptLock?: ReceiptLock;
 };
 
 type UpsertInstallRecordInput = {
@@ -106,7 +132,9 @@ export async function buildInstalledFiles(
 export async function writeReceipt({
   installRoot,
   receipt,
-  receiptPath = RECEIPT_FILE
+  receiptPath = RECEIPT_FILE,
+  onWritten,
+  receiptLock
 }: WriteReceiptInput): Promise<string> {
   if (!isRecord(receipt)) {
     throw new Error("Receipt payload must be an object.");
@@ -119,8 +147,10 @@ export async function writeReceipt({
     receiptPath: normalizedReceiptPath
   });
   const payload = normalizeReceiptPayload(receipt);
-  await withReceiptLock({ installRoot: normalizedRoot }, async () => {
-    await writeReceiptUnlocked(outputPath, payload);
+  await withOptionalReceiptLock({ installRoot: path.dirname(outputPath), receiptLock }, async () => {
+    const previousText = await readOptionalReceiptTextUnlocked(outputPath);
+    const writtenText = await writeReceiptUnlocked(outputPath, payload);
+    onWritten?.({ previousText, writtenText });
   });
   return outputPath;
 }
@@ -146,7 +176,9 @@ export async function upsertAndWriteReceipt({
   receipt,
   skillName,
   installRecord,
-  receiptPath = RECEIPT_FILE
+  receiptPath = RECEIPT_FILE,
+  onWritten,
+  receiptLock
 }: UpsertAndWriteReceiptInput): Promise<string> {
   const normalizedRoot = normalizeInstallRoot(installRoot);
   const normalizedReceiptPath = receiptPath ?? RECEIPT_FILE;
@@ -171,7 +203,8 @@ export async function upsertAndWriteReceipt({
     ? { ...installRecord, targetPath: normalizedTargetPath }
     : installRecord;
 
-  await withReceiptLock({ installRoot: normalizedRoot }, async () => {
+  await withOptionalReceiptLock({ installRoot: path.dirname(outputPath), receiptLock }, async () => {
+    const previousText = await readOptionalReceiptTextUnlocked(outputPath);
     const currentReceipt = receipt === undefined
       ? await readReceipt({
         installRoot: normalizedRoot,
@@ -193,7 +226,8 @@ export async function upsertAndWriteReceipt({
         installRoot: normalizedRoot
       }
     );
-    await writeReceiptUnlocked(outputPath, normalizeReceiptPayload(nextReceipt));
+    const writtenText = await writeReceiptUnlocked(outputPath, normalizeReceiptPayload(nextReceipt));
+    onWritten?.({ previousText, writtenText });
   });
   return outputPath;
 }
@@ -201,7 +235,9 @@ export async function upsertAndWriteReceipt({
 export async function updateAndWriteReceipt({
   installRoot,
   receiptPath = RECEIPT_FILE,
-  update
+  update,
+  onWritten,
+  receiptLock
 }: UpdateAndWriteReceiptInput): Promise<string> {
   const normalizedRoot = normalizeInstallRoot(installRoot);
   const normalizedReceiptPath = receiptPath ?? RECEIPT_FILE;
@@ -209,18 +245,58 @@ export async function updateAndWriteReceipt({
     installRoot: normalizedRoot,
     receiptPath: normalizedReceiptPath
   });
-  await withReceiptLock({ installRoot: normalizedRoot }, async () => {
+  await withOptionalReceiptLock({ installRoot: path.dirname(outputPath), receiptLock }, async () => {
+    const previousText = await readOptionalReceiptTextUnlocked(outputPath);
     const currentReceipt = await readReceipt({
       installRoot: normalizedRoot,
       receiptPath: normalizedReceiptPath
     });
     const nextReceipt = await update(currentReceipt);
-    await writeReceiptUnlocked(outputPath, normalizeReceiptPayload(nextReceipt));
+    const writtenText = await writeReceiptUnlocked(outputPath, normalizeReceiptPayload(nextReceipt));
+    onWritten?.({ previousText, writtenText });
   });
   return outputPath;
 }
 
-export async function withReceiptLock<T>({ installRoot }: { installRoot: string }, action: () => Promise<T>): Promise<T> {
+export async function rollbackReceiptMutations({
+  installRoot,
+  receiptPath = RECEIPT_FILE,
+  mutations,
+  receiptLock
+}: RollbackReceiptMutationsInput): Promise<boolean> {
+  if (mutations.length === 0) {
+    return true;
+  }
+  const normalizedRoot = normalizeInstallRoot(installRoot);
+  const normalizedReceiptPath = receiptPath ?? RECEIPT_FILE;
+  const outputPath = resolveReceiptPath({
+    installRoot: normalizedRoot,
+    receiptPath: normalizedReceiptPath
+  });
+  try {
+    return await withOptionalReceiptLock({ installRoot: path.dirname(outputPath), receiptLock }, async () => {
+      const currentText = await readOptionalReceiptTextUnlocked(outputPath);
+      let restoredText = currentText;
+      let complete = true;
+      for (const mutation of [...mutations].reverse()) {
+        const reverted = revertReceiptMutation(restoredText, mutation);
+        restoredText = reverted.text;
+        complete = complete && reverted.complete;
+      }
+      if (restoredText !== currentText) {
+        await writeReceiptTextUnlocked(outputPath, restoredText);
+      }
+      return complete;
+    });
+  } catch {
+    return false;
+  }
+}
+
+export async function withReceiptLock<T>(
+  { installRoot }: { installRoot: string },
+  action: (receiptLock: ReceiptLock) => Promise<T>
+): Promise<T> {
   const normalizedRoot = normalizeInstallRoot(installRoot);
   await mkdir(normalizedRoot, { recursive: true });
   const lockPath = path.join(normalizedRoot, RECEIPT_LOCK_FILE);
@@ -231,31 +307,182 @@ export async function withReceiptLock<T>({ installRoot }: { installRoot: string 
       handle = await open(lockPath, "wx");
       break;
     } catch (error) {
-      if ((error as { code?: string }).code !== "EEXIST" || Date.now() >= deadline) {
-        throw error;
-      }
+      if ((error as { code?: string }).code !== "EEXIST") throw error;
+      if (await removeStaleLegacyReceiptLock(lockPath)) continue;
+      if (Date.now() >= deadline) throw new Error(`Timed out waiting for receipt lock at ${lockPath}.`);
       await new Promise((resolve) => setTimeout(resolve, RECEIPT_LOCK_RETRY_MS));
     }
   }
+  const lockText = `${process.pid}\n`;
+  const receiptLock: ReceiptLock = {
+    installRoot: normalizedRoot,
+    active: true,
+    [RECEIPT_LOCK_TOKEN]: true
+  };
   try {
-    await handle.writeFile(`${process.pid}\n`, "utf8");
-    return await action();
+    await handle.writeFile(lockText, "utf8");
+    return await action(receiptLock);
   } finally {
+    receiptLock.active = false;
     await handle.close().catch(() => undefined);
-    await rm(lockPath, { force: true }).catch(() => undefined);
+    try {
+      if (await readFile(lockPath, "utf8") === lockText) await rm(lockPath);
+    } catch {}
   }
 }
 
-async function writeReceiptUnlocked(outputPath: string, receipt: Receipt): Promise<void> {
+async function withOptionalReceiptLock<T>(
+  { installRoot, receiptLock }: { installRoot: string; receiptLock: ReceiptLock | undefined },
+  action: () => Promise<T>
+): Promise<T> {
+  if (
+    receiptLock?.[RECEIPT_LOCK_TOKEN] === true
+    && receiptLock.active
+    && receiptLock.installRoot === normalizeInstallRoot(installRoot)
+  ) {
+    return action();
+  }
+  return withReceiptLock({ installRoot }, action);
+}
+
+async function removeStaleLegacyReceiptLock(lockPath: string): Promise<boolean> {
+  const info = await lstatSafe(lockPath);
+  if (
+    info === null
+    || !info.isDirectory()
+    || info.mtimeMs > Date.now() - RECEIPT_LEGACY_LOCK_STALE_MS
+  ) {
+    return false;
+  }
+  try {
+    if ((await readdir(lockPath)).length > 0) return false;
+    const current = await lstat(lockPath);
+    if (current.dev !== info.dev || current.ino !== info.ino) return false;
+    await rmdir(lockPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function lstatSafe(filePath: string): Promise<import("node:fs").Stats | null> {
+  try {
+    return await lstat(filePath);
+  } catch {
+    return null;
+  }
+}
+
+async function writeReceiptUnlocked(outputPath: string, receipt: Receipt): Promise<string> {
+  const text = `${JSON.stringify(receipt, null, 2)}\n`;
+  await writeReceiptTextUnlocked(outputPath, text);
+  return text;
+}
+
+async function writeReceiptTextUnlocked(outputPath: string, text: string | null): Promise<void> {
+  if (text === null) {
+    await rm(outputPath, { force: true });
+    return;
+  }
   await mkdir(path.dirname(outputPath), { recursive: true });
   const tempPath = `${outputPath}.${process.pid}.${Date.now()}.tmp`;
   try {
-    await writeFile(tempPath, `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    await writeFile(tempPath, text, { encoding: "utf8", flag: "wx" });
     await rename(tempPath, outputPath);
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+async function readOptionalReceiptTextUnlocked(receiptPath: string): Promise<string | null> {
+  try {
+    return await readFile(receiptPath, "utf8");
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function revertReceiptMutation(
+  currentText: string | null,
+  mutation: ReceiptMutation
+): { text: string | null; complete: boolean } {
+  if (currentText === mutation.writtenText) {
+    return { text: mutation.previousText, complete: true };
+  }
+  const current = parseReceiptText(currentText);
+  const previous = parseReceiptText(mutation.previousText);
+  const written = parseReceiptText(mutation.writtenText);
+  if (current === null || previous === null || written === null) {
+    return { text: currentText, complete: false };
+  }
+
+  const reverted = { ...current };
+  let complete = true;
+  for (const key of new Set([...Object.keys(previous), ...Object.keys(written)])) {
+    if (key === "installs") {
+      const result = revertReceiptInstalls(current.installs, previous.installs, written.installs);
+      if (result.value === undefined) delete reverted.installs;
+      else reverted.installs = result.value;
+      complete = complete && result.complete;
+      continue;
+    }
+    const currentValue = current[key];
+    const previousValue = previous[key];
+    const writtenValue = written[key];
+    if (stableEqual(previousValue, writtenValue)) continue;
+    if (!stableEqual(currentValue, writtenValue)) {
+      complete = false;
+      continue;
+    }
+    if (previousValue === undefined) delete reverted[key];
+    else reverted[key] = previousValue;
+  }
+  if (isRecord(reverted.installs) && Object.keys(reverted.installs).length > 0) {
+    reverted.schema = RECEIPT_SCHEMA;
+  }
+  return { text: `${JSON.stringify(reverted, null, 2)}\n`, complete };
+}
+
+function revertReceiptInstalls(
+  currentValue: unknown,
+  previousValue: unknown,
+  writtenValue: unknown
+): { value: Receipt["installs"]; complete: boolean } {
+  const current = (isRecord(currentValue) ? { ...currentValue } : {}) as NonNullable<Receipt["installs"]>;
+  const previous = (isRecord(previousValue) ? previousValue : {}) as NonNullable<Receipt["installs"]>;
+  const written = (isRecord(writtenValue) ? writtenValue : {}) as NonNullable<Receipt["installs"]>;
+  let complete = true;
+  for (const skill of new Set([...Object.keys(previous), ...Object.keys(written)])) {
+    if (stableEqual(previous[skill], written[skill])) continue;
+    if (!stableEqual(current[skill], written[skill])) {
+      complete = false;
+      continue;
+    }
+    if (previous[skill] === undefined) delete current[skill];
+    else current[skill] = previous[skill];
+  }
+  return {
+    value: Object.keys(current).length === 0 && previousValue === undefined ? undefined : current,
+    complete
+  };
+}
+
+function parseReceiptText(text: string | null): Receipt | null {
+  if (text === null) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function stableEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 async function readReceiptForUpsert({ receiptPath, legacyReceiptPath }: {

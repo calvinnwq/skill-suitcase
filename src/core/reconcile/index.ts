@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
@@ -8,7 +8,11 @@ import {
   RECEIPT_FILE,
   buildInstallRecord,
   buildInstalledFiles,
-  upsertAndWriteReceipt
+  rollbackReceiptMutations,
+  type ReceiptLock,
+  type ReceiptMutation,
+  upsertAndWriteReceipt,
+  withReceiptLock
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import {
@@ -478,17 +482,31 @@ async function executeReconcile(input: ReconcileInput, plan: ReconcileBaseResult
   if (installRoot === null) {
     return applyFailure(plan, "missing_install_root", "could not resolve install root for reconcile");
   }
-
-  const receiptPath = path.join(installRoot, RECEIPT_FILE);
-  let previousReceiptText: string | null;
   try {
-    previousReceiptText = await readOptionalText(receiptPath);
+    return await withReceiptLock(
+      { installRoot },
+      (receiptLock) => executeReconcileLocked(input, plan, installRoot, receiptLock)
+    );
+  } catch (error) {
+    return applyFailure(plan, "receipt_lock_failed", errorMessage(error));
+  }
+}
+
+async function executeReconcileLocked(
+  input: ReconcileInput,
+  plan: ReconcileBaseResult,
+  installRoot: string,
+  receiptLock: ReceiptLock
+): Promise<ReconcileApplyResult> {
+  try {
+    await readOptionalText(path.join(installRoot, RECEIPT_FILE));
   } catch (error) {
     return applyFailure(plan, "invalid_receipt", `Could not read receipt before reconcile: ${errorMessage(error)}`);
   }
 
   const reconciledSkills: string[] = [];
   const backups: ReconciledBackup[] = [];
+  const receiptMutations: ReceiptMutation[] = [];
   let reconciledFiles = 0;
   let receiptPathWritten: string | null = null;
   const { manifest } = await loadCatalog(input.source, { targetOverrides: input.targetOverrides });
@@ -564,7 +582,9 @@ async function executeReconcile(input: ReconcileInput, plan: ReconcileBaseResult
       receiptPathWritten = await upsertAndWriteReceipt({
         installRoot,
         skillName: candidate.skill,
-        installRecord: buildInstallRecord(installRecord)
+        installRecord: buildInstallRecord(installRecord),
+        onWritten: (mutation) => receiptMutations.push(mutation),
+        receiptLock
       });
       reconciledSkills.push(candidate.skill);
       reconciledFiles += installedFiles.length;
@@ -583,7 +603,7 @@ async function executeReconcile(input: ReconcileInput, plan: ReconcileBaseResult
       if (copied) {
         await removePath(tmpPath);
       }
-      await restoreOriginalReceipt({ receiptPath, previousReceiptText });
+      await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
       for (const completed of backups.reverse()) {
         await removePath(completed.targetPath);
         await restorePath(completed.backupPath, completed.targetPath);
@@ -1320,24 +1340,6 @@ async function readOptionalText(filePath: string): Promise<string | null> {
       return null;
     }
     throw error;
-  }
-}
-
-async function restoreOriginalReceipt({
-  receiptPath,
-  previousReceiptText
-}: {
-  receiptPath: string;
-  previousReceiptText: string | null;
-}): Promise<void> {
-  try {
-    if (previousReceiptText === null) {
-      await unlink(receiptPath);
-      return;
-    }
-    await writeFile(receiptPath, previousReceiptText, "utf8");
-  } catch {
-    // best effort restore only
   }
 }
 

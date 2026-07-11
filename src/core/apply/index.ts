@@ -10,14 +10,16 @@ import {
   SYMLINK_MODE
 } from "../install-modes.js";
 import {
-  RECEIPT_FILE,
   buildInstallRecord,
   buildInstalledFiles,
   readReceipt,
+  rollbackReceiptMutations,
   upsertAndWriteReceipt,
+  withReceiptLock,
   type Receipt,
   type ReceiptInstalledFile,
-  type ReceiptInstallRecord
+  type ReceiptInstallRecord,
+  type ReceiptMutation
 } from "../receipts/index.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
@@ -315,7 +317,9 @@ export async function apply({
     });
   }
 
-  const preStatus = await status({
+  try {
+    return await withReceiptLock({ installRoot }, async (receiptLock) => {
+    const preStatus = await status({
     source: diffResult.source,
     target,
     targetOverrides
@@ -413,7 +417,8 @@ export async function apply({
       preApplySummary,
       targetOverrides,
       target,
-      sourcePolicy: manifest.sourcePolicy
+      sourcePolicy: manifest.sourcePolicy,
+      receiptLock
     });
   }
 
@@ -540,8 +545,7 @@ export async function apply({
     successfulWritesRef.value = writeResult.successfulWrites;
   }
 
-  const receiptPath = path.join(installRoot, RECEIPT_FILE);
-  const previousReceiptText = await readFileSafeText(receiptPath);
+  const receiptMutations: ReceiptMutation[] = [];
 
   const sourceCommit = context.sourceCommit;
   const backupPaths = restorePlan
@@ -619,16 +623,19 @@ export async function apply({
       await upsertAndWriteReceipt({
         installRoot,
         skillName: skill,
-        installRecord: buildInstallRecord(nextRecord)
+        installRecord: buildInstallRecord(nextRecord),
+        onWritten: (mutation) => receiptMutations.push(mutation),
+        receiptLock
       });
     }
   } catch (error) {
     await rollbackApplyWrites({
       restorePlan
     });
-    await restoreOriginalReceipt({
-      receiptPath,
-      previousReceiptText
+    await rollbackReceiptMutations({
+      installRoot,
+      mutations: receiptMutations,
+      receiptLock
     });
     await cleanupApplyBackups({ restorePlan });
     return failure({
@@ -665,28 +672,41 @@ export async function apply({
     postApplyStatus = null;
   }
 
-  return {
-    ok: true,
-    source: diffResult.source,
-    target,
-    mode: context.mode,
-    input: context.input,
-    assignment: diffResult.assignment,
-    planTarget: diffResult.target,
-    installRoot,
-    preApplyStatus: {
-      source: preStatus.source,
-      statuses: targetStatuses,
-      summary: preApplySummary
-    },
-    postApplyStatus,
-    summary: asSummary(diffResult),
-    applied: {
-      skills: [...filesAppliedBySkill.keys()],
-      files: writeEntries.items.length
-    },
-    errors: []
-  };
+    return {
+      ok: true,
+      source: diffResult.source,
+      target,
+      mode: context.mode,
+      input: context.input,
+      assignment: diffResult.assignment,
+      planTarget: diffResult.target,
+      installRoot,
+      preApplyStatus: {
+        source: preStatus.source,
+        statuses: targetStatuses,
+        summary: preApplySummary
+      },
+      postApplyStatus,
+      summary: asSummary(diffResult),
+      applied: {
+        skills: [...filesAppliedBySkill.keys()],
+        files: writeEntries.items.length
+      },
+      errors: []
+    };
+    });
+  } catch (error) {
+    return failure({
+      source: diffResult.source,
+      target,
+      mode: context.mode,
+      input: context.input,
+      assignment: diffResult.assignment,
+      planTarget: diffResult.target,
+      installRoot,
+      errors: [{ code: "receipt_lock_failed", message: error instanceof Error ? error.message : "Receipt lock failed" }]
+    });
+  }
 }
 
 function normalizeInstallMode(mode: string | undefined): ApplyInstallMode | null {
@@ -767,7 +787,8 @@ async function applySymlinkInstalls({
   preApplySummary,
   targetOverrides,
   target,
-  sourcePolicy
+  sourcePolicy,
+  receiptLock
 }: {
   diffResult: DiffForApply;
   context: ApprovalContext;
@@ -778,6 +799,7 @@ async function applySymlinkInstalls({
   targetOverrides: TargetOverrides | undefined;
   target: string;
   sourcePolicy: SourcePolicy | undefined;
+  receiptLock: import("../receipts/index.js").ReceiptLock;
 }): Promise<ApplyResult> {
   const sourceRoot = diffResult.source;
   const assignment = diffResult.assignment ?? target;
@@ -856,9 +878,8 @@ async function applySymlinkInstalls({
   }
 
   // Phase 2: create links (only for missing targets) and write symlink receipts.
-  const receiptPath = path.join(installRoot, RECEIPT_FILE);
-  const previousReceiptText = await readFileSafeText(receiptPath);
   const previousReceipt = await readReceipt({ installRoot }).catch((): Receipt => ({}));
+  const receiptMutations: ReceiptMutation[] = [];
   const linkedSkills: string[] = [];
   const createdLinks: string[] = [];
   try {
@@ -924,7 +945,9 @@ async function applySymlinkInstalls({
       await upsertAndWriteReceipt({
         installRoot,
         skillName: item.skill,
-        installRecord: buildInstallRecord(nextRecord)
+        installRecord: buildInstallRecord(nextRecord),
+        onWritten: (mutation) => receiptMutations.push(mutation),
+        receiptLock
       });
       linkedSkills.push(item.skill);
     }
@@ -934,7 +957,7 @@ async function applySymlinkInstalls({
     for (const linkPath of [...createdLinks].reverse()) {
       await unlinkSafe(linkPath);
     }
-    await restoreOriginalReceipt({ receiptPath, previousReceiptText });
+    await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
     return failSymlink([{
       code: "symlink_write_error",
       message: error instanceof Error ? error.message : "Unknown symlink write error"
@@ -2069,25 +2092,6 @@ async function cleanupApplyBackups({
     if (plannedRestore.backupPath !== null) {
       await unlinkSafe(plannedRestore.backupPath);
     }
-  }
-}
-
-async function restoreOriginalReceipt({
-  receiptPath,
-  previousReceiptText
-}: {
-  receiptPath: string;
-  previousReceiptText: string | null;
-}): Promise<void> {
-  if (previousReceiptText === null) {
-    await unlinkSafe(receiptPath);
-    return;
-  }
-
-  try {
-    await writeFile(receiptPath, previousReceiptText, "utf8");
-  } catch {
-    // best effort
   }
 }
 
