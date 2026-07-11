@@ -211,7 +211,7 @@ from a source checkout.
 Provider-backed targets such as OpenCode and Pi are read-only compatibility
 surfaces, even when the catalog declares a custom `assignmentPaths` review root.
 Treat `read_only_target` from `pack`, `apply`, `track`, `reconcile`, `repair`,
-or `import-target` as the expected boundary instead of trying to adopt that
+`prune`, or `import-target` as the expected boundary instead of trying to adopt that
 provider-owned home.
 Provider fallback inventory without a catalog assignment has no status entries; a custom assigned provider path may have ordinary status entries, but it remains read-only for materialization and mutation.
 
@@ -243,14 +243,28 @@ skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex"
 skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --apply --json
 ```
 
+Use `prune` only for an explicit receipt-owned install that is no longer
+assigned to the selected target. Review the read-only plan, then apply only
+after approval names the target, exact skill list, and returned plan ID:
+
+```bash
+skill-suitcase prune --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <obsolete-skill> --dry-run --json
+# after approval naming target, skills, and plan id:
+skill-suitcase prune --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <obsolete-skill> --plan-id <reviewed-plan-id> --apply --json
+```
+
+Keep the reported quarantine root, transaction journal, and receipt backup for
+review. Do not manually delete obsolete paths or use broad rollback.
+
 Use `import-target` for the opposite of `repair`: a selected receipt-owned,
 catalog-owned skill that went `dirty` because you edited it **intentionally** in
 a writable target and want that local version to become the repo version through
-review (it moves target → catalog, the inverse of `repair`). The five-way
+review (it moves target → catalog, the inverse of `repair`). The six-way
 decision tree for a single skill is: `track` for an exact match that only needs a
 receipt, `reconcile` for catalog-owned receiptless drift, `promote` for a
 brand-new target-created skill, `repair` to discard an accidental dirty edit, and
-`import-target` to keep an intentional one. Dry-run first, then apply only after
+`prune` to remove an obsolete receipt-owned target install, and `import-target`
+to keep an intentional edit. Dry-run first, then apply only after
 explicit approval:
 
 ```bash

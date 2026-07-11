@@ -21,6 +21,7 @@ test("command registry exposes every public command explicitly", () => {
     "reconcile",
     "repair",
     "promote",
+    "prune",
     "import-target",
     "upstream"
   ]);
@@ -200,6 +201,34 @@ test("parseCommandArgs supports explicit reconcile dry-run and apply modes", () 
     source: fixtureSource,
     target: "openclaw",
     skill: ["skill-cleaner"],
+    apply: true,
+    dryRun: false,
+    json: true
+  });
+});
+
+test("parseCommandArgs supports receipt-aware prune dry-run and approved apply modes", () => {
+  assert.deepEqual(parseCommandArgs([
+    "prune", "--source", fixtureSource, "--target", "codex",
+    "--skill", "old-one", "--skill", "old-two", "--dry-run", "--json"
+  ]), {
+    command: "prune",
+    source: fixtureSource,
+    target: "codex",
+    skill: ["old-one", "old-two"],
+    dryRun: true,
+    json: true
+  });
+
+  assert.deepEqual(parseCommandArgs([
+    "prune", "--source", fixtureSource, "--target", "codex",
+    "--skill", "old-one", "--plan-id", "reviewed-plan", "--apply", "--json"
+  ]), {
+    command: "prune",
+    source: fixtureSource,
+    target: "codex",
+    skill: ["old-one"],
+    planId: "reviewed-plan",
     apply: true,
     dryRun: false,
     json: true

@@ -308,6 +308,41 @@ At least one `--skill` is required, and the flag is repeatable.
 Dry-run reports receipt/catalog/live hashes, file changes, and the backup plan.
 Apply backs up live content, installs catalog source, refreshes the receipt, and verifies `current` status.
 
+### `prune`
+
+```bash
+skill-suitcase prune \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill obsolete-skill \
+  --dry-run \
+  --json
+
+skill-suitcase prune \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill obsolete-skill \
+  --plan-id <reviewed-plan-id> \
+  --apply \
+  --json
+```
+
+Prunes only explicit receipt-owned installs that are no longer assigned to the
+selected writable target. Dry-run is read-only and returns a stable plan ID
+derived from the receipt hash, selected skills, object kinds, directory file
+hashes, and symlink targets. Apply requires the same skill list and exact plan
+ID, then recomputes all state before mutation.
+
+Physical directories move into a plan-scoped quarantine. Symlinks are removed
+only when their current target still matches their receipt source. Apply writes
+a transaction journal and receipt backup, updates the receipt atomically, and
+restores completed mutations when a pre-commit step fails. Assigned,
+unreceipted, drifted, read-only/provider-backed, and path-escaping candidates
+are refused. Retain the reported quarantine and backup paths for reviewed
+cleanup; never replace prune with manual deletion or broad rollback.
+
 ### `rollback`
 
 ```bash

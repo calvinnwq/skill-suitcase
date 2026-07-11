@@ -5,6 +5,7 @@ import { importTargetCommand } from "./import-target.js";
 import { packCommand } from "./pack.js";
 import { planCommand } from "./plan.js";
 import { promoteCommand } from "./promote.js";
+import { pruneCommand } from "./prune.js";
 import { reconcileCommand } from "./reconcile.js";
 import { repairCommand } from "./repair.js";
 import { rollbackCommand } from "./rollback.js";
@@ -31,6 +32,7 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   reconcileCommand,
   repairCommand,
   promoteCommand,
+  pruneCommand,
   importTargetCommand,
   upstreamCommand
 ];
@@ -176,7 +178,7 @@ function isKnownCommand(command: string): command is CommandName {
 
 function isValueArg(token: string): boolean {
   return token === "--source" || token === "--target" || token === "--target-skill" || token === "--output"
-    || token === "--lock" || token === "--artifact" || token === "--mode" || token === "--receipt"
+    || token === "--lock" || token === "--artifact" || token === "--mode" || token === "--receipt" || token === "--plan-id"
     || token === "--codex-home" || token === "--codex-skills" || token === "--claude-skills"
     || token === "--agents-skills" || token === "--grok-skills";
 }
@@ -198,13 +200,16 @@ function isSkillFlagAllowed(command: CommandName | "help"): boolean {
     command === "reconcile" ||
     command === "repair" ||
     command === "import-target" ||
-    command === "upstream";
+    command === "upstream" ||
+    command === "prune";
 }
 
 function valueFlagName(token: string): ValueFlagName {
   switch (token) {
     case "--target-skill":
       return "targetSkill";
+    case "--plan-id":
+      return "planId";
     case "--agents-skills":
       return "agentsSkills";
     case "--codex-home":
@@ -230,11 +235,11 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
       return command === "plan" || command === "diff" || command === "pack" || command === "import"
         || command === "validate" || command === "targets" || command === "status" || command === "apply"
         || command === "track" || command === "reconcile" || command === "repair" || command === "promote"
-        || command === "import-target" || command === "upstream";
+        || command === "import-target" || command === "upstream" || command === "prune";
     case "--target":
       return command === "plan" || command === "diff" || command === "pack" || command === "apply"
         || command === "track" || command === "reconcile" || command === "repair" || command === "status"
-        || command === "import-target";
+        || command === "import-target" || command === "prune";
     case "--target-skill":
       return command === "promote";
     case "--output":
@@ -245,6 +250,8 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
       return command === "apply";
     case "--receipt":
       return command === "rollback";
+    case "--plan-id":
+      return command === "prune";
     case "--agents-skills":
     case "--codex-home":
     case "--codex-skills":
@@ -252,12 +259,12 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--grok-skills":
       return command === "diff" || command === "pack" || command === "targets" || command === "status"
         || command === "apply" || command === "track" || command === "reconcile" || command === "repair"
-        || command === "import-target";
+        || command === "import-target" || command === "prune";
     case "--dry-run":
-      return command === "pack" || command === "promote" || command === "reconcile" || command === "repair"
+      return command === "pack" || command === "promote" || command === "reconcile" || command === "repair" || command === "prune"
         || command === "import-target" || command === "upstream";
     case "--apply":
-      return command === "promote" || command === "reconcile" || command === "repair"
+      return command === "promote" || command === "reconcile" || command === "repair" || command === "prune"
         || command === "import-target" || command === "upstream";
     case "--strict":
       return command === "validate";
