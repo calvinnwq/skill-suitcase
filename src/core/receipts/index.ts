@@ -303,11 +303,18 @@ export async function rollbackReceiptMutations({
 }
 
 export async function withReceiptLock<T>(
-  { installRoot }: { installRoot: string },
+  { installRoot, createInstallRoot = true }: { installRoot: string; createInstallRoot?: boolean },
   action: (receiptLock: ReceiptLock) => Promise<T>
 ): Promise<T> {
   const normalizedRoot = normalizeInstallRoot(installRoot);
-  await mkdir(normalizedRoot, { recursive: true });
+  if (createInstallRoot) {
+    await mkdir(normalizedRoot, { recursive: true });
+  } else {
+    const rootInfo = await lstat(normalizedRoot);
+    if (!rootInfo.isDirectory()) {
+      throw new Error(`Receipt lock root is not a directory: ${normalizedRoot}.`);
+    }
+  }
   const lockPath = path.join(normalizedRoot, RECEIPT_LOCK_FILE);
   const deadline = Date.now() + RECEIPT_LOCK_TIMEOUT_MS;
   const owner: ReceiptLockOwner = {
@@ -359,21 +366,35 @@ async function removeStaleReceiptLock(lockPath: string): Promise<boolean> {
   if (await removeStaleLegacyReceiptLock(lockPath)) return true;
   const initial = await readReceiptLockOwner(lockPath);
   if (initial === null || isProcessAlive(initial.owner.pid)) return false;
-  const current = await readReceiptLockOwner(lockPath);
-  if (
-    current === null
-    || current.text !== initial.text
-    || current.info.dev !== initial.info.dev
-    || current.info.ino !== initial.info.ino
-    || isProcessAlive(current.owner.pid)
-  ) {
+  const recoveryPath = `${lockPath}.${initial.info.dev}-${initial.info.ino}.recover`;
+  try {
+    await link(lockPath, recoveryPath);
+  } catch {
     return false;
   }
   try {
+    const [current, recovery] = await Promise.all([
+      readReceiptLockOwner(lockPath),
+      readReceiptLockOwner(recoveryPath)
+    ]);
+    if (
+      current === null
+      || recovery === null
+      || current.text !== initial.text
+      || current.info.dev !== initial.info.dev
+      || current.info.ino !== initial.info.ino
+      || recovery.info.dev !== initial.info.dev
+      || recovery.info.ino !== initial.info.ino
+      || isProcessAlive(current.owner.pid)
+    ) {
+      return false;
+    }
     await rm(lockPath);
     return true;
   } catch {
     return false;
+  } finally {
+    await rm(recoveryPath, { force: true }).catch(() => undefined);
   }
 }
 

@@ -134,7 +134,19 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
   };
 
   try {
-    return await withReceiptLock({ installRoot }, async (receiptLock) => {
+    await readReceipt(receiptPath);
+  } catch (error) {
+    result.ok = false;
+    result.errors.push({
+      code: "invalid_receipt",
+      message: `Invalid receipt ${receiptPath}: ${errorMessage(error)}`,
+      path: receiptPath
+    });
+    return result;
+  }
+
+  try {
+    return await withReceiptLock({ installRoot, createInstallRoot: false }, async (receiptLock) => {
   let receiptPayload: Receipt;
   try {
     receiptPayload = await readReceipt(receiptPath);

@@ -1392,6 +1392,38 @@ test("receipt writers recover a lock left by a terminated owner", async (t) => {
   assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
 });
 
+test("concurrent stale-lock waiters preserve every receipt update", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-stale-waiters-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(
+    path.join(root, RECEIPT_LOCK_FILE),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token: "terminated-owner",
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+
+  const skills = Array.from({ length: 24 }, (_, index) => `concurrent-${index}`);
+  await Promise.all(skills.map((skill) => upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: skill,
+    installRecord: buildInstallRecord({
+      skill,
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, skill),
+      sourcePath: `/repo/skills/${skill}`,
+      sourceHash: `${skill}-hash`
+    })
+  })));
+
+  const receipt = await readReceipt({ installRoot: root });
+  assert.deepEqual(Object.keys(receipt.installs ?? {}).sort(), skills.sort());
+});
+
 test("receipt writers recover a legacy file lock left by a terminated owner", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-legacy-crash-lock-"));
   t.after(() => rm(root, { recursive: true, force: true }));

@@ -550,6 +550,18 @@ test("rollback returns invalid_receipt for malformed receipt JSON", async (t) =>
   assert.deepEqual(result.rollbacks, []);
 });
 
+test("rollback does not create parents for a missing nested receipt", async (t) => {
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-missing-receipt-"));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  const missingParent = path.join(targetRoot, "missing", "nested");
+
+  const result = await rollback({ receipt: path.join(missingParent, RECEIPT_FILE) });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "invalid_receipt");
+  assert.equal(await lstat(missingParent).then(() => true, () => false), false);
+});
+
 test("rollback reports receipt write failures after restoring files", async (t) => {
   const { receiptPath, targetSkill } = await createAppliedUpdate(t);
   await chmod(receiptPath, 0o400);
