@@ -68,9 +68,12 @@ pnpm run format:check
 pnpm run architecture:check
 ```
 
-`pnpm test` rebuilds the project and runs Node's built-in test runner against
-the compiled test suite, including deterministic checks for the community files,
-issue forms, local documentation links, and packaging validation.
+`pnpm test` rebuilds the project, recursively discovers every
+`tests/**/*.test.ts` source, and fails if the compiled test inventory does not
+match those sources exactly.
+It then runs every compiled test and every `scripts/**/*.test.mjs` test with
+Node's built-in test runner, including deterministic checks for the community
+files, issue forms, local documentation links, and packaging validation.
 `package:smoke` clean-builds through npm's `prepack` hook, validates the public
 metadata and exact tarball payload, installs that tarball in an empty temporary
 project, and runs its read-only `targets` command. `package:prepare` is the

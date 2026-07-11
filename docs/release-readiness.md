@@ -149,8 +149,10 @@ npm publish --dry-run --access public --json
 ```
 
 The release workflow additionally runs the `lint` and `format:check` script
-aliases. `pnpm test` performs a clean build before executing the compiled test
-suite.
+aliases.
+`pnpm test` performs a clean build, requires the recursively discovered
+compiled test inventory to match `tests/**/*.test.ts` exactly, and then runs
+every compiled test and every `scripts/**/*.test.mjs` test.
 
 Review the npm dry-run output for the expected executable, compiled runtime,
 operator skill, license, and public docs. Refuse the release if it contains
