@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -1390,6 +1390,53 @@ test("receipt writers recover a lock left by a terminated owner", async (t) => {
   await writeReceipt({ installRoot: root, receipt: { installs: {} } });
 
   assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+});
+
+test("receipt writers recover an orphaned stale-lock recovery claim", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-orphaned-recovery-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const lockPath = path.join(root, RECEIPT_LOCK_FILE);
+  await writeFile(
+    lockPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token: "terminated-owner",
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+  const lockInfo = await stat(lockPath);
+  const recoveryPath = `${lockPath}.${lockInfo.dev}-${lockInfo.ino}.recover`;
+  await link(lockPath, recoveryPath);
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  await assert.rejects(stat(recoveryPath), { code: "ENOENT" });
+});
+
+test("receipt writers recover a terminated recovery claimant", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-terminated-recovery-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const lockPath = path.join(root, RECEIPT_LOCK_FILE);
+  await writeFile(
+    lockPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token: "terminated-owner",
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+  const recoveryPath = `${lockPath}.recover.2147483647.terminated-claimant`;
+  await link(lockPath, recoveryPath);
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  await assert.rejects(stat(recoveryPath), { code: "ENOENT" });
 });
 
 test("concurrent stale-lock waiters preserve every receipt update", async (t) => {

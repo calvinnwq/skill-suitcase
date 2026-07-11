@@ -334,6 +334,11 @@ export async function withReceiptLock<T>(
   }
   try {
     while (true) {
+      if (!(await receiptLockRecoveryIsClear(lockPath))) {
+        if (Date.now() >= deadline) throw new Error(`Timed out waiting for receipt lock at ${lockPath}.`);
+        await new Promise((resolve) => setTimeout(resolve, RECEIPT_LOCK_RETRY_MS));
+        continue;
+      }
       try {
         await link(pendingPath, lockPath);
         break;
@@ -366,7 +371,7 @@ async function removeStaleReceiptLock(lockPath: string): Promise<boolean> {
   if (await removeStaleLegacyReceiptLock(lockPath)) return true;
   const initial = await readReceiptLockOwner(lockPath);
   if (initial === null || isProcessAlive(initial.owner.pid)) return false;
-  const recoveryPath = `${lockPath}.${initial.info.dev}-${initial.info.ino}.recover`;
+  const recoveryPath = `${lockPath}.recover.${process.pid}.${randomUUID()}`;
   try {
     await link(lockPath, recoveryPath);
   } catch {
@@ -396,6 +401,57 @@ async function removeStaleReceiptLock(lockPath: string): Promise<boolean> {
   } finally {
     await rm(recoveryPath, { force: true }).catch(() => undefined);
   }
+}
+
+async function receiptLockRecoveryIsClear(lockPath: string): Promise<boolean> {
+  const directory = path.dirname(lockPath);
+  const lockName = path.basename(lockPath);
+  const recoveryPrefix = `${lockName}.recover.`;
+  const legacyPrefix = `${lockName}.`;
+  const entries = await readdir(directory);
+  const current = await readReceiptLockOwner(lockPath);
+  let clear = true;
+
+  for (const entry of entries) {
+    if (entry.startsWith(recoveryPrefix)) {
+      const parts = entry.slice(recoveryPrefix.length).split(".");
+      const pid = Number(parts[0]);
+      if (parts.length !== 2 || !Number.isSafeInteger(pid) || pid <= 0 || parts[1]?.length === 0) {
+        clear = false;
+        continue;
+      }
+      if (isProcessAlive(pid)) {
+        clear = false;
+        continue;
+      }
+      try {
+        await rm(path.join(directory, entry));
+      } catch {
+        clear = false;
+      }
+      continue;
+    }
+
+    if (!entry.startsWith(legacyPrefix) || !entry.endsWith(".recover")) continue;
+    const identity = entry.slice(legacyPrefix.length, -".recover".length);
+    if (!/^\d+-\d+$/.test(identity)) continue;
+    const recoveryPath = path.join(directory, entry);
+    try {
+      const recoveryInfo = await lstat(recoveryPath);
+      if (
+        current !== null
+        && recoveryInfo.dev === current.info.dev
+        && recoveryInfo.ino === current.info.ino
+      ) {
+        continue;
+      }
+      await rm(recoveryPath);
+    } catch {
+      clear = false;
+    }
+  }
+
+  return clear;
 }
 
 async function readReceiptLockOwner(
