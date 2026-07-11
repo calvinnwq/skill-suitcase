@@ -27,7 +27,8 @@ Current durable release facts:
 - The GitHub repository is public.
 - The installed binary name is `skill-suitcase`.
 - The package requires Node.js 20 or newer.
-- CI runs the test suite on Node 24 and the packed-package smoke test on Node 20 and Node 24.
+- CI runs tests, lint/typecheck, architecture, and formatting checks on Node 24,
+  plus the packed-package smoke test on Node 20 and Node 24.
 - GitHub releases and release notes are managed by Release Please.
 - npm publication runs only after Release Please creates a GitHub release.
 - npm publication uses GitHub Actions OIDC Trusted Publishing with provenance;
@@ -50,6 +51,8 @@ homes.
 Release Please is the source of truth for version changes, changelog entries,
 Git tags, and GitHub releases. The release workflow is
 `.github/workflows/release-please.yml`.
+Release tags and release names use the plain `vX.Y.Z` form without a package
+component prefix.
 
 Merge a Release Please PR only when:
 
