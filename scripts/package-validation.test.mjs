@@ -39,20 +39,34 @@ test("build validation rejects changed inputs and missing, stale, or non-executa
   await recordPackageBuild(root);
   await validatePackageBuild(root);
 
-  const tsconfigPath = path.join(root, "tsconfig.json");
-  const originalTsconfig = await readFile(tsconfigPath, "utf8");
-  await writeFile(tsconfigPath, `${originalTsconfig}\n`);
-  await assert.rejects(validatePackageBuild(root), /stale package build: build input changed.*tsconfig\.json/);
+  for (const inputPath of ["package.json", "pnpm-lock.yaml", "tsconfig.json"]) {
+    const fixtureInputPath = path.join(root, inputPath);
+    const originalInput = await readFile(fixtureInputPath, "utf8");
+    await writeFile(fixtureInputPath, `${originalInput}\n`);
+    await assert.rejects(
+      validatePackageBuild(root),
+      new RegExp(`stale package build: build input changed.*${inputPath.replaceAll(".", "\\.")}`)
+    );
+    await writeFile(fixtureInputPath, originalInput);
+  }
 
-  await writeFile(tsconfigPath, originalTsconfig);
-  await recordPackageBuild(root);
   const cliSourcePath = path.join(root, "src", "cli.ts");
   const originalSource = await readFile(cliSourcePath, "utf8");
   await writeFile(cliSourcePath, `${originalSource}\n`);
   await assert.rejects(validatePackageBuild(root), /stale package build: source changed/);
 
   await writeFile(cliSourcePath, originalSource);
-  await recordPackageBuild(root);
+  const cliOutputPath = path.join(root, CLI_BIN_PATH);
+  const originalOutput = await readFile(cliOutputPath, "utf8");
+  await writeFile(cliOutputPath, `${originalOutput}\n`);
+  await assert.rejects(validatePackageBuild(root), /stale package build: compiled output changed/);
+
+  await writeFile(cliOutputPath, originalOutput);
+  const additionalOutputPath = path.join(root, "dist", "src", "unintended.js");
+  await writeFile(additionalOutputPath, "export {};\n");
+  await assert.rejects(validatePackageBuild(root), /package build manifest mismatch.*unintended\.js/);
+
+  await rm(additionalOutputPath);
   await chmod(path.join(root, CLI_BIN_PATH), 0o644);
   await assert.rejects(validatePackageBuild(root), /not executable/);
 
