@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   lstat,
   mkdir,
+  readdir,
   readFile,
   readlink,
   realpath,
@@ -15,7 +16,6 @@ import { plan } from "../planning/index.js";
 import { targets } from "../catalog/targets.js";
 import type { TargetOverrides } from "../catalog/index.js";
 import {
-  buildInstalledFiles,
   readReceipt,
   RECEIPT_FILE,
   RECEIPT_SCHEMA,
@@ -38,6 +38,7 @@ type PruneInput = {
   __test?: {
     failAfterMutationForSkill?: string;
     failBeforeReceipt?: boolean;
+    beforeMutationForSkill?: (skill: string) => Promise<void> | void;
   };
 };
 
@@ -107,7 +108,16 @@ export type PruneResult = PrunePlanResult | PruneApplyResult;
 
 type PlannedPrune = PruneBaseResult & {
   receipt: Receipt | null;
+  targetIdentity: string;
 };
+
+type TreeEntry = {
+  kind: "directory" | "file";
+  path: string;
+  hash?: string;
+};
+
+const PRUNABLE_INSTALL_MODES = new Set(["copy", "import", "reconcile", "repair", "track", SYMLINK_MODE]);
 
 export async function prune(input: PruneInput): Promise<PruneResult> {
   if (!input.source) throw new Error("source is required");
@@ -146,6 +156,7 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
   const target = targetReport.targets.find((item) => item.id === input.target);
   const installRoot = target?.platform?.installRoot ?? null;
   const assignment = target?.assignment ?? null;
+  const targetIdentity = assignment ?? input.target;
   if (target === undefined) errors.push({ code: "unknown_target", message: `Unknown target ${input.target}.` });
   if (target?.platform?.metadata["readOnly"] === true) errors.push({ code: "read_only_target", message: `Target ${input.target} is read-only.` });
   if (target !== undefined && target.safety.classification !== "live-install-root") {
@@ -176,6 +187,10 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
   if (installRoot !== null) {
     receiptPath = path.join(installRoot, RECEIPT_FILE);
     try {
+      const receiptInfo = await lstat(receiptPath);
+      if (!receiptInfo.isFile() || receiptInfo.isSymbolicLink()) {
+        throw new Error("Prune receipt must be a regular file.");
+      }
       const receiptText = await readFile(receiptPath, "utf8");
       receiptHash = sha256(receiptText);
       receipt = await readReceipt({ installRoot });
@@ -197,7 +212,7 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
         errors.push({ code: "unsafe_target_path", message: `Target path ${targetPath} escapes ${installRoot}.`, skill, path: targetPath });
         continue;
       }
-      const record = selectReceiptRecord(receipt, skill, targetPath, installRoot);
+      const record = selectReceiptRecord(receipt, skill, targetIdentity, targetPath, installRoot);
       if (record === null) {
         errors.push({ code: "missing_receipt_record", message: `Skill ${skill} has no matching receipt record for ${targetPath}.`, skill, path: targetPath });
         continue;
@@ -249,7 +264,8 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
       refused: refused.length
     },
     errors,
-    receipt
+    receipt,
+    targetIdentity
   };
 }
 
@@ -287,12 +303,24 @@ async function inspectCandidate(
   if (!isInside(resolvedTarget, resolvedRoot)) {
     return { error: { code: "unsafe_target_path", message: `Directory ${targetPath} resolves outside ${installRoot}.`, skill, path: targetPath } };
   }
-  const actualFiles = await buildInstalledFiles(targetPath);
+  const tree = await inspectDirectoryTree(targetPath);
+  if ("error" in tree) {
+    return { error: { code: "unsupported_target_entry", message: `${targetPath} contains ${tree.error}.`, skill, path: targetPath } };
+  }
+  const actualFiles = tree.entries.flatMap((entry) => entry.kind === "file"
+    ? [{ path: entry.path, hash: entry.hash! }]
+    : []);
   const expectedFiles = normalizeInstalledFiles(record.installedFiles);
-  if (expectedFiles === null || stableJson(actualFiles) !== stableJson(expectedFiles)) {
+  const expectedDirectories = expectedFiles === null ? [] : installedFileDirectories(expectedFiles);
+  const actualDirectories = tree.entries.flatMap((entry) => entry.kind === "directory" ? [entry.path] : []);
+  if (
+    expectedFiles === null
+    || stableJson(actualFiles) !== stableJson(expectedFiles)
+    || stableJson(actualDirectories) !== stableJson(expectedDirectories)
+  ) {
     return { error: { code: "target_drift", message: `Directory ${targetPath} no longer matches receipt-owned files.`, skill, path: targetPath } };
   }
-  return { value: { skill, kind: "directory", targetPath, fingerprint: sha256(stableJson(actualFiles)), receiptRecordHash, symlinkTarget: null, quarantinePath: null } };
+  return { value: { skill, kind: "directory", targetPath, fingerprint: sha256(stableJson(tree.entries)), receiptRecordHash, symlinkTarget: null, quarantinePath: null } };
 }
 
 async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<PruneApplyResult> {
@@ -301,20 +329,30 @@ async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<P
   const quarantineRoot = planned.plan.quarantineRoot!;
   const transactionPath = path.join(quarantineRoot, "transaction.json");
   const receiptBackupPath = path.join(quarantineRoot, "receipt.before.json");
-  const receiptTempPath = path.join(installRoot, `.skill-suitcase-receipt.prune-${planned.plan.id}.tmp`);
+  const receiptTempPath = path.join(quarantineRoot, "receipt.after.tmp");
+  const lockPath = path.join(installRoot, ".skill-suitcase-prune.lock");
   const movedDirectories: PruneCandidate[] = [];
   const removedSymlinks: PruneCandidate[] = [];
   let receiptReplaced = false;
+  let lockAcquired = false;
   try {
+    await mkdir(lockPath, { recursive: false });
+    lockAcquired = true;
     await mkdir(quarantineRoot, { recursive: false });
     await mkdir(path.join(quarantineRoot, "quarantine"), { recursive: false });
+    const receiptInfo = await lstat(receiptPath);
+    if (!receiptInfo.isFile() || receiptInfo.isSymbolicLink()) {
+      throw new Error("Prune receipt must be a regular file.");
+    }
     const receiptText = await readFile(receiptPath, "utf8");
     if (sha256(receiptText) !== planned.plan.receiptHash) {
       throw new Error("Receipt changed after prune preflight.");
     }
-    await writeFile(receiptBackupPath, receiptText, "utf8");
+    await writeFile(receiptBackupPath, receiptText, { encoding: "utf8", flag: "wx" });
     await writeTransaction(transactionPath, planned, "prepared");
     for (const candidate of planned.candidates) {
+      await input.__test?.beforeMutationForSkill?.(candidate.skill);
+      await revalidateCandidate(planned, candidate);
       if (candidate.kind === "directory") {
         await rename(candidate.targetPath, candidate.quarantinePath!);
         movedDirectories.push(candidate);
@@ -325,8 +363,13 @@ async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<P
       if (input.__test?.failAfterMutationForSkill === candidate.skill) throw new Error(`Injected failure after ${candidate.skill}`);
     }
     if (input.__test?.failBeforeReceipt) throw new Error("Injected failure before receipt write");
-    const nextReceipt = removeCandidateRecords(planned.receipt!, planned.candidates, installRoot);
-    await writeFile(receiptTempPath, `${JSON.stringify(nextReceipt, null, 2)}\n`, "utf8");
+    const nextReceipt = removeCandidateRecords(
+      planned.receipt!,
+      planned.candidates,
+      planned.targetIdentity,
+      installRoot
+    );
+    await writeFile(receiptTempPath, `${JSON.stringify(nextReceipt, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
     await rename(receiptTempPath, receiptPath);
     receiptReplaced = true;
     await writeTransaction(transactionPath, planned, "committed");
@@ -374,32 +417,93 @@ async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<P
       transactionPath: rollbackErrors.length === 0 ? null : transactionPath,
       receiptBackupPath: rollbackErrors.length === 0 ? null : receiptBackupPath
     };
+  } finally {
+    if (lockAcquired) await rm(lockPath, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-function removeCandidateRecords(receipt: Receipt, candidates: PruneCandidate[], installRoot: string): Receipt {
+function removeCandidateRecords(
+  receipt: Receipt,
+  candidates: PruneCandidate[],
+  targetIdentity: string,
+  installRoot: string
+): Receipt {
   const installs = { ...(receipt.installs ?? {}) };
   for (const candidate of candidates) {
     const raw = installs[candidate.skill];
     const records = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
-    const remaining = records.filter((record) => !recordMatches(record, candidate.targetPath, installRoot));
+    const remaining = records.filter((record) => !recordMatches(
+      record,
+      candidate.skill,
+      targetIdentity,
+      candidate.targetPath,
+      installRoot
+    ));
     if (remaining.length === 0) delete installs[candidate.skill];
     else installs[candidate.skill] = remaining.length === 1 ? remaining[0]! : remaining;
   }
   return { ...receipt, schema: RECEIPT_SCHEMA, installs };
 }
 
-function selectReceiptRecord(receipt: Receipt, skill: string, targetPath: string, installRoot: string): ReceiptInstallRecord | null {
+function selectReceiptRecord(
+  receipt: Receipt,
+  skill: string,
+  targetIdentity: string,
+  targetPath: string,
+  installRoot: string
+): ReceiptInstallRecord | null {
   const raw = receipt.installs?.[skill];
   const records = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
-  const matches = records.filter((record) => recordMatches(record, targetPath, installRoot));
+  const matches = records.filter((record) => recordMatches(record, skill, targetIdentity, targetPath, installRoot));
   return matches.length === 1 ? matches[0]! : null;
 }
 
-function recordMatches(record: ReceiptInstallRecord, targetPath: string, installRoot: string): boolean {
+function recordMatches(
+  record: ReceiptInstallRecord,
+  skill: string,
+  targetIdentity: string,
+  targetPath: string,
+  installRoot: string
+): boolean {
   const value = normalize(record.targetPath);
-  if (value === null) return false;
-  return path.resolve(installRoot, value) === path.resolve(targetPath);
+  const recordTarget = normalize(record.target);
+  return value !== null
+    && normalize(record.skill) === skill
+    && normalize(record.agent) === targetIdentity
+    && (recordTarget === null || recordTarget === targetIdentity)
+    && PRUNABLE_INSTALL_MODES.has(normalize(record.mode) ?? "")
+    && path.resolve(installRoot, value) === path.resolve(targetPath);
+}
+
+async function revalidateCandidate(planned: PlannedPrune, candidate: PruneCandidate): Promise<void> {
+  const receiptText = await readFile(planned.plan.receiptPath!, "utf8");
+  if (sha256(receiptText) !== planned.plan.receiptHash) {
+    throw new Error("Receipt changed during prune transaction.");
+  }
+  const receipt = JSON.parse(receiptText) as Receipt;
+  const record = selectReceiptRecord(
+    receipt,
+    candidate.skill,
+    planned.targetIdentity,
+    candidate.targetPath,
+    planned.installRoot!
+  );
+  if (record === null || sha256(stableJson(record)) !== candidate.receiptRecordHash) {
+    throw new Error(`Receipt ownership changed for ${candidate.skill} during prune transaction.`);
+  }
+  const inspected = await inspectCandidate(candidate.skill, candidate.targetPath, planned.installRoot!, record);
+  if ("error" in inspected || !sameCandidate(candidate, inspected.value)) {
+    throw new Error(`Target changed for ${candidate.skill} during prune transaction.`);
+  }
+}
+
+function sameCandidate(expected: PruneCandidate, actual: PruneCandidate): boolean {
+  return expected.skill === actual.skill
+    && expected.kind === actual.kind
+    && expected.targetPath === actual.targetPath
+    && expected.fingerprint === actual.fingerprint
+    && expected.receiptRecordHash === actual.receiptRecordHash
+    && expected.symlinkTarget === actual.symlinkTarget;
 }
 
 function receiptSourcePath(record: ReceiptInstallRecord): string | null {
@@ -423,8 +527,47 @@ function normalizeInstalledFiles(value: unknown): Array<{ path: string; hash: st
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
+async function inspectDirectoryTree(root: string): Promise<
+  { entries: TreeEntry[] } | { error: string }
+> {
+  const entries: TreeEntry[] = [];
+  const pending = [""];
+  while (pending.length > 0) {
+    const relativeRoot = pending.pop()!;
+    const children = await readdir(path.join(root, relativeRoot), { withFileTypes: true });
+    children.sort((left, right) => left.name.localeCompare(right.name));
+    for (const child of children) {
+      const relativePath = path.join(relativeRoot, child.name);
+      const absolutePath = path.join(root, relativePath);
+      if (child.isDirectory()) {
+        entries.push({ kind: "directory", path: relativePath });
+        pending.push(relativePath);
+        continue;
+      }
+      if (child.isFile()) {
+        entries.push({ kind: "file", path: relativePath, hash: sha256(await readFile(absolutePath)) });
+        continue;
+      }
+      return { error: `unsupported ${child.isSymbolicLink() ? "symlink" : "filesystem entry"} ${relativePath}` };
+    }
+  }
+  return { entries: entries.sort((left, right) => left.path.localeCompare(right.path)) };
+}
+
+function installedFileDirectories(files: Array<{ path: string; hash: string }>): string[] {
+  const directories = new Set<string>();
+  for (const file of files) {
+    let directory = path.dirname(file.path);
+    while (directory !== ".") {
+      directories.add(directory);
+      directory = path.dirname(directory);
+    }
+  }
+  return [...directories].sort((left, right) => left.localeCompare(right));
+}
+
 async function writeTransaction(transactionPath: string, planned: PlannedPrune, status: "prepared" | "committed"): Promise<void> {
-  await writeFile(transactionPath, `${JSON.stringify({
+  const payload = `${JSON.stringify({
     schema: PRUNE_TRANSACTION_SCHEMA,
     planId: planned.plan.id,
     status,
@@ -434,7 +577,14 @@ async function writeTransaction(transactionPath: string, planned: PlannedPrune, 
     receiptPath: planned.plan.receiptPath,
     receiptBackupPath: path.join(planned.plan.quarantineRoot!, "receipt.before.json"),
     candidates: planned.candidates
-  }, null, 2)}\n`, "utf8");
+  }, null, 2)}\n`;
+  if (status === "prepared") {
+    await writeFile(transactionPath, payload, { encoding: "utf8", flag: "wx" });
+    return;
+  }
+  const tempPath = path.join(planned.plan.quarantineRoot!, "transaction.committed.tmp");
+  await writeFile(tempPath, payload, { encoding: "utf8", flag: "wx" });
+  await rename(tempPath, transactionPath);
 }
 
 function finalizePlan(planned: PlannedPrune): PrunePlanResult {
@@ -449,7 +599,7 @@ function finalizePlan(planned: PlannedPrune): PrunePlanResult {
 }
 
 function stripReceipt(planned: PlannedPrune): PruneBaseResult {
-  const { receipt: _receipt, ...result } = planned;
+  const { receipt: _receipt, targetIdentity: _targetIdentity, ...result } = planned;
   return result;
 }
 
@@ -460,7 +610,7 @@ function failedPlan(input: PruneInput, selected: string[], code: string, message
     plan: { schema: PRUNE_PLAN_SCHEMA, id: null, receiptPath: null, receiptHash: null, quarantineRoot: null },
     candidates: [], preserved: { assigned: [] }, refused: { skills: selected },
     summary: { selected: selected.length, candidates: 0, directories: 0, symlinks: 0, refused: selected.length },
-    errors: [{ code, message }], receipt: null
+    errors: [{ code, message }], receipt: null, targetIdentity: input.target
   });
 }
 
@@ -480,7 +630,7 @@ function isInside(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
-function sha256(value: string): string {
+function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
 function stableJson(value: unknown): string {

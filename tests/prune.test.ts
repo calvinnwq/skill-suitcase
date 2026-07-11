@@ -90,6 +90,7 @@ test("prune dry-run plans explicit obsolete directory and symlink without mutati
 
   assert.equal(result.ok, true);
   assert.equal(result.readOnly, true);
+  assert.equal("targetIdentity" in result, false);
   assert.equal(result.summary.directories, 1);
   assert.equal(result.summary.symlinks, 1);
   assert.equal(typeof result.plan.id, "string");
@@ -116,6 +117,7 @@ test("prune apply quarantines directories, removes symlinks, and updates receipt
   });
 
   assert.equal(result.ok, true);
+  assert.equal("targetIdentity" in result, false);
   assert.deepEqual(result.pruned, { skills: ["dir-old", "link-old"], directories: 1, symlinks: 1 });
   await assert.rejects(stat(fixture.directoryTarget), /ENOENT/);
   await assert.rejects(stat(fixture.symlinkTarget), /ENOENT/);
@@ -180,6 +182,89 @@ test("prune apply refuses drift after review", async (t) => {
   assert.equal(result.ok, false);
   assert.equal(result.errors.some((error) => error.code === "target_drift" || error.code === "stale_plan"), true);
   assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+});
+
+test("prune refuses unreceipted directory entry kinds", async (t) => {
+  const fixture = await createFixture(t);
+  await mkdir(path.join(fixture.directoryTarget, "empty"));
+  let result = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "target_drift"), true);
+
+  await rm(path.join(fixture.directoryTarget, "empty"), { recursive: true });
+  await symlink("SKILL.md", path.join(fixture.directoryTarget, "linked-skill"));
+  result = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "unsupported_target_entry"), true);
+});
+
+test("prune requires complete receipt ownership identity", async (t) => {
+  const cases: Array<[string, (record: Record<string, unknown>) => void]> = [
+    ["skill", (record) => { record["skill"] = "other"; }],
+    ["target", (record) => { record["agent"] = "claude"; }],
+    ["mode", (record) => { record["mode"] = "provider"; }]
+  ];
+  for (const [name, mutate] of cases) {
+    await t.test(name, async (t) => {
+      const fixture = await createFixture(t);
+      const receipt = await readReceipt({ installRoot: fixture.targetRoot });
+      const record = receipt.installs?.["dir-old"];
+      assert.ok(record && !Array.isArray(record));
+      mutate(record);
+      await writeReceipt({ installRoot: fixture.targetRoot, receipt });
+
+      const result = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+      assert.equal(result.ok, false);
+      assert.equal(result.errors.some((error) => error.code === "missing_receipt_record"), true);
+      assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+    });
+  }
+});
+
+test("prune revalidates each candidate immediately before mutation", async (t) => {
+  const fixture = await createFixture(t);
+  const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.ok(dryRun.plan.id);
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    planId: dryRun.plan.id,
+    apply: true,
+    __test: {
+      beforeMutationForSkill: async () => {
+        await writeFile(path.join(fixture.directoryTarget, "late-drift.txt"), "drift\n");
+      }
+    }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "prune_apply_failed"), true);
+  assert.equal(await readFile(path.join(fixture.directoryTarget, "late-drift.txt"), "utf8"), "drift\n");
+});
+
+test("prune never follows the old deterministic receipt temp path", async (t) => {
+  const fixture = await createFixture(t);
+  const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.ok(dryRun.plan.id);
+  const victim = path.join(fixture.sourceRoot, "victim.txt");
+  await writeFile(victim, "preserve\n");
+  const oldTempPath = path.join(
+    fixture.targetRoot,
+    `.skill-suitcase-receipt.prune-${dryRun.plan.id}.tmp`
+  );
+  await symlink(victim, oldTempPath);
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    planId: dryRun.plan.id,
+    apply: true
+  });
+  assert.equal(result.ok, true);
+  assert.equal(await readFile(victim, "utf8"), "preserve\n");
+  assert.equal(await readlink(oldTempPath), victim);
 });
 
 test("prune rolls back a mixed batch when apply fails", async (t) => {
