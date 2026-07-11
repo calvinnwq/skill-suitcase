@@ -38,6 +38,7 @@ type PruneInput = {
   planId?: string;
   targetOverrides?: TargetOverrides | undefined;
   __test?: {
+    beforeLock?: () => Promise<void> | void;
     failAfterMutationForSkill?: string;
     failBeforeReceipt?: boolean;
     beforeMutationForSkill?: (skill: string) => Promise<void> | void;
@@ -108,7 +109,15 @@ export type PruneApplyResult = PruneBaseResult & {
   receiptBackupPath: string | null;
 };
 
-export type PruneResult = PrunePlanResult | PruneApplyResult;
+export type PruneApplyRefusalResult = PruneBaseResult & {
+  dryRun: false;
+  readOnly: true;
+  pruned: { skills: []; directories: 0; symlinks: 0 };
+  transactionPath: null;
+  receiptBackupPath: null;
+};
+
+export type PruneResult = PrunePlanResult | PruneApplyResult | PruneApplyRefusalResult;
 
 type PlannedPrune = PruneBaseResult & {
   receipt: Receipt | null;
@@ -141,15 +150,17 @@ export async function prune(input: PruneInput): Promise<PruneResult> {
   }
 
   const planned = await planPrune(input, selected);
-  if (wantsDryRun || !planned.ok) return finalizePlan(planned);
+  if (wantsDryRun) return finalizePlan(planned);
+  if (!planned.ok) return finalizeApplyRefusal(planned);
   if (planned.plan.id !== input.planId) {
     planned.ok = false;
     planned.errors.push({
       code: "stale_plan",
       message: `Reviewed prune plan ${input.planId} no longer matches current state ${planned.plan.id ?? "unavailable"}. Run a fresh dry-run.`
     });
-    return finalizePlan(planned);
+    return finalizeApplyRefusal(planned);
   }
+  await input.__test?.beforeLock?.();
   return executePrune(input, planned);
 }
 
@@ -348,7 +359,10 @@ async function inspectCandidate(
 async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<PruneApplyResult> {
   const installRoot = planned.installRoot!;
   try {
-    return await withReceiptLock({ installRoot }, () => executePruneLocked(input, planned));
+    return await withReceiptLock(
+      { installRoot, createInstallRoot: false },
+      () => executePruneLocked(input, planned)
+    );
   } catch (error) {
     const failed = stripReceipt(planned);
     return {
@@ -560,12 +574,20 @@ function recordMatches(
 ): boolean {
   const value = normalize(record.targetPath);
   const recordTarget = normalize(record.target);
+  const recordAgent = normalize(record.agent);
+  const standardIdentity = recordAgent === targetIdentity
+    && (recordTarget === null || recordTarget === targetIdentity);
+  const promotedIdentity = identityPathMatches(recordAgent, installRoot)
+    && identityPathMatches(recordTarget, installRoot);
   return value !== null
     && normalize(record.skill) === skill
-    && normalize(record.agent) === targetIdentity
-    && (recordTarget === null || recordTarget === targetIdentity)
+    && (standardIdentity || promotedIdentity)
     && PRUNABLE_INSTALL_MODES.has(normalize(record.mode) ?? "")
     && path.resolve(installRoot, value) === path.resolve(targetPath);
+}
+
+function identityPathMatches(value: string | null, expected: string): boolean {
+  return value !== null && path.isAbsolute(value) && path.resolve(value) === path.resolve(expected);
 }
 
 function invalidReceiptRecord(receipt: Receipt): string | null {
@@ -698,6 +720,17 @@ function finalizePlan(planned: PlannedPrune): PrunePlanResult {
   return {
     ...stripReceipt(planned),
     dryRun: true,
+    readOnly: true,
+    pruned: { skills: [], directories: 0, symlinks: 0 },
+    transactionPath: null,
+    receiptBackupPath: null
+  };
+}
+
+function finalizeApplyRefusal(planned: PlannedPrune): PruneApplyRefusalResult {
+  return {
+    ...stripReceipt(planned),
+    dryRun: false,
     readOnly: true,
     pruned: { skills: [], directories: 0, symlinks: 0 },
     transactionPath: null,

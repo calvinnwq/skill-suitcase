@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { access, lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readdir, readFile, readlink, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
 import {
@@ -117,7 +117,8 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
   }
 
   const receiptPath = await resolveReceiptPath(receipt);
-  const installRoot = path.dirname(receiptPath);
+  const receiptDirectory = path.dirname(receiptPath);
+  const installRoot = await resolveReceiptInstallRoot(receiptDirectory);
   const result: RollbackResult = {
     ok: true,
     receipt: receiptPath,
@@ -488,7 +489,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     try {
       await access(receiptPath, constants.W_OK);
       await updateAndWriteReceipt({
-        installRoot: path.dirname(receiptPath),
+        installRoot,
         receiptPath: path.basename(receiptPath),
         receiptLock,
         update: (currentReceipt) => {
@@ -537,6 +538,16 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
       path: receiptPath
     });
     return result;
+  }
+}
+
+async function resolveReceiptInstallRoot(receiptDirectory: string): Promise<string> {
+  try {
+    const info = await lstat(receiptDirectory);
+    if (!info.isSymbolicLink()) return receiptDirectory;
+    return path.resolve(path.dirname(receiptDirectory), await readlink(receiptDirectory));
+  } catch {
+    return receiptDirectory;
   }
 }
 

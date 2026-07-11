@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const RECEIPT_SCHEMA = "calvinnwq.skills.receipt.v0";
@@ -310,7 +310,7 @@ export async function withReceiptLock<T>(
   if (createInstallRoot) {
     await mkdir(normalizedRoot, { recursive: true });
   } else {
-    const rootInfo = await lstat(normalizedRoot);
+    const rootInfo = await stat(normalizedRoot);
     if (!rootInfo.isDirectory()) {
       throw new Error(`Receipt lock root is not a directory: ${normalizedRoot}.`);
     }

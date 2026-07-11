@@ -257,8 +257,48 @@ test("prune apply refuses drift after review", async (t) => {
     apply: true
   });
   assert.equal(result.ok, false);
+  assert.equal(result.dryRun, false);
+  assert.equal(result.readOnly, true);
   assert.equal(result.errors.some((error) => error.code === "target_drift" || error.code === "stale_plan"), true);
   assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+});
+
+test("prune apply refusal preserves apply mode for a stale plan id", async (t) => {
+  const fixture = await createFixture(t);
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    planId: "not-the-reviewed-plan",
+    apply: true
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.dryRun, false);
+  assert.equal(result.readOnly, true);
+  assert.equal(result.errors.some((error) => error.code === "stale_plan"), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+});
+
+test("prune does not recreate an install root removed before lock acquisition", async (t) => {
+  const fixture = await createFixture(t);
+  const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });
+  assert.ok(dryRun.plan.id);
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    planId: dryRun.plan.id,
+    apply: true,
+    __test: {
+      beforeLock: () => rm(fixture.targetRoot, { recursive: true })
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "receipt_lock_failed"), true);
+  await assert.rejects(stat(fixture.targetRoot), /ENOENT/);
 });
 
 test("prune refuses unreceipted directory entry kinds", async (t) => {
@@ -296,6 +336,30 @@ test("prune requires complete receipt ownership identity", async (t) => {
       assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
     });
   }
+});
+
+test("prune accepts receipt ownership written by promote", async (t) => {
+  const fixture = await createFixture(t);
+  const receipt = await readReceipt({ installRoot: fixture.targetRoot });
+  const record = receipt.installs?.["link-old"];
+  assert.ok(record && !Array.isArray(record));
+  record.agent = fixture.targetRoot;
+  record.target = fixture.targetRoot;
+  await writeReceipt({ installRoot: fixture.targetRoot, receipt });
+
+  const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["link-old"], dryRun: true });
+  assert.equal(dryRun.ok, true);
+  assert.ok(dryRun.plan.id);
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["link-old"],
+    planId: dryRun.plan.id,
+    apply: true
+  });
+
+  assert.equal(result.ok, true);
+  await assert.rejects(stat(fixture.symlinkTarget), /ENOENT/);
 });
 
 test("prune revalidates each candidate immediately before mutation", async (t) => {
