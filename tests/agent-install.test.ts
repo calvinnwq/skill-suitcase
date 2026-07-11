@@ -14,7 +14,23 @@ test("operator skill has complete frontmatter and conservative live-mutation rul
   const skill = await readFile("skills/skill-suitcase/SKILL.md", "utf8");
 
   assert.match(skill, /^---\nname: skill-suitcase\n/m);
-  assert.match(skill, /description: Use when asked to install, audit, sync, track, reconcile, apply, rollback, or explain Skill Suitcase-managed agent skills/);
+  const description = skill.match(/^description: (.+)$/m)?.[1];
+  assert.ok(description);
+  for (const trigger of [
+    "install",
+    "audit",
+    "sync",
+    "track",
+    "reconcile",
+    "repair",
+    "import-target",
+    "apply",
+    "rollback",
+    "refresh upstream catalog source",
+    "explain Skill Suitcase-managed agent skills",
+  ]) {
+    assert.ok(description.includes(trigger), `operator skill description must include ${trigger}`);
+  }
   assert.doesNotMatch(skill, /TODO/);
   assert.match(skill, /read-only commands as the default path/);
   assert.match(skill, /Mutate live skill roots only after explicit human approval/);

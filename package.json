@@ -56,7 +56,7 @@
     "prepack": "pnpm --silent run package:prepare",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "pnpm run typecheck",
-    "test": "pnpm run build && node --test dist/tests/*.test.js scripts/*.test.mjs",
+    "test": "pnpm run build && node scripts/run-tests.mjs",
     "format:check": "git diff --check",
     "architecture:check": "node scripts/check-architecture.mjs"
   },
