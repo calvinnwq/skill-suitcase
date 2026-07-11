@@ -259,18 +259,40 @@ test("repository exposes one canonical support issue form", async () => {
 
 test("development setup uses the pinned pnpm version without global shims", async () => {
   const developing = await readFile("DEVELOPING.md", "utf8");
+  const guides = [
+    ["DEVELOPING.md", developing],
+    ["INSTALL.md", await readFile("INSTALL.md", "utf8")],
+    ["skills/skill-suitcase/SKILL.md", await readFile("skills/skill-suitcase/SKILL.md", "utf8")]
+  ] as const;
   const packageJson = expectRecord(JSON.parse(await readFile("package.json", "utf8")), "package.json");
   const packageManager = expectString(packageJson.packageManager, "package.json.packageManager");
   const match = /^pnpm@(\d+\.\d+\.\d+)$/.exec(packageManager);
   assert.ok(match, "package.json.packageManager must pin an exact pnpm version");
   const pinnedVersion = expectString(match[1], "package.json.packageManager version");
+  const pinnedRunner = `npm exec --yes --package=pnpm@${pinnedVersion} -- pnpm`;
+  const versionCheck = `test "$(pnpm --version)" = "${pinnedVersion}"`;
+  const frozenInstall = "pnpm install --frozen-lockfile";
 
-  assert.match(
-    developing,
-    new RegExp(`npm exec --yes --package=pnpm@${pinnedVersion.replaceAll(".", "\\.")} -- pnpm`),
-    "DEVELOPING.md must use the pnpm version pinned by packageManager"
-  );
-  assert.doesNotMatch(developing, /\bcorepack enable\b/, "DEVELOPING.md must not require global shim writes");
+  for (const [file, guide] of guides) {
+    assert.ok(guide.indexOf(pinnedRunner) >= 0, `${file} must use the pnpm version pinned by packageManager`);
+    assert.ok(guide.indexOf(pinnedRunner) < guide.indexOf(versionCheck), `${file} must verify pnpm after defining it`);
+    assert.ok(guide.indexOf(versionCheck) < guide.indexOf(frozenInstall), `${file} must verify pnpm before installing`);
+    assert.doesNotMatch(guide, /\bcorepack enable\b/, `${file} must not require global shim writes`);
+    assert.doesNotMatch(guide, /\bcorepack@latest\b/, `${file} must not install an unpinned Corepack version`);
+    assert.doesNotMatch(guide, /npm install --global corepack\b/, `${file} must not install Corepack globally`);
+    assert.doesNotMatch(guide, /npm install --global(?: --force)? pnpm@/, `${file} must not install pnpm globally`);
+  }
+
+  for (const file of [".github/workflows/ci.yml", ".github/workflows/release-please.yml"]) {
+    const workflow = await readFile(file, "utf8");
+    assert.match(workflow, /uses: pnpm\/action-setup@v6\b/, `${file} must pin the supported pnpm action major`);
+    assert.doesNotMatch(workflow, /version:\s*latest\b/, `${file} must not request the latest pnpm version`);
+  }
+});
+
+test("development guide documents the focused test workflow", async () => {
+  const developing = await readFile("DEVELOPING.md", "utf8");
+  assert.match(developing, /pnpm run build\s+node --test dist\/tests\/[\w.-]+\.test\.js/);
 });
 
 test("conduct reports have an independent escalation route", async () => {

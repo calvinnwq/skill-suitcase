@@ -74,6 +74,13 @@ TypeScript typecheck. `format:check` runs `git diff --check`, and
 `architecture:check` enforces the module boundaries documented in
 `ARCHITECTURE.md`.
 
+For a focused test, build first and run the compiled test file directly:
+
+```bash
+pnpm run build
+node --test dist/tests/commands.test.js
+```
+
 When changing CLI output, test both the parsed JSON stdout and the stderr/exit
 code contract. Tests should use temporary directories and deterministic fixture
 data rather than depending on a contributor's home directory.
