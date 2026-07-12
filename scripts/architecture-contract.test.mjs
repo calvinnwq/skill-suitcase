@@ -129,6 +129,7 @@ test("architecture contract keeps argv and process output at the CLI boundary", 
     ["destructured stdout", "src/core/planning/index.ts", "const { stdout } = process;", "process.stdout"],
     ["global process stdout", "src/core/planning/index.ts", "globalThis.process.stdout.write('result');", "process.stdout"],
     ["Node global process stdout", "src/core/planning/index.ts", "global.process.stdout.write('result');", "process.stdout"],
+    ["class process superclass", "src/core/planning/index.ts", "export class Output extends process.stdout {}", "process.stdout"],
     ["imported stderr", "src/core/planning/index.ts", "import { stderr } from 'node:process';", "process.stderr"],
     ["aliased process argv", "src/core/planning/index.ts", "const runtime = process; export const args = runtime.argv;", "process.argv"],
     [
@@ -170,6 +171,52 @@ test("architecture contract rejects process capability re-export facades", async
 
   assert.deepEqual(await checkArchitecture(root), [
     "src/core/process-facade.ts uses process.stdout outside the CLI boundary"
+  ]);
+});
+
+test("architecture contract ignores type-only process capability references", async () => {
+  const root = await createFixture({
+    "src/core/process-types.ts": [
+      'import type process from "node:process";',
+      'import type * as runtime from "node:process";',
+      'import type runtimeEquals = require("node:process");',
+      'import type { stderr } from "node:process";',
+      'import { type stdout } from "node:process";',
+      "type Args = typeof process.argv;",
+      "type RuntimeArgs = typeof runtime.argv;",
+      "type RuntimeEqualsArgs = typeof runtimeEquals.argv;",
+      "type ErrorOutput = typeof stderr;",
+      "type StandardOutput = typeof stdout;",
+      "type GlobalOutput = typeof globalThis.process.stdout;",
+      "export type { Args, RuntimeArgs, RuntimeEqualsArgs, ErrorOutput, StandardOutput, GlobalOutput };"
+    ].join("\n"),
+    "src/core/process-type-exports.ts": [
+      'export type * from "node:process";',
+      'export type { argv, stderr } from "node:process";',
+      'export { type stdout } from "node:process";'
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract still rejects runtime process imports beside type-only references", async () => {
+  const root = await createFixture({
+    "src/core/process-types.ts": [
+      'import process, { stderr, type stdout } from "node:process";',
+      "type StandardOutput = typeof stdout;",
+      "export const args = process.argv;",
+      "stderr.write('warning');"
+    ].join("\n"),
+    "src/core/process-exports.ts": [
+      'export { stderr, type stdout } from "node:process";'
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/core/process-exports.ts uses process.stderr outside the CLI boundary",
+    "src/core/process-types.ts uses process.argv outside the CLI boundary",
+    "src/core/process-types.ts uses process.stderr outside the CLI boundary"
   ]);
 });
 

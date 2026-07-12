@@ -170,7 +170,7 @@ function analyzeSourceFile(filePath, text) {
       && node.moduleSpecifier !== undefined
       && ts.isStringLiteralLike(node.moduleSpecifier)
       && isNodeProcessSpecifier(node.moduleSpecifier.text)) {
-      collectProcessExport(node.exportClause, processMembers);
+      collectProcessExport(node, processMembers);
     }
 
     if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
@@ -181,10 +181,12 @@ function analyzeSourceFile(filePath, text) {
     }
 
     if (ts.isPropertyAccessExpression(node)
+      && !isInTypeOnlyContext(node)
       && isProcessObject(node.expression, checker, processAliases)
       && isGuardedProcessMember(node.name.text)) {
       processMembers.push(node.name.text);
     } else if (ts.isElementAccessExpression(node)
+      && !isInTypeOnlyContext(node)
       && isProcessObject(node.expression, checker, processAliases)
       && node.argumentExpression !== undefined
       && ts.isStringLiteralLike(node.argumentExpression)
@@ -228,14 +230,17 @@ function collectProcessAliases(sourceFile, checker, processAliases) {
       && ts.isStringLiteralLike(node.moduleSpecifier)
       && isNodeProcessSpecifier(node.moduleSpecifier.text)) {
       const importClause = node.importClause;
-      if (importClause?.name !== undefined) {
+      if (importClause?.name !== undefined && !importClause.isTypeOnly) {
         addIdentifierSymbol(importClause.name, checker, processAliases);
       }
-      if (importClause?.namedBindings !== undefined) {
+      if (importClause?.namedBindings !== undefined && !importClause.isTypeOnly) {
         if (ts.isNamespaceImport(importClause.namedBindings)) {
           addIdentifierSymbol(importClause.namedBindings.name, checker, processAliases);
         } else {
           for (const element of importClause.namedBindings.elements) {
+            if (element.isTypeOnly) {
+              continue;
+            }
             const importedName = element.propertyName?.text ?? element.name.text;
             if (importedName === "default" || importedName === "process") {
               addIdentifierSymbol(element.name, checker, processAliases);
@@ -247,7 +252,8 @@ function collectProcessAliases(sourceFile, checker, processAliases) {
       && ts.isExternalModuleReference(node.moduleReference)
       && node.moduleReference.expression !== undefined
       && ts.isStringLiteralLike(node.moduleReference.expression)
-      && isNodeProcessSpecifier(node.moduleReference.expression.text)) {
+      && isNodeProcessSpecifier(node.moduleReference.expression.text)
+      && !node.isTypeOnly) {
       addIdentifierSymbol(node.name, checker, processAliases);
     } else if (ts.isVariableDeclaration(node)
       && node.initializer !== undefined) {
@@ -299,7 +305,7 @@ function addIdentifierSymbol(identifier, checker, symbols) {
 }
 
 function collectProcessImport(importClause, processMembers) {
-  if (importClause === undefined) {
+  if (importClause === undefined || importClause.isTypeOnly) {
     return;
   }
   if (importClause.namedBindings === undefined) {
@@ -309,6 +315,9 @@ function collectProcessImport(importClause, processMembers) {
     return;
   }
   for (const element of importClause.namedBindings.elements) {
+    if (element.isTypeOnly) {
+      continue;
+    }
     const importedName = element.propertyName?.text ?? element.name.text;
     if (isGuardedProcessMember(importedName)) {
       processMembers.push(importedName);
@@ -316,12 +325,19 @@ function collectProcessImport(importClause, processMembers) {
   }
 }
 
-function collectProcessExport(exportClause, processMembers) {
+function collectProcessExport(declaration, processMembers) {
+  if (declaration.isTypeOnly) {
+    return;
+  }
+  const exportClause = declaration.exportClause;
   if (exportClause === undefined || ts.isNamespaceExport(exportClause)) {
     processMembers.push("argv", "stdout", "stderr");
     return;
   }
   for (const element of exportClause.elements) {
+    if (element.isTypeOnly) {
+      continue;
+    }
     const exportedName = element.propertyName?.text ?? element.name.text;
     if (exportedName === "default") {
       processMembers.push("argv", "stdout", "stderr");
@@ -329,6 +345,21 @@ function collectProcessExport(exportClause, processMembers) {
       processMembers.push(exportedName);
     }
   }
+}
+
+function isInTypeOnlyContext(node) {
+  for (let current = node.parent; current !== undefined; current = current.parent) {
+    if (ts.isTypeNode(current)) {
+      if (ts.isExpressionWithTypeArguments(current)
+        && ts.isHeritageClause(current.parent)
+        && current.parent.token === ts.SyntaxKind.ExtendsKeyword
+        && (ts.isClassDeclaration(current.parent.parent) || ts.isClassExpression(current.parent.parent))) {
+        return false;
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 function collectProcessBindings(pattern, processMembers) {
