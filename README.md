@@ -48,6 +48,9 @@ Skill Suitcase requires Node.js 20 or newer.
 npm install --global skill-suitcase
 ```
 
+For a hands-on first run — install, catalog setup, local target overrides,
+read-only audit, staged apply, and rollback — follow
+[`docs/getting-started.md`](docs/getting-started.md).
 For agent/runtime setup, including the packaged operator skill, follow
 [`INSTALL.md`](INSTALL.md).
 

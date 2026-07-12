@@ -509,6 +509,86 @@ test("operator-facing docs describe manifest source policy materialization bound
   }
 });
 
+/**
+ * NGX-621 public onboarding docs: the getting-started walkthrough and the
+ * INSTALL runbook are packaged, public-facing documents. They must cover the
+ * full first-run flow (npm install, agent setup, catalog setup, local target
+ * overrides, read-only audit, pack/apply staging, and safe rollback) using
+ * portable paths and generic repo names only.
+ */
+
+test("getting-started guide covers the public onboarding flow with portable examples", async () => {
+  const guide = await readFile("docs/getting-started.md", "utf8");
+  const normalized = normalize(guide);
+
+  assert.ok(guide.includes("npm install --global skill-suitcase"), "guide should install the published CLI");
+  for (const phrase of [
+    "operator skill",
+    "skill-suitcase.yaml",
+    "`--claude-skills`",
+    "`--codex-home`",
+    "read-only",
+    "`pack`",
+    "`apply`",
+    "`rollback`",
+    "receipt",
+    "does not resolve target install paths, so it needs no override flags",
+    "does not restore promotions"
+  ]) {
+    assert.ok(normalized.includes(phrase.toLowerCase()), `getting-started guide should cover: ${phrase}`);
+  }
+
+  for (const heading of [
+    "## 1. install the cli",
+    "## 2. install the operator skill into your agent",
+    "## 3. set up a skills catalog",
+    "## 4. point targets at your machine with local overrides",
+    "## 5. audit read-only first",
+    "## 6. stage with `pack`, install with `apply`",
+    "## 7. roll back safely"
+  ]) {
+    assert.ok(normalized.includes(heading), `getting-started guide should keep the walkthrough section: ${heading}`);
+  }
+
+  assert.doesNotMatch(guide, /\/Users\//, "getting-started examples must not contain maintainer-local paths");
+  assert.doesNotMatch(guide, /calvinnwq\/skills\b/, "getting-started must not reference a private catalog repository");
+
+  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files: string[] };
+  assert.ok(
+    packageJson.files.includes("docs/getting-started.md"),
+    "getting-started guide must ship in the npm package"
+  );
+
+  const readme = await readFile("README.md", "utf8");
+  assert.ok(
+    readme.includes("](docs/getting-started.md)"),
+    "README should route new users to the getting-started guide"
+  );
+
+  const install = await readFile("INSTALL.md", "utf8");
+  assert.ok(
+    install.includes("](docs/getting-started.md)"),
+    "INSTALL should route human first-run setup to the getting-started guide"
+  );
+});
+
+test("public install runbook uses portable paths and generic repo names", async () => {
+  const install = await readFile("INSTALL.md", "utf8");
+
+  assert.doesNotMatch(install, /\/Users\//, "INSTALL examples must not contain maintainer-local paths");
+  assert.doesNotMatch(install, /calvinnwq\/skills\b/, "INSTALL must not reference a private catalog repository");
+  assert.doesNotMatch(install, /git@github\.com:/, "INSTALL should clone public repositories over https");
+  assert.doesNotMatch(
+    install,
+    /--skill (?:office-hours|improve|gnhf-postflight)\b/,
+    "INSTALL examples must use generic skill names"
+  );
+  assert.ok(
+    install.includes("<your-catalog-remote>"),
+    "INSTALL catalog setup should use a generic catalog remote placeholder"
+  );
+});
+
 test("README points new-machine setup at Suitcase-managed catalog installs", async () => {
   const normalized = await loadNormalized("README.md");
   assert.ok(normalized.includes("catalog-only upstream lane"), "README should mention the catalog-only upstream lane");

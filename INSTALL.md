@@ -7,6 +7,9 @@ machine. If you are human, paste this line into your agent:
 > install the Skill Suitcase CLI and operator skill, then audit my local skill
 > targets without mutating them until I approve.
 
+If you are a human setting up a machine by hand, start with the walkthrough in
+[`docs/getting-started.md`](docs/getting-started.md).
+
 Never paste secrets, tokens, API keys, private prompts, or credential dumps into
 chat, issues, PRs, logs, or release notes.
 
@@ -16,8 +19,8 @@ Check first:
 
 ```bash
 command -v skill-suitcase || true
-if command -v skill-suitcase >/dev/null 2>&1 && test -d "$HOME/repos/skills"; then
-  skill-suitcase targets --source "$HOME/repos/skills" --json
+if command -v skill-suitcase >/dev/null 2>&1 && test -d "$HOME/repos/skills-catalog"; then
+  skill-suitcase targets --source "$HOME/repos/skills-catalog" --json
 fi
 ```
 
@@ -25,7 +28,7 @@ If missing, install the published CLI:
 
 ```bash
 npm install --global skill-suitcase
-test -d "$HOME/repos/skills" && skill-suitcase targets --source "$HOME/repos/skills" --json
+test -d "$HOME/repos/skills-catalog" && skill-suitcase targets --source "$HOME/repos/skills-catalog" --json
 ```
 
 Source installs require Node.js 20 or newer and pnpm 10.34.4, as pinned by
@@ -35,8 +38,13 @@ package-manager shims:
 
 ```bash
 if mkdir -p "$HOME/repos" &&
-  (test -d "$HOME/repos/skill-suitcase" || git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase") &&
-  git -C "$HOME/repos/skill-suitcase" pull --ff-only &&
+  {
+    if test -d "$HOME/repos/skill-suitcase/.git"; then
+      git -C "$HOME/repos/skill-suitcase" pull --ff-only
+    else
+      git clone https://github.com/calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase"
+    fi
+  } &&
   cd "$HOME/repos/skill-suitcase"
 then
   pnpm() {
@@ -139,11 +147,29 @@ Restart the agent runtime after installing or replacing a skill.
 
 ## 3. Install Or Refresh The Skills Catalog
 
+Use the reviewed catalog repository the operator names; the examples below call
+its remote `<your-catalog-remote>` and clone it to a portable local path:
+
 ```bash
-mkdir -p "$HOME/repos" &&
-(test -d "$HOME/repos/skills" || git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills") &&
-git -C "$HOME/repos/skills" pull --ff-only &&
-export SRC="$HOME/repos/skills"
+if mkdir -p "$HOME/repos"; then
+  if test -d "$HOME/repos/skills-catalog/.git"; then
+    git -C "$HOME/repos/skills-catalog" pull --ff-only
+  else
+    git clone <your-catalog-remote> "$HOME/repos/skills-catalog"
+  fi
+else
+  printf 'Catalog checkout setup failed.\n' >&2
+  false
+fi
+```
+
+If no catalog exists yet, create a minimal one by following
+[`docs/getting-started.md`](docs/getting-started.md).
+
+Use the catalog as the source of truth:
+
+```bash
+export SRC="$HOME/repos/skills-catalog"
 ```
 
 New-machine setup installs from this catalog through Skill Suitcase, not directly from `skills.sh` or `npx skills`.
@@ -261,7 +287,7 @@ and ownership boundaries rather than target adapters.
 Use `track` for exact matches only:
 
 ```bash
-skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --skill improve --skill gnhf-postflight --json
+skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --skill <another-skill> --json
 ```
 
 Use `reconcile` only for selected catalog-owned receiptless drift:
@@ -388,6 +414,7 @@ skill-suitcase status --source "$SRC" --json
 ```
 
 Report the catalog branch/SHA, target ids inspected, live mutations run, final
-summary counts, receipt or backup paths, and anything skipped. Codex `linear` is
+summary counts, receipt or backup paths, and anything skipped. Leave
+provider-managed skills outside Suitcase ownership; for example, Codex `linear` is
 provider-managed by Codex/plugin/MCP and should not be forced into Suitcase
 ownership.
