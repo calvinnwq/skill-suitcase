@@ -7,23 +7,35 @@ command needs a target.
 
 From a Skill Suitcase repository checkout, first complete the dependency setup
 in [`DEVELOPING.md`](../../DEVELOPING.md#set-up-the-repository), then build the
-CLI before running the walkthrough:
+CLI:
 
 ```bash
 pnpm run build
-
+CLI="$PWD/dist/src/cli.js"
 SRC="$PWD/examples/sample-catalog"
+```
+
+From a global npm installation, use the packaged CLI and sample instead:
+
+```bash
+CLI="$(command -v skill-suitcase)"
+SRC="$(npm root --global)/skill-suitcase/examples/sample-catalog"
+```
+
+After either setup, run the walkthrough:
+
+```bash
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-demo.XXXXXX")"
 TARGET="$SANDBOX/agent-skills"
 PACK="$SANDBOX/pack"
 mkdir -p "$TARGET"
 
-node dist/src/cli.js validate --source "$SRC" --json
-node dist/src/cli.js upstream check --source "$SRC" --json
-node dist/src/cli.js plan --source "$SRC" --target agents --json
-node dist/src/cli.js status --source "$SRC" --target agents --agents-skills "$TARGET" --json
-node dist/src/cli.js diff --source "$SRC" --target agents --agents-skills "$TARGET" --json
-node dist/src/cli.js pack --source "$SRC" --target agents --agents-skills "$TARGET" --output "$PACK" --json
+"$CLI" validate --source "$SRC" --json
+"$CLI" upstream check --source "$SRC" --json
+"$CLI" plan --source "$SRC" --target agents --json
+"$CLI" status --source "$SRC" --target agents --agents-skills "$TARGET" --json
+"$CLI" diff --source "$SRC" --target agents --agents-skills "$TARGET" --json
+"$CLI" pack --source "$SRC" --target agents --agents-skills "$TARGET" --output "$PACK" --json
 ARTIFACT="$(find "$PACK/.skill-suitcase/artifacts" -mindepth 1 -maxdepth 1 -type d -print -quit)"
 ```
 
@@ -32,10 +44,10 @@ directory. To test mutation, apply the staged artifact only to the disposable
 target:
 
 ```bash
-node dist/src/cli.js apply --source "$SRC" --target agents --agents-skills "$TARGET" --artifact "$ARTIFACT" --json
+"$CLI" apply --source "$SRC" --target agents --agents-skills "$TARGET" --artifact "$ARTIFACT" --json
 printf '\nLocal demo edit.\n' >> "$TARGET/hello-suitcase/references/greeting.md"
-node dist/src/cli.js repair --source "$SRC" --target agents --agents-skills "$TARGET" --skill hello-suitcase --apply --json
-node dist/src/cli.js rollback --receipt "$TARGET/.skill-suitcase-receipt.json" --json
+"$CLI" repair --source "$SRC" --target agents --agents-skills "$TARGET" --skill hello-suitcase --apply --json
+"$CLI" rollback --receipt "$TARGET/.skill-suitcase-receipt.json" --json
 rm -rf "$SANDBOX"
 ```
 
