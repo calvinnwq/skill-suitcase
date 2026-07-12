@@ -8,15 +8,16 @@ belongs in [`VISION.md`](VISION.md), implementation boundaries belong in
 
 ## Source Of Truth
 
-Skill Suitcase manages approved skill installs from a caller-selected, Git-backed
-catalog. The catalog is canonical; runtime and agent homes are targets. A live
-target does not become catalog source merely because it contains a skill or a
-newer local edit.
+Skill Suitcase manages approved skill installs from a caller-selected catalog.
+A Git-backed catalog is the preferred operating model because it provides reviewable provenance and recovery, but planning and target materialization also accept a non-Git catalog directory.
+Workflows with stronger source-control requirements, including upstream import, refuse a catalog outside a Git worktree.
+The catalog is canonical; runtime and agent homes are targets.
+A live target does not become catalog source merely because it contains a skill or a newer local edit.
 
 The CLI separates three decisions:
 
 1. inspect catalog and target state without mutation;
-2. stage or lock the exact work to review;
+2. stage or record planned work for review;
 3. mutate only through the approval boundary required by the selected command.
 
 Upstream-to-catalog refresh and catalog-to-target installation are separate
@@ -122,25 +123,30 @@ manifest, but ordinary missing or behind writes are rebuilt from current catalog
 source. Artifact file hashes authorize only the dirty-behind exception. An old
 bundle is therefore not byte-for-byte authorization for every later write.
 
+Neither approval input binds the resolved live install root, CLI target path overrides, or copy-versus-symlink mode.
+Those choices are supplied or resolved again at apply time and must be reviewed separately.
+
 See [packing tests](tests/packer.test.ts),
 [plan-lock tests](tests/plan-lock.test.ts), and
 [apply tests](tests/apply.test.ts).
 
 ## Live Mutation
 
-Live mutation requires an explicit command-specific boundary:
+Live mutation requires an explicit command-specific boundary.
+The CLI enforces only the boundaries listed below.
+Operators should first review the corresponding read-only plan, fetch, or diff, but the CLI does not bind that review to the later mutation except where `apply` validates its approval input and `prune` validates an exact plan ID.
 
-| Command | Required boundary | Mutation scope |
+| Command | Enforced CLI boundary | Mutation scope |
 | --- | --- | --- |
-| `apply` | exactly one reviewed plan lock or staged artifact | selected writable target and receipt |
-| `track` | explicit invocation after an exact unreceipted match is inspected | receipt only |
-| `reconcile --apply` | matching `--dry-run` review and explicit approval | receiptless mismatched target replaced from catalog |
-| `repair --apply` | matching `--dry-run` review and explicit approval | dirty receipt-owned copy restored from catalog |
+| `apply` | exactly one plan lock or staged artifact | selected writable target and receipt |
+| `track` | explicit invocation; the target must exactly match catalog source | receipt only |
+| `reconcile --apply` | `--apply` plus explicitly named skills | receiptless mismatched target replaced from catalog |
+| `repair --apply` | `--apply` plus explicitly named skills | dirty receipt-owned copy restored from catalog |
 | `prune --apply` | explicit skills plus exact plan ID from `--dry-run` | obsolete receipt-owned installs |
 | `rollback` | explicit receipt path | receipt-backed state eligible for rollback |
-| `promote --apply` | matching `--dry-run` review and explicit approval | new target skill copied to catalog and linked back |
-| `import-target --apply` | matching `--dry-run` review and explicit approval | intentional receipt-owned target edit copied to catalog |
-| `upstream import --apply` | reviewed fetch/diff and explicit approval | selected catalog source and upstream lock only |
+| `promote --apply` | `--apply` plus an explicit target skill path | new target skill copied to catalog and linked back |
+| `import-target --apply` | `--apply` plus explicitly named skills | intentional receipt-owned target edit copied to catalog |
+| `upstream import --apply` | `--apply` plus exactly one named skill | selected catalog source and upstream lock only |
 
 Mutation is limited to writable, resolved roots and named or planned skills.
 Commands validate containment, ownership, current filesystem state, and relevant
@@ -153,7 +159,7 @@ Symlink mode links the selected current catalog source to the target and records
 that mode explicitly; filesystem shape alone does not establish ownership.
 
 Detailed preconditions and refusal cases live in
-[`docs/command-reference.md`](docs/command-reference.md#mutating-commands).
+[`docs/command-reference.md`](docs/command-reference.md#explicit-mutation-commands).
 
 ## Receipts
 
@@ -249,4 +255,3 @@ The current contract does not:
 - assign install semantics to manifest groups;
 - expand support to an undeclared target merely because a provider knows its
   path.
-

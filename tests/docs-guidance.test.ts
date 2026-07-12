@@ -157,6 +157,12 @@ test("SPEC defines the shipped contract without taking over adjacent documentati
   assert.ok(spec.includes("](ARCHITECTURE.md)"), "SPEC.md should route implementation structure to ARCHITECTURE.md");
   assert.ok(spec.includes("](docs/command-reference.md)"), "SPEC.md should route detailed usage to the command reference");
   assert.ok(spec.includes("](tests/apply.test.ts)"), "SPEC.md should link contract claims to tests");
+  assert.ok(spec.includes("planning and target materialization also accept a non-Git catalog directory"));
+  assert.ok(spec.includes("Neither approval input binds the resolved live install root"));
+  assert.ok(spec.includes("copy-versus-symlink mode"));
+  assert.ok(spec.includes("the CLI does not bind that review to the later mutation"));
+  assert.ok(spec.includes("](docs/command-reference.md#explicit-mutation-commands)"));
+  assert.ok(!spec.includes("](docs/command-reference.md#mutating-commands)"));
   assert.doesNotMatch(spec, /\/Users\//, "SPEC.md examples must not contain maintainer-local paths");
   assert.doesNotMatch(spec, /\b(?:roadmap|planned milestone|future command)\b/i, "SPEC.md should describe shipped behavior only");
 
