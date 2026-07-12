@@ -74,5 +74,8 @@ can manage real skill catalogs safely today.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) defines the implementation boundaries that preserve this
   vision.
 - [`README.md`](README.md) explains the current public CLI surface.
+- The [documentation site](https://calvinnwq.github.io/skill-suitcase/) provides
+  the guide-level overview, models, workflows, troubleshooting, and CLI
+  reference.
 - [`INSTALL.md`](INSTALL.md) explains agent/runtime setup.
 - [`docs/skills-sh-delegation.md`](docs/skills-sh-delegation.md) records the current upstream-provider boundary.
