@@ -5,9 +5,13 @@ placeholder target, so commands cannot accidentally select a contributor's
 agent home. Override that placeholder with a disposable directory whenever a
 command needs a target.
 
-From a Skill Suitcase repository checkout:
+From a Skill Suitcase repository checkout, first complete the dependency setup
+in [`DEVELOPING.md`](../../DEVELOPING.md#set-up-the-repository), then build the
+CLI before running the walkthrough:
 
 ```bash
+pnpm run build
+
 SRC="$PWD/examples/sample-catalog"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-demo.XXXXXX")"
 TARGET="$SANDBOX/agent-skills"
