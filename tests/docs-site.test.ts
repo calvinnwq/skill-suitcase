@@ -166,6 +166,12 @@ test("docs search cache uses guarded session storage", () => {
   assert.doesNotMatch(js, /sessionStorage\.getItem/);
 });
 
+test("docs search closes when a result is activated", () => {
+  const js = read("docs/site.js");
+
+  assert.match(js, /paletteResults\.addEventListener\("click", function \(e\) \{\s*if \(e\.target\.closest\("a"\)\) closePalette\(\);/);
+});
+
 test("docs site collapses to a mobile drawer", () => {
   const css = read("docs/site.css");
   const js = read("docs/site.js");
@@ -176,6 +182,9 @@ test("docs site collapses to a mobile drawer", () => {
   assert.match(css, /body\.nav-open \.sidebar \{ transform: none; \}/);
   assert.match(js, /classList\.toggle\("nav-open"\)/);
   assert.match(js, /aria-expanded/);
+  assert.match(js, /function closeDrawer\(\) \{\s*document\.body\.classList\.remove\("nav-open"\);[\s\S]*?setAttribute\("aria-expanded", "false"\)/);
+  assert.match(js, /closest\("#sidebar a"\)[\s\S]*?closeDrawer\(\)/);
+  assert.match(js, /e\.key === "Escape"[\s\S]*?closeDrawer\(\)/);
 });
 
 test("docs site uses ledger visual components instead of dense prose only", () => {

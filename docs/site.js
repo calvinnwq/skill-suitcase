@@ -238,6 +238,13 @@
 
   /* ---------- mobile drawer ---------- */
 
+  function closeDrawer() {
+    document.body.classList.remove("nav-open");
+    document.querySelectorAll("[data-menu]").forEach(function (btn) {
+      btn.setAttribute("aria-expanded", "false");
+    });
+  }
+
   document.addEventListener("click", function (e) {
     var btn = e.target.closest("[data-menu]");
     if (btn) {
@@ -246,7 +253,7 @@
       return;
     }
     if (document.body.classList.contains("nav-open") && e.target.closest("#sidebar a")) {
-      document.body.classList.remove("nav-open");
+      closeDrawer();
     }
   });
 
@@ -343,6 +350,9 @@
 
     paletteResults = document.createElement("div");
     paletteResults.className = "palette-results";
+    paletteResults.addEventListener("click", function (e) {
+      if (e.target.closest("a")) closePalette();
+    });
 
     palette.appendChild(paletteInput);
     palette.appendChild(paletteResults);
@@ -398,7 +408,7 @@
       openPalette();
     } else if (e.key === "Escape") {
       closePalette();
-      document.body.classList.remove("nav-open");
+      closeDrawer();
     }
   });
 
