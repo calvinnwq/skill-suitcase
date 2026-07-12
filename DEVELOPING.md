@@ -82,8 +82,11 @@ project, and runs its read-only `targets` command. `package:prepare` is the
 lower-level clean-build and hash-recording step used by `prepack`, while
 `package:validate` rechecks the recorded build without rebuilding it. `lint`
 currently aliases the TypeScript typecheck. `format:check` runs
-`git diff --check`, and `architecture:check` enforces the module boundaries
-documented in `ARCHITECTURE.md`.
+`git diff --check`, and `architecture:check` enforces the dependency,
+process-IO, recognized-layer, and thin-entrypoint contracts documented in
+`ARCHITECTURE.md`.
+The architecture contract tests run from
+`scripts/architecture-contract.test.mjs` as part of `pnpm test`.
 
 For a focused test, build first and run the compiled test file directly:
 

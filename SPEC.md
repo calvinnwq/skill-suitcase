@@ -243,8 +243,8 @@ to stderr. They must not be mixed into machine-readable stdout. Exit status is
 derived separately from the structured result or fatal failure.
 
 This boundary is enforced by [renderer tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/renderers.test.ts),
-[CLI tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/cli.test.ts), and the architectural dependency guard in
-[architecture guardrail tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/architecture-guardrails.test.ts).
+[CLI tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/cli.test.ts), and the executable architecture contract in
+[architecture contract tests](https://github.com/calvinnwq/skill-suitcase/blob/main/scripts/architecture-contract.test.mjs).
 
 ## Non-Goals
 

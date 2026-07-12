@@ -120,7 +120,12 @@ about CLI parsing or rendering.
 - JSON formatting
 - usage/help text
 - known error rendering
-- stdout/stderr discipline
+- deterministic text returned to the process entrypoint
+
+Renderers must not read `process.argv` or write `process.stdout` or
+`process.stderr` directly.
+`src/cli.ts` owns those process capabilities and writes the text produced by
+renderer helpers.
 
 Skill Suitcase is JSON-first.
 Structured command results, including findings and `ok: false` errors, belong on stdout.
@@ -511,18 +516,51 @@ touches live paths.
 Default dependency direction:
 
 ```txt
-cli.ts -> commands -> core/domain -> adapters/interfaces/shared
-commands -> renderers
+cli.ts -> commands -> core/domain -> adapters
+   |          |            |           |
+   +-> config +-> renderers +----------+-> config/shared
 ```
 
-Rules:
+The executable architecture contract recognizes `cli.ts`, `commands/`,
+`core/`, `adapters/`, `renderers/`, `config/`, and `shared/` as source layers.
+Legacy top-level `src/*.ts` re-export shims are classified as core modules.
+Nested source directories outside the recognized layers are rejected.
 
-- Core/domain modules must not import `commands/`.
-- Core/domain modules must not import `renderers/`.
-- Adapter modules must not import command modules.
-- `process.argv` should stay at the CLI boundary.
-- `process.stdout` and `process.stderr` should stay in `cli.ts` or renderers.
-- New command behavior should not be added directly to `src/cli.ts`.
+Allowed relative source imports are:
+
+| Source layer | May import |
+| --- | --- |
+| `cli.ts` | `commands/`, `config/`, `renderers/`, `shared/` |
+| `commands/` | `commands/`, `core/`, `config/`, `renderers/`, `shared/` |
+| `core/` and top-level shims | `core/`, `adapters/`, `config/`, `shared/` |
+| `adapters/` | `adapters/`, `config/`, `shared/` |
+| `renderers/` | `renderers/`, `config/`, `shared/` |
+| `config/` | `config/`, `shared/` |
+| `shared/` | `config/`, `shared/` |
+
+Additional enforced rules:
+
+- Runtime access to `process.argv`, `process.stdout`, and `process.stderr` must
+  stay in `src/cli.ts`.
+- `src/cli.ts` must stay at or below 60 non-empty lines and must not contain a
+  switch statement.
+- Command behavior modules must stay at or below 80 non-empty lines.
+  The registry and shared support files `index.ts`, `helpers.ts`,
+  `target-overrides.ts`, and `types.ts` are exempt from this command-module
+  size limit.
+- New command behavior must not be added directly to `src/cli.ts`.
+
+`pnpm run architecture:check` enforces these rules with the TypeScript AST.
+It inspects static imports and exports, TypeScript import-equals declarations,
+and dynamic imports whose relative specifier can be resolved from immutable
+string expressions.
+It also follows runtime aliases of the guarded process capabilities while
+ignoring comments, quoted examples, type-only references, shadowed globals,
+and dynamic expressions that cannot be resolved statically.
+Failures are sorted to keep diagnostics deterministic.
+The contract cases live in `scripts/architecture-contract.test.mjs`, while
+`tests/architecture-guardrails.test.ts` verifies the project entrypoint and
+current source tree.
 
 ## Migration Path
 
@@ -540,7 +578,8 @@ boundary moves:
 3. Move feature modules into `src/core/` only when a command or feature change
    already touches that area.
 4. Add adapter modules when core behavior needs filesystem or target-install IO.
-5. Add import-boundary checks once the folders exist.
+5. Extend the executable architecture contract when a deliberate new layer or
+   dependency direction is introduced.
 
 Avoid moving every file at once. Each change should preserve behavior and leave
 the repo shippable.
@@ -569,7 +608,7 @@ The exact API can change, but the separation should not:
 - parse and validate at the command boundary
 - execute durable behavior in core/domain code
 - render through renderer helpers
-- keep process IO out of domain code
+- keep `process.argv`, `process.stdout`, and `process.stderr` in `src/cli.ts`
 
 ## Output Contract
 
@@ -608,5 +647,6 @@ The architecture is working when:
 - commands are discoverable by command name or family
 - core/domain behavior is testable without CLI process IO
 - JSON stdout remains stable
-- `pnpm run architecture:check` prevents obvious boundary regressions
+- `pnpm run architecture:check` prevents dependency, process-IO, and thin-layer
+  regressions
 - new feature work naturally follows the same pattern
