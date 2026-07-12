@@ -118,7 +118,15 @@ skill-suitcase status --source "$SRC" --json</code></pre>
               </li>
               <li>
                 <span class="stamp approval">Approval</span>
-                <span>Recovery mutations require <code>--apply</code> plus explicitly named skills. <code>prune --apply</code> additionally requires the exact plan ID returned by its dry-run. <code>rollback</code> requires an explicit receipt path.</span>
+                <span><code>reconcile</code>, <code>repair</code>, <code>prune</code>, <code>promote</code>, and <code>import-target</code> mutations require <code>--apply</code> plus an explicitly named scope. <code>prune --apply</code> additionally requires the exact plan ID returned by its dry-run.</span>
+              </li>
+              <li>
+                <span class="stamp approval">Approval</span>
+                <span><code>track</code> mutates on explicit invocation, writes only a receipt and never skill files, and requires the target to exactly match catalog source. Its <code>--skill</code> selection is optional; omitting it uses all-planned-skills mode.</span>
+              </li>
+              <li>
+                <span class="stamp approval">Approval</span>
+                <span><code>rollback</code> requires an explicit receipt path.</span>
               </li>
               <li>
                 <span class="stamp refused">Refused</span>
