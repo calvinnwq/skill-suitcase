@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.15.0...v0.16.0) (2026-07-12)
+
+
+### Features
+
+* improve community contribution workflows ([#73](https://github.com/calvinnwq/skill-suitcase/issues/73)) ([ab31905](https://github.com/calvinnwq/skill-suitcase/commit/ab319051d047680c801f1a2e2cba96f5f9f5c4d1))
+* **prune:** safely remove obsolete managed skills ([#79](https://github.com/calvinnwq/skill-suitcase/issues/79)) ([747051c](https://github.com/calvinnwq/skill-suitcase/commit/747051c62f8f467a972cec275127d503cead761c))
+
+
+### Bug Fixes
+
+* harden npm package metadata and publishing ([#72](https://github.com/calvinnwq/skill-suitcase/issues/72)) ([c399e5f](https://github.com/calvinnwq/skill-suitcase/commit/c399e5fd33bae45d25c56ab5062fb7717cb5c0ec))
+
 ## [0.15.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.14.0...v0.15.0) (2026-07-09)
 
 
