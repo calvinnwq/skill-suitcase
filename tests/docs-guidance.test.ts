@@ -165,6 +165,12 @@ test("SPEC defines the shipped contract without taking over adjacent documentati
     "SPEC.md should link contract claims to tests"
   );
   assert.ok(spec.includes("planning and target materialization also accept a non-Git catalog directory"));
+  assert.ok(normalized.includes("copy-mode materialization"));
+  assert.ok(normalized.includes("symlink_source_policy_exclude"));
+  assert.ok(normalized.includes("patterns have no current matches"));
+  assert.ok(normalized.includes("target-aware materialization and mutation flows"));
+  assert.ok(normalized.includes("path-driven `promote` and receipt-driven `rollback` do not resolve target adapters"));
+  assert.ok(!normalized.includes("materializing or mutating commands return `read_only_target`"));
   assert.ok(spec.includes("Neither approval input binds the resolved live install root"));
   assert.ok(spec.includes("copy-versus-symlink mode"));
   assert.ok(spec.includes("the CLI does not bind that review to the later mutation"));

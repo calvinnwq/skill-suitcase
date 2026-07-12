@@ -42,7 +42,10 @@ A catalog root contains `skill-suitcase.yaml`, canonical skill directories at
 
 Names and references must validate deterministically. Assignments determine the
 skills selected for a target; groups do not. `sourcePolicy.exclude` omits approved
-generated or cache paths from packing, plan locks, diffs, and applies.
+generated or cache paths from packing, plan locks, diffs, and copy-mode
+materialization. Symlink apply cannot hide excluded descendants, so it refuses
+any exclude policy with `symlink_source_policy_exclude`, including a policy whose
+patterns have no current matches.
 `sourcePolicy.deny`, including built-in secret-like path denials, blocks the
 materialization before a target write and reports path-level evidence.
 
@@ -67,10 +70,13 @@ The currently modeled target IDs are `openclaw`, `codex`, `openclaw-codex`,
 
 OpenCode and Pi are provider-backed compatibility targets and are read-only.
 That policy follows the adapter kind even when a manifest supplies a custom
-assignment path. Materializing or mutating commands return `read_only_target`
-instead of adopting or writing those roots. Provider fallback inventory without
-a catalog assignment may be discovered, but it produces no catalog status
-entries.
+assignment path. Target-aware materialization and mutation flows (`pack`,
+`apply`, `track`, `reconcile`, `repair`, `prune`, and `import-target`) return
+`read_only_target` instead of adopting or writing those roots. Path-driven
+`promote` and receipt-driven `rollback` do not resolve target adapters; their
+explicit path or receipt scope and ownership checks are separate safety
+boundaries. Provider fallback inventory without a catalog assignment may be
+discovered, but it produces no catalog status entries.
 
 Target resolution is covered by [target tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/targets.test.ts) and
 [platform-adapter tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/platform-adapters.test.ts). The provider boundary
