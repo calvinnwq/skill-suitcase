@@ -540,8 +540,12 @@ Allowed relative source imports are:
 
 Additional enforced rules:
 
-- Runtime access to `process.argv`, `process.stdout`, and `process.stderr` must
-  stay in `src/cli.ts`.
+- Direct runtime access to `process.argv`, `process.stdout`, and
+  `process.stderr` must stay in `src/cli.ts`.
+- Direct `console` output is forbidden in `src/`; structured stdout and
+  diagnostics must flow through renderer helpers at the CLI boundary.
+- `src/cli.ts` stdout writes must call the JSON renderer directly, and stderr
+  writes must call a renderer helper directly.
 - `src/cli.ts` must stay at or below 60 non-empty lines and must not contain a
   switch statement.
 - Command behavior modules must stay at or below 80 non-empty lines.
@@ -550,13 +554,20 @@ Additional enforced rules:
   size limit.
 - New command behavior must not be added directly to `src/cli.ts`.
 
-`pnpm run architecture:check` enforces these rules with the TypeScript AST.
-It inspects static imports and exports, TypeScript import-equals declarations,
-and dynamic imports whose relative specifier can be resolved from immutable
-string expressions.
-It also follows runtime aliases of the guarded process capabilities while
-ignoring comments, quoted examples, type-only references, shadowed globals,
-and dynamic expressions that cannot be resolved statically.
+`pnpm run architecture:check` enforces these rules with a deliberately
+syntactic TypeScript AST pass. It inspects static imports and exports,
+TypeScript import-equals declarations, direct `require()` calls, and dynamic
+imports with literal relative specifiers. It also detects direct process and
+console output access, direct process capability imports and destructuring,
+and renderer-mediated writes in `src/cli.ts` while ignoring comments, quoted
+examples, type-only references, and non-literal dynamic dependencies. Direct
+global-looking identifiers are matched syntactically; project code should not
+shadow names such as `process`, `console`, or `require`.
+
+The checker is not a whole-program alias, constant-folding, or control-flow
+analyzer. Those concerns belong in a mature lint or dependency-analysis tool
+if the project later needs them; this contract stays small enough to remain
+reviewable and deterministic.
 Failures are sorted to keep diagnostics deterministic.
 The contract cases live in `scripts/architecture-contract.test.mjs`, while
 `tests/architecture-guardrails.test.ts` verifies the project entrypoint and

@@ -84,7 +84,8 @@ lower-level clean-build and hash-recording step used by `prepack`, while
 currently aliases the TypeScript typecheck. `format:check` runs
 `git diff --check`, and `architecture:check` enforces the dependency,
 process-IO, recognized-layer, and thin-entrypoint contracts documented in
-`ARCHITECTURE.md`.
+`ARCHITECTURE.md`. The checker is intentionally syntactic rather than a
+whole-program alias or control-flow analyzer.
 The architecture contract tests run from
 `scripts/architecture-contract.test.mjs` as part of `pnpm test`.
 
