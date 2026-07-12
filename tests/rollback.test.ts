@@ -306,6 +306,22 @@ test("rollback refuses a symlinked target root before restoring", async (t) => {
   assert.equal(await readFile(path.join(outsideSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
 });
 
+test("rollback refuses a target leaf symlinked within the install root", async (t) => {
+  const { receiptPath, targetRoot, targetSkill } = await createAppliedUpdate(t);
+  const replacementSkill = path.join(targetRoot, "replacement");
+  await cp(targetSkill, replacementSkill, { recursive: true });
+  await rm(targetSkill, { recursive: true, force: true });
+  await symlink(replacementSkill, targetSkill, "dir");
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "target_drift");
+  assert.equal(result.summary.refused, 1);
+  assert.equal(await readFile(path.join(replacementSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+});
+
 test("rollback refuses file paths with symlinked ancestors", async (t) => {
   const { receiptPath, targetSkill } = await createAppliedUpdate(t);
   const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-nested-symlink-outside-"));

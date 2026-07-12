@@ -246,6 +246,8 @@ skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex"
 Use `prune` only for an explicit receipt-owned install that is no longer
 assigned to the selected target. Review the read-only plan, then apply only
 after approval names the target, exact skill list, and returned plan ID:
+Prune requires `.skill-suitcase-receipt.json` and refuses legacy
+`.skills-sync.json` receipts without migrating them.
 
 ```bash
 skill-suitcase prune --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <obsolete-skill> --dry-run --json

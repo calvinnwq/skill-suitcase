@@ -1203,7 +1203,8 @@ function resolveReceiptPathUnderRoot(root: string, candidate: string, aliasRoot:
     return resolvedCandidate;
   }
   try {
-    const canonicalCandidate = realpathSync(resolvedCandidate);
+    const canonicalParent = realpathSync(path.dirname(resolvedCandidate));
+    const canonicalCandidate = path.join(canonicalParent, path.basename(resolvedCandidate));
     if (isPathInsideOrSame(resolvedRoot, canonicalCandidate)) {
       return canonicalCandidate;
     }

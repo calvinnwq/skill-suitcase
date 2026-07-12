@@ -177,6 +177,8 @@ skills still assigned to the target, paths without one matching receipt record,
 provider/read-only targets, path escapes, receipt/file drift, and symlinks whose
 current target differs from their receipt source. The plan includes the receipt
 hash, per-object fingerprint, quarantine paths, and a stable plan ID.
+Prune requires `.skill-suitcase-receipt.json` and safely refuses a legacy
+`.skills-sync.json` receipt instead of migrating it in this safety-sensitive workflow.
 
 After approval, repeat the exact skill list with
 `--plan-id <reviewed-id> --apply`. Apply recomputes the plan before mutation,

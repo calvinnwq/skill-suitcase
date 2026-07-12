@@ -140,13 +140,13 @@ export async function prune(input: PruneInput): Promise<PruneResult> {
   const wantsDryRun = input.dryRun === true;
   const wantsApply = input.apply === true;
   if (selected.length === 0 || input.skills?.some((skill) => skill.trim().length === 0)) {
-    return failedPlan(input, selected, "invalid_skill_filter", "prune requires at least one explicit non-blank --skill value.");
+    return failedValidation(input, selected, wantsApply, "invalid_skill_filter", "prune requires at least one explicit non-blank --skill value.");
   }
   if (wantsDryRun === wantsApply) {
-    return failedPlan(input, selected, "invalid_prune_mode", "prune requires exactly one of --dry-run or --apply.");
+    return failedValidation(input, selected, wantsApply, "invalid_prune_mode", "prune requires exactly one of --dry-run or --apply.");
   }
   if (wantsApply && !normalize(input.planId)) {
-    return failedPlan(input, selected, "missing_plan_id", "prune --apply requires the exact --plan-id returned by dry-run.");
+    return failedValidation(input, selected, true, "missing_plan_id", "prune --apply requires the exact --plan-id returned by dry-run.");
   }
 
   const planned = await planPrune(input, selected);
@@ -743,15 +743,22 @@ function stripReceipt(planned: PlannedPrune): PruneBaseResult {
   return result;
 }
 
-function failedPlan(input: PruneInput, selected: string[], code: string, message: string): PrunePlanResult {
-  return finalizePlan({
+function failedValidation(
+  input: PruneInput,
+  selected: string[],
+  wantsApply: boolean,
+  code: string,
+  message: string
+): PrunePlanResult | PruneApplyRefusalResult {
+  const planned: PlannedPrune = {
     ok: false, dryRun: true, readOnly: true, source: path.resolve(input.source), target: input.target,
     assignment: null, installRoot: null, selected: { skills: selected },
     plan: { schema: PRUNE_PLAN_SCHEMA, id: null, receiptPath: null, receiptHash: null, quarantineRoot: null },
     candidates: [], preserved: { assigned: [] }, refused: { skills: selected },
     summary: { selected: selected.length, candidates: 0, directories: 0, symlinks: 0, refused: selected.length },
     errors: [{ code, message }], receipt: null, targetIdentity: input.target
-  });
+  };
+  return wantsApply ? finalizeApplyRefusal(planned) : finalizePlan(planned);
 }
 
 function normalizeSkills(skills: string[] | undefined): string[] {

@@ -8,6 +8,8 @@ import { prune, PRUNE_TRANSACTION_SCHEMA } from "../src/prune.js";
 import {
   buildInstallRecord,
   buildInstalledFiles,
+  LEGACY_RECEIPT_SCHEMA,
+  RECEIPT_FILE,
   readReceipt,
   upsertAndWriteReceipt,
   writeReceipt
@@ -136,6 +138,56 @@ test("prune refuses provider read-only policy with a writable adapter", async (t
   assert.equal(result.ok, false);
   assert.equal(result.plan.id, null);
   assert.equal(result.errors.some((error) => error.code === "read_only_target"), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+});
+
+test("prune preserves apply refusal semantics for early validation failures", async () => {
+  const blankSkill = await prune({
+    source: ".",
+    target: "codex",
+    skills: ["   "],
+    planId: "reviewed-plan",
+    apply: true
+  });
+  assert.equal(blankSkill.ok, false);
+  assert.equal(blankSkill.dryRun, false);
+  assert.equal(blankSkill.readOnly, true);
+  assert.equal(blankSkill.errors[0]?.code, "invalid_skill_filter");
+
+  const blankPlanId = await prune({
+    source: ".",
+    target: "codex",
+    skills: ["obsolete"],
+    planId: "   ",
+    apply: true
+  });
+  assert.equal(blankPlanId.ok, false);
+  assert.equal(blankPlanId.dryRun, false);
+  assert.equal(blankPlanId.readOnly, true);
+  assert.equal(blankPlanId.errors[0]?.code, "missing_plan_id");
+});
+
+test("prune refuses legacy receipts without migrating them", async (t) => {
+  const fixture = await createFixture(t);
+  const modernReceiptPath = path.join(fixture.targetRoot, RECEIPT_FILE);
+  const receipt = JSON.parse(await readFile(modernReceiptPath, "utf8")) as Record<string, unknown>;
+  await rm(modernReceiptPath);
+  await writeFile(
+    path.join(fixture.targetRoot, ".skills-sync.json"),
+    `${JSON.stringify({ ...receipt, schema: LEGACY_RECEIPT_SCHEMA }, null, 2)}\n`
+  );
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    dryRun: true
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "invalid_receipt"), true);
+  await assert.rejects(stat(modernReceiptPath), /ENOENT/);
+  assert.equal((await stat(path.join(fixture.targetRoot, ".skills-sync.json"))).isFile(), true);
   assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
 });
 

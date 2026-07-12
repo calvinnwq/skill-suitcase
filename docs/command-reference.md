@@ -344,6 +344,8 @@ instead of reusing or cleaning it. Assigned,
 unreceipted, drifted, read-only/provider-backed, and path-escaping candidates
 are refused. Retain the reported quarantine and backup paths for reviewed
 cleanup; never replace prune with manual deletion or broad rollback.
+Prune requires the modern `.skill-suitcase-receipt.json` receipt and safely
+refuses legacy `.skills-sync.json` instead of migrating it.
 
 ### `rollback`
 

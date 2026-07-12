@@ -263,6 +263,8 @@ matches their receipt source, atomically updates the receipt, and reports a
 transaction journal plus receipt backup. Register retained quarantine/backup
 paths with the active artifact-retention workflow. If the plan quarantine root
 already exists, apply refuses and preserves it. Do not manually delete it.
+Prune requires `.skill-suitcase-receipt.json` and refuses legacy
+`.skills-sync.json` receipts without migrating them.
 
 For a selected receipt-owned, catalog-owned skill that went `dirty` from an
 intentional local edit you want in the repo, import it the other direction
