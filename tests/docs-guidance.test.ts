@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { posix } from "node:path";
 import { test } from "node:test";
 
 test("README stays product-forward, portable, and free of roadmap drift", async () => {
@@ -154,9 +155,15 @@ test("SPEC defines the shipped contract without taking over adjacent documentati
   }
 
   assert.ok(spec.includes("](VISION.md)"), "SPEC.md should route product direction to VISION.md");
-  assert.ok(spec.includes("](ARCHITECTURE.md)"), "SPEC.md should route implementation structure to ARCHITECTURE.md");
+  assert.ok(
+    spec.includes("](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md)"),
+    "SPEC.md should route implementation structure to ARCHITECTURE.md"
+  );
   assert.ok(spec.includes("](docs/command-reference.md)"), "SPEC.md should route detailed usage to the command reference");
-  assert.ok(spec.includes("](tests/apply.test.ts)"), "SPEC.md should link contract claims to tests");
+  assert.ok(
+    spec.includes("](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/apply.test.ts)"),
+    "SPEC.md should link contract claims to tests"
+  );
   assert.ok(spec.includes("planning and target materialization also accept a non-Git catalog directory"));
   assert.ok(spec.includes("Neither approval input binds the resolved live install root"));
   assert.ok(spec.includes("copy-versus-symlink mode"));
@@ -170,6 +177,19 @@ test("SPEC defines the shipped contract without taking over adjacent documentati
   const readme = await readFile("README.md", "utf8");
   assert.ok(vision.includes("`SPEC.md` defines the normative current-state product contract"));
   assert.ok(readme.includes("](SPEC.md)"), "README.md should link to the current contract");
+});
+
+test("SPEC relative links resolve within the public package", async () => {
+  const spec = await readFile("SPEC.md", "utf8");
+  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files: string[] };
+  const relativeTargets = [...spec.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)]
+    .flatMap((match) => match[1] === undefined ? [] : [match[1].split("#", 1)[0] ?? ""])
+    .filter((target) => target !== "" && !target.startsWith("#") && !/^[a-z][a-z\d+.-]*:/i.test(target))
+    .map((target) => posix.normalize(target));
+
+  for (const target of relativeTargets) {
+    assert.ok(packageJson.files.includes(target), `Packaged SPEC.md contains a relative link to omitted file: ${target}`);
+  }
 });
 
 /**

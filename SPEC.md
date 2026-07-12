@@ -3,7 +3,7 @@
 This document specifies the behavior shipped by Skill Suitcase today. It is a
 current-state contract, not a product-direction document. Product direction
 belongs in [`VISION.md`](VISION.md), implementation boundaries belong in
-[`ARCHITECTURE.md`](ARCHITECTURE.md), and detailed command usage belongs in
+[`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md), and detailed command usage belongs in
 [`docs/command-reference.md`](docs/command-reference.md).
 
 ## Source Of Truth
@@ -46,10 +46,10 @@ generated or cache paths from packing, plan locks, diffs, and applies.
 `sourcePolicy.deny`, including built-in secret-like path denials, blocks the
 materialization before a target write and reports path-level evidence.
 
-See the [catalog fixture](tests/fixtures/skills-catalog/skill-suitcase.yaml),
-[manifest tests](tests/suitcase-manifest.test.ts),
-[validation tests](tests/validator.test.ts), and
-[source-policy tests](tests/source-policy.test.ts).
+See the [catalog fixture](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/fixtures/skills-catalog/skill-suitcase.yaml),
+[manifest tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/suitcase-manifest.test.ts),
+[validation tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/validator.test.ts), and
+[source-policy tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/source-policy.test.ts).
 
 ## Target Adapters And Resolution
 
@@ -72,8 +72,8 @@ instead of adopting or writing those roots. Provider fallback inventory without
 a catalog assignment may be discovered, but it produces no catalog status
 entries.
 
-Target resolution is covered by [target tests](tests/targets.test.ts) and
-[platform-adapter tests](tests/platform-adapters.test.ts). The provider boundary
+Target resolution is covered by [target tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/targets.test.ts) and
+[platform-adapter tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/platform-adapters.test.ts). The provider boundary
 is explained in [`docs/skills-sh-delegation.md`](docs/skills-sh-delegation.md).
 
 ## Read-Only Commands
@@ -101,8 +101,8 @@ Read-only commands do not create install roots, runtime homes, receipts,
 symlinks, or catalog files. Their command-level guarantees and known refusal
 codes are defined in
 [`docs/command-reference.md`](docs/command-reference.md#read-only-commands) and
-exercised by [command tests](tests/commands.test.ts),
-[status tests](tests/status.test.ts), and [diff tests](tests/diff.test.ts).
+exercised by [command tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/commands.test.ts),
+[status tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/status.test.ts), and [diff tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/diff.test.ts).
 
 ## Staging And Approval Inputs
 
@@ -126,9 +126,9 @@ bundle is therefore not byte-for-byte authorization for every later write.
 Neither approval input binds the resolved live install root, CLI target path overrides, or copy-versus-symlink mode.
 Those choices are supplied or resolved again at apply time and must be reviewed separately.
 
-See [packing tests](tests/packer.test.ts),
-[plan-lock tests](tests/plan-lock.test.ts), and
-[apply tests](tests/apply.test.ts).
+See [packing tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/packer.test.ts),
+[plan-lock tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/plan-lock.test.ts), and
+[apply tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/apply.test.ts).
 
 ## Live Mutation
 
@@ -177,8 +177,8 @@ implicitly.
 
 A receipt proves what Skill Suitcase recorded; commands still compare it with
 the current catalog and filesystem before mutation. Receipt behavior is covered
-by [receipt tests](tests/receipt.test.ts) and
-[concurrent apply tests](tests/apply.test.ts).
+by [receipt tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/receipt.test.ts) and
+[concurrent apply tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/apply.test.ts).
 
 ## Rollback And Recovery
 
@@ -201,9 +201,9 @@ Recovery commands have distinct ownership meanings:
 `repair`, `prune`, and `import-target` provide read-only plans with hashes and
 affected paths before apply. `prune` additionally binds apply to a stable plan
 ID and quarantines physical directories transactionally. Recovery semantics are
-covered by [rollback tests](tests/rollback.test.ts),
-[repair tests](tests/repair.test.ts), [prune tests](tests/prune.test.ts), and
-[import-target tests](tests/import-target.test.ts).
+covered by [rollback tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/rollback.test.ts),
+[repair tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/repair.test.ts), [prune tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/prune.test.ts), and
+[import-target tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/import-target.test.ts).
 
 ## Upstream Refresh
 
@@ -222,7 +222,7 @@ replaces target receipts. `skills-sh` declarations pin the installer package
 version, not the referenced repository content revision, so every fetched diff
 still requires review. Git declarations pin a version tag or full commit SHA.
 
-See [upstream tests](tests/upstream.test.ts) and
+See [upstream tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/upstream.test.ts) and
 [`docs/skills-sh-delegation.md`](docs/skills-sh-delegation.md).
 
 ## Output Contract
@@ -235,9 +235,9 @@ Parser and usage failures, uncaught fatal diagnostics, and non-JSON notices go
 to stderr. They must not be mixed into machine-readable stdout. Exit status is
 derived separately from the structured result or fatal failure.
 
-This boundary is enforced by [renderer tests](tests/renderers.test.ts),
-[CLI tests](tests/cli.test.ts), and the architectural dependency guard in
-[architecture guardrail tests](tests/architecture-guardrails.test.ts).
+This boundary is enforced by [renderer tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/renderers.test.ts),
+[CLI tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/cli.test.ts), and the architectural dependency guard in
+[architecture guardrail tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/architecture-guardrails.test.ts).
 
 ## Non-Goals
 
