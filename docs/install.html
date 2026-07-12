@@ -82,11 +82,8 @@ else
   SKILL_SRC="$(npm root -g)/skill-suitcase/skills/skill-suitcase"
 fi
 
-<span class="c"># pick the skill root for the runtime you are configuring</span>
-AGENT_SKILLS_DIR="$HOME/.codex/skills"      <span class="c"># Codex</span>
-AGENT_SKILLS_DIR="$HOME/.claude/skills"     <span class="c"># Claude</span>
-AGENT_SKILLS_DIR="$HOME/.agents/skills"     <span class="c"># shared agents root</span>
-AGENT_SKILLS_DIR="$HOME/.grok/skills"       <span class="c"># Grok Build</span>
+<span class="c"># choose one runtime root: Codex $HOME/.codex/skills, Claude $HOME/.claude/skills, shared agents root $HOME/.agents/skills, or Grok Build $HOME/.grok/skills</span>
+AGENT_SKILLS_DIR="$HOME/.codex/skills"
 
 <span class="c"># install into the selected root</span>
 if test -d "$SKILL_SRC"; then
