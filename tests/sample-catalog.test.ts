@@ -56,19 +56,22 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   }>(["validate", ...sourceArgs]);
   assert.equal(validated.ok, true);
   assert.equal(validated.summary.referencedSkills, 1);
-  assert.equal(validated.summary.upstreamDeclarations, 1);
+  assert.equal(validated.summary.upstreamDeclarations, 0);
 
   const upstream = runCli<{
     ok: boolean;
     readOnly: boolean;
-    summary: { declared: number };
+    summary: { declared: number; packageAvailable: number; failures: number };
     declarations: Array<{ skill: string; provider: string }>;
   }>(["upstream", "check", ...sourceArgs]);
   assert.equal(upstream.ok, true);
   assert.equal(upstream.readOnly, true);
-  assert.equal(upstream.summary.declared, 1);
-  assert.equal(upstream.declarations[0]?.skill, "hello-suitcase");
-  assert.equal(upstream.declarations[0]?.provider, "git");
+  assert.deepEqual(upstream.summary, {
+    declared: 0,
+    packageAvailable: 0,
+    failures: 0
+  });
+  assert.deepEqual(upstream.declarations, []);
 
   const planned = runCli<{ ok: boolean; planned: Array<{ skill: string }> }>([
     "plan",

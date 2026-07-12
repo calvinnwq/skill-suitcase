@@ -35,6 +35,7 @@ node dist/src/cli.js rollback --receipt "$TARGET/.skill-suitcase-receipt.json" -
 rm -rf "$SANDBOX"
 ```
 
-`upstream check` validates pinned policy and lineage without fetching or writing.
-Network-backed `upstream fetch` and `upstream import` are intentionally outside
-this offline demo.
+`upstream check` validates the empty upstream policy document and reports zero
+declarations without fetching or writing.
+The sample skill has no executable third-party lineage, so `upstream fetch` and
+`upstream import` are intentionally outside this offline demo.
