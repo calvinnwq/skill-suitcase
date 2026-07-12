@@ -53,9 +53,9 @@
               package-manager shims:
             </p>
             <pre><code>mkdir -p "$HOME/repos"
-git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase" 2>/dev/null || true
+test -d "$HOME/repos/skill-suitcase" || git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase"
+git -C "$HOME/repos/skill-suitcase" pull --ff-only
 cd "$HOME/repos/skill-suitcase"
-git pull --ff-only
 pnpm() {
   npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
 }
@@ -75,8 +75,12 @@ node "$CLI" targets --source "/path/to/skills-catalog" --json</code></pre>
               <code>skills/skill-suitcase</code> directory, not just
               <code>SKILL.md</code>.
             </p>
-            <pre><code><span class="c"># from a global npm install</span>
-SKILL_SRC="$(npm root -g)/skill-suitcase/skills/skill-suitcase"
+            <pre><code><span class="c"># use the source checkout when present, otherwise the global npm install</span>
+if test -d "$HOME/repos/skill-suitcase/skills/skill-suitcase"; then
+  SKILL_SRC="$HOME/repos/skill-suitcase/skills/skill-suitcase"
+else
+  SKILL_SRC="$(npm root -g)/skill-suitcase/skills/skill-suitcase"
+fi
 
 <span class="c"># pick the skill root for the runtime you are configuring</span>
 AGENT_SKILLS_DIR="$HOME/.codex/skills"      <span class="c"># Codex</span>
@@ -85,9 +89,13 @@ AGENT_SKILLS_DIR="$HOME/.agents/skills"     <span class="c"># shared agents root
 AGENT_SKILLS_DIR="$HOME/.grok/skills"       <span class="c"># Grok Build</span>
 
 <span class="c"># install into the selected root</span>
-mkdir -p "$AGENT_SKILLS_DIR"
-rm -rf "$AGENT_SKILLS_DIR/skill-suitcase"
-cp -R "$SKILL_SRC" "$AGENT_SKILLS_DIR/"</code></pre>
+if test -d "$SKILL_SRC"; then
+  mkdir -p "$AGENT_SKILLS_DIR"
+  rm -rf "$AGENT_SKILLS_DIR/skill-suitcase"
+  cp -R "$SKILL_SRC" "$AGENT_SKILLS_DIR/"
+else
+  printf 'Skill source not found: %s\n' "$SKILL_SRC" >&amp;2
+fi</code></pre>
             <p>Restart the agent runtime after installing or replacing a skill.</p>
           </section>
 
@@ -99,7 +107,7 @@ cp -R "$SKILL_SRC" "$AGENT_SKILLS_DIR/"</code></pre>
               preferred operating model.
             </p>
             <pre><code>mkdir -p "$HOME/repos"
-git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills" 2>/dev/null || true
+test -d "$HOME/repos/skills" || git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills"
 git -C "$HOME/repos/skills" pull --ff-only
 
 export SRC="$HOME/repos/skills"</code></pre>
