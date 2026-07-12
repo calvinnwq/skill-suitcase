@@ -642,7 +642,10 @@ async function readOptionalReceiptTextUnlocked(receiptPath: string): Promise<str
     if ((error as { code?: string }).code === "ENOENT") {
       return null;
     }
-    throw error;
+    if (error instanceof ReceiptReadError) {
+      throw error;
+    }
+    throw new ReceiptReadError(error instanceof Error ? error.message : String(error));
   }
 }
 
