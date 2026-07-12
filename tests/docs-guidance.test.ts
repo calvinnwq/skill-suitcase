@@ -532,6 +532,7 @@ test("getting-started guide covers the public onboarding flow with portable exam
     "`apply`",
     "`rollback`",
     "receipt",
+    "receipts created by `apply`, `reconcile`, or `repair`",
     "does not resolve target install paths, so it needs no override flags",
     "does not restore promotions"
   ]) {

@@ -193,7 +193,7 @@ Two safety properties matter here:
 
 ## 7. Roll Back Safely
 
-Every receipt-backed install can be reversed:
+Receipts created by `apply`, `reconcile`, or `repair` can reverse recorded installs when they include rollback metadata:
 
 ```bash
 skill-suitcase rollback --receipt "$TARGET/.skill-suitcase-receipt.json" --json
