@@ -60,8 +60,19 @@ test("navigation manifest covers every page in numbered reading order", () => {
   }
   assert.match(js, /setAttribute\("aria-current", "page"\)/);
   assert.match(js, /THEME_KEY = "skill-suitcase-docs-theme"/);
-  assert.match(js, /skill-suitcase-docs-index-v1/);
+  assert.match(js, /skill-suitcase-docs-index-v2/);
   assert.doesNotMatch(js, /artshelf/i, "the docs chrome must use Skill Suitcase identifiers");
+});
+
+test("table of contents preserves canonical fragment owners", () => {
+  const js = read("docs/site.js");
+
+  assert.match(js, /var owner = h\.closest\("\.cmd\[id\]"\);\s*if \(owner\) return owner\.id;/);
+  assert.match(js, /while \(root\.getElementById\(id\)\)/);
+  assert.match(js, /a\.href = "#" \+ id/);
+  assert.match(js, /t\.href = "#" \+ id/);
+  assert.match(js, /p\.h \+ "#" \+ headingId\(head, doc\)/);
+  assert.doesNotMatch(js, /if \(!h\.id\) h\.id = slug/);
 });
 
 test("docs chrome renders when web storage is unavailable", () => {
@@ -146,7 +157,7 @@ test("docs chrome renders when web storage is unavailable", () => {
 test("docs search cache uses guarded session storage", () => {
   const js = read("docs/site.js");
 
-  assert.match(js, /var INDEX_KEY = "skill-suitcase-docs-index-v1"/);
+  assert.match(js, /var INDEX_KEY = "skill-suitcase-docs-index-v2"/);
   assert.match(js, /var INDEX = null;\s*var INDEX_PROMISE = null;/);
   assert.match(js, /if \(INDEX_PROMISE\) return INDEX_PROMISE/);
   assert.match(js, /getStorageItem\("sessionStorage", INDEX_KEY\)/);

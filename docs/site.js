@@ -50,7 +50,7 @@
   /* ---------- theme ---------- */
 
   var THEME_KEY = "skill-suitcase-docs-theme";
-  var INDEX_KEY = "skill-suitcase-docs-index-v1";
+  var INDEX_KEY = "skill-suitcase-docs-index-v2";
 
   function getStorageItem(storageName, key) {
     try {
@@ -156,21 +156,36 @@
     return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   }
 
+  function headingId(h, root) {
+    if (h.id) return h.id;
+    var owner = h.closest(".cmd[id]");
+    if (owner) return owner.id;
+    var base = slug(h.textContent) || "section";
+    var id = base;
+    var suffix = 2;
+    while (root.getElementById(id)) {
+      id = base + "-" + suffix;
+      suffix += 1;
+    }
+    h.id = id;
+    return id;
+  }
+
   function renderToc() {
     var toc = document.getElementById("toc");
     var heads = document.querySelectorAll("article h2, article h3");
     var links = [];
     heads.forEach(function (h) {
-      if (!h.id) h.id = slug(h.textContent);
+      var id = headingId(h, document);
       var a = document.createElement("a");
-      a.href = "#" + h.id;
+      a.href = "#" + id;
       a.textContent = "#";
       a.className = "anchor";
       a.setAttribute("aria-label", "Link to " + h.textContent);
       h.appendChild(a);
       if (toc) {
         var t = document.createElement("a");
-        t.href = "#" + h.id;
+        t.href = "#" + id;
         t.textContent = h.childNodes[0].textContent.trim();
         if (h.tagName === "H3") t.className = "sub";
         toc.appendChild(t);
@@ -271,7 +286,7 @@
         var entries = [{ t: p.t, h: p.h, where: p.t }];
         doc.querySelectorAll("article h2, article h3").forEach(function (head) {
           var text = head.textContent.trim();
-          entries.push({ t: text, h: p.h + "#" + slug(text), where: p.t });
+          entries.push({ t: text, h: p.h + "#" + headingId(head, doc), where: p.t });
         });
         return entries;
       }).catch(function () { return [{ t: p.t, h: p.h, where: p.t }]; });
