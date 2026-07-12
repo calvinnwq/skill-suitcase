@@ -558,6 +558,40 @@ test("prune revalidates every assignment before committing the receipt", async (
   assert.ok(receipt.installs?.["link-old"]);
 });
 
+test("prune revalidates assignments after preparing the replacement receipt", async (t) => {
+  const fixture = await createFixture(t);
+  const receiptPath = path.join(fixture.targetRoot, RECEIPT_FILE);
+  const receiptBefore = await readFile(receiptPath, "utf8");
+  const dryRun = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old", "link-old"],
+    dryRun: true
+  });
+  assert.ok(dryRun.plan.id);
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old", "link-old"],
+    planId: dryRun.plan.id,
+    apply: true,
+    __test: {
+      afterReceiptPrepared: async () => {
+        const manifestPath = path.join(fixture.sourceRoot, "skill-suitcase.yaml");
+        const manifest = await readFile(manifestPath, "utf8");
+        await writeFile(manifestPath, manifest.replace("      - current", "      - current\n      - dir-old"));
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.message.includes("dir-old became assigned")), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+  assert.equal(await readlink(fixture.symlinkTarget), path.join(fixture.sourceRoot, "skills", "link-old"));
+  assert.equal(await readFile(receiptPath, "utf8"), receiptBefore);
+});
+
 test("prune preserves a receipt update that starts during apply", async (t) => {
   const fixture = await createFixture(t);
   const dryRun = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["dir-old"], dryRun: true });

@@ -42,6 +42,7 @@ type PruneInput = {
     failAfterMutationForSkill?: string;
     failBeforeReceipt?: boolean;
     beforeMutationForSkill?: (skill: string) => Promise<void> | void;
+    afterReceiptPrepared?: () => Promise<void> | void;
     failAfterReceipt?: boolean;
     afterReceiptWrite?: () => Promise<void> | void;
   };
@@ -412,7 +413,7 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
     await writeTransaction(transactionPath, planned, "prepared");
     for (const candidate of planned.candidates) {
       await input.__test?.beforeMutationForSkill?.(candidate.skill);
-      await revalidateAssignment(input, planned, candidate.skill);
+      await revalidateAssignments(input, planned, [candidate.skill]);
       await revalidateCandidate(planned, candidate);
       if (candidate.kind === "directory") {
         await rename(candidate.targetPath, candidate.quarantinePath!);
@@ -423,10 +424,6 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       }
       if (input.__test?.failAfterMutationForSkill === candidate.skill) throw new Error(`Injected failure after ${candidate.skill}`);
     }
-    for (const candidate of planned.candidates) {
-      await revalidateAssignment(input, planned, candidate.skill);
-    }
-    if (input.__test?.failBeforeReceipt) throw new Error("Injected failure before receipt write");
     const nextReceipt = removeCandidateRecords(
       planned.receipt!,
       planned.candidates,
@@ -435,6 +432,13 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
     );
     await writeFile(receiptTempPath, `${JSON.stringify(nextReceipt, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: receiptMode });
     await chmod(receiptTempPath, receiptMode);
+    await input.__test?.afterReceiptPrepared?.();
+    await revalidateAssignments(
+      input,
+      planned,
+      planned.candidates.map((candidate) => candidate.skill)
+    );
+    if (input.__test?.failBeforeReceipt) throw new Error("Injected failure before receipt write");
     await rename(receiptTempPath, receiptPath);
     receiptReplaced = true;
     await input.__test?.afterReceiptWrite?.();
@@ -502,7 +506,7 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
   }
 }
 
-async function revalidateAssignment(input: PruneInput, planned: PlannedPrune, skill: string): Promise<void> {
+async function revalidateAssignments(input: PruneInput, planned: PlannedPrune, skills: string[]): Promise<void> {
   const targetReport = await targets({ source: planned.source, targetOverrides: input.targetOverrides });
   const target = targetReport.targets.find((item) => item.id === planned.target);
   if (
@@ -512,24 +516,25 @@ async function revalidateAssignment(input: PruneInput, planned: PlannedPrune, sk
     || target.platform.metadata["readOnly"] === true
     || target.safety.classification !== "live-install-root"
   ) {
-    throw new Error(`Target assignment changed for ${skill} during prune transaction.`);
+    throw new Error(`Target assignment changed for ${skills.join(", ")} during prune transaction.`);
   }
   let assignmentPlan: Awaited<ReturnType<typeof plan>>;
   try {
     assignmentPlan = await plan({ source: planned.source, target: planned.assignment ?? planned.target });
   } catch (error) {
-    throw new Error(`Cannot revalidate assignment for ${skill}: ${errorMessage(error)}`);
+    throw new Error(`Cannot revalidate assignments for ${skills.join(", ")}: ${errorMessage(error)}`);
   }
   if (assignmentPlan.errors.some((error) => error.skill === undefined)) {
-    throw new Error(`Cannot revalidate assignment for ${skill} during prune transaction.`);
+    throw new Error(`Cannot revalidate assignments for ${skills.join(", ")} during prune transaction.`);
   }
   const assigned = new Set([
     ...assignmentPlan.planned.map((item) => item.skill),
     ...assignmentPlan.blocked.map((item) => item.skill),
     ...assignmentPlan.errors.flatMap((error) => error.skill === undefined ? [] : [error.skill])
   ]);
-  if (assigned.has(skill)) {
-    throw new Error(`Skill ${skill} became assigned during prune transaction.`);
+  const newlyAssigned = skills.find((skill) => assigned.has(skill));
+  if (newlyAssigned !== undefined) {
+    throw new Error(`Skill ${newlyAssigned} became assigned during prune transaction.`);
   }
 }
 
