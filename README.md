@@ -1,5 +1,10 @@
 # Skill Suitcase
 
+[**Docs**](https://calvinnwq.github.io/skill-suitcase/) ·
+[Install](INSTALL.md) ·
+[Spec](SPEC.md) ·
+[Command reference](docs/command-reference.md)
+
 Skill Suitcase is an agent-first skill package manager backed by a Git catalog.
 It gives agents one JSON-first CLI for inspecting, installing, updating, and
 recovering skills across runtimes without treating live agent homes as the
@@ -28,6 +33,8 @@ Read-only command modes (`plan`, `diff`, `pack --dry-run`, `import`, `validate`,
   usage and fatal diagnostics go to stderr.
 - Copy and symlink installs are tracked with receipts and recoverable workflows.
 
+The [docs site](https://calvinnwq.github.io/skill-suitcase/) carries the guide-level documentation:
+overview, install, safety model, catalog model, upstream refresh, agent workflows, troubleshooting, and the full CLI reference.
 Read [`VISION.md`](VISION.md) for the product north star and
 [`SPEC.md`](SPEC.md) for the normative current-state contract. See
 [`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md)
@@ -345,6 +352,8 @@ git diff --check
 `test` rebuilds first, verifies that the recursively discovered compiled test inventory exactly matches `tests/**/*.test.ts`, then runs every compiled test and every `scripts/**/*.test.mjs` test with Node's built-in test runner.
 `package:smoke` runs the supported local pack verification: npm invokes `prepack` to create a clean build and record build-input, source, and output hashes in the ignored `dist/.package-build.json`, then the smoke script parses `npm pack --json`, validates the pinned public metadata and exact allowed payload, installs the tarball into an empty temporary project, and runs the read-only `targets` command through the installed executable.
 `architecture:check` runs `scripts/check-architecture.mjs` to enforce the module boundaries described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+`docs:serve` previews the static docs site from `docs/` at `http://127.0.0.1:8080/`.
+The same pages are validated by `tests/docs-site.test.ts` inside `pnpm test` and deploy to GitHub Pages through `.github/workflows/pages.yml`.
 
 CI uses the package's pinned pnpm `10.34.4` toolchain.
 The `verify` job runs the tests, lint/typecheck, architecture check, and

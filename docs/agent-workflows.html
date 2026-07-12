@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agent workflows · Skill Suitcase docs</title>
+    <meta name="description" content="The agent operating loop: read-only audit first, a six-way recovery decision tree, drift heartbeats, and fresh-machine setup through the catalog.">
+    <script>(function(){var stored=null;try{stored=localStorage.getItem("skill-suitcase-docs-theme");}catch(e){}var dark=false;try{dark=matchMedia("(prefers-color-scheme: dark)").matches;}catch(e){}document.documentElement.dataset.theme=stored||(dark?"dark":"light");})();</script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%B3%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,450..680;1,9..144,450..680&family=Newsreader:ital,opsz,wght@0,6..72,400..650;1,6..72,400..650&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="site.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body data-page="agent-workflows.html">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <button class="menu-btn" type="button" data-menu aria-label="Toggle navigation" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 3.5h14M1 8h14M1 12.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <a class="brand" href="index.html">Skill Suitcase<span class="brand-tag">docs</span></a>
+        <button class="search-btn" type="button" data-search-open><span>Search docs</span><kbd>/</kbd></button>
+        <div class="masthead-tools">
+          <a class="gh" href="https://github.com/calvinnwq/skill-suitcase">GitHub</a>
+          <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+            <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
+            <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="frame">
+      <nav id="sidebar" class="sidebar" aria-label="Documentation"></nav>
+
+      <main id="content" class="article-col">
+        <article>
+          <p class="kicker"><span class="n">06</span>Operate · Agent workflows</p>
+          <h1>Audit first, mutate on approval.</h1>
+          <p class="lede">
+            Agents run the read-only audit loop freely, report what they find, and
+            cross a mutation boundary only after a human approves the exact source,
+            target, and mode. The packaged operator skill encodes this loop.
+          </p>
+
+          <section>
+            <h2>The audit loop</h2>
+            <pre><code>skill-suitcase import --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --strict --json
+skill-suitcase targets --source "$SRC" --json
+skill-suitcase status --source "$SRC" --json
+
+<span class="c"># then per target, with explicit path overrides</span>
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+            <p>
+              Every command here is read-only. Repeat the same shape for
+              <code>claude</code>, <code>agents</code>, and <code>grok</code> with
+              their overrides. Treat <code>read_only_target</code> from
+              provider-backed targets such as OpenCode and Pi as the expected
+              boundary, not an error to work around.
+            </p>
+          </section>
+
+          <section>
+            <h2>The recovery decision tree</h2>
+            <p>
+              When a target does not match the catalog, the target state and
+              ownership model select exactly one command:
+            </p>
+            <div class="ledger">
+              <a class="ledger-row" href="reference.html#track">
+                <span class="n">a</span>
+                <span class="stage">track</span>
+                <span class="what">The existing target exactly matches catalog source but has no receipt. Track writes the receipt and never rewrites skill files. Preview candidates with <code>diff</code>; track has no dry-run flag.</span>
+              </a>
+              <a class="ledger-row" href="reference.html#reconcile">
+                <span class="n">b</span>
+                <span class="stage">reconcile</span>
+                <span class="what">A receiptless target differs from a catalog-planned skill and catalog source should replace it. The prior target content is preserved as rollback state.</span>
+              </a>
+              <a class="ledger-row" href="reference.html#repair">
+                <span class="n">c</span>
+                <span class="stage">repair</span>
+                <span class="what">A receipt-owned copy install went dirty by accident and the catalog should win. Dirty means stop and inspect first; repair only after explicit approval.</span>
+              </a>
+              <a class="ledger-row" href="reference.html#prune">
+                <span class="n">d</span>
+                <span class="stage">prune</span>
+                <span class="what">A receipt-owned install is no longer assigned to the target. Dry-run returns a plan ID; apply repeats the exact skill list with that ID and quarantines directories transactionally.</span>
+              </a>
+              <a class="ledger-row" href="reference.html#promote">
+                <span class="n">e</span>
+                <span class="stage">promote</span>
+                <span class="what">A brand-new target-created skill should become catalog source. Promote copies it into the catalog and symlinks the original back to it.</span>
+              </a>
+              <a class="ledger-row" href="reference.html#import-target">
+                <span class="n">f</span>
+                <span class="stage">import-target</span>
+                <span class="what">An intentional edit to a receipt-owned, catalog-owned skill should return to Git through review. The inverse of repair: it moves target content into the catalog.</span>
+              </a>
+            </div>
+            <p>
+              Run the matching dry-run before <code>reconcile</code>,
+              <code>repair</code>, <code>prune</code>, <code>promote</code>, or
+              <code>import-target</code>, and use receipt-backed
+              <code>rollback</code> when a mutation needs to be reversed.
+            </p>
+          </section>
+
+          <section>
+            <h2>Drift audit and heartbeat</h2>
+            <div class="callout" data-kind="readonly">
+              <p class="callout-label">Heartbeat</p>
+              <p>
+                Re-run <code>status --json</code> and <code>diff --json</code>
+                periodically as the drift-audit heartbeat. Reporting drift is
+                automatic; importing or overwriting it is not. Drift detection is
+                never permission to mutate either side.
+              </p>
+            </div>
+            <p>
+              When a catalog-owned skill goes <code>dirty</code> in a writable
+              target, stop and inspect. <code>repair --dry-run</code> previews
+              discarding the edit; <code>import-target --dry-run</code> previews
+              keeping it, reporting the receipt hash, catalog hash, target hash,
+              and planned repo writes. Either apply runs only after explicit
+              approval that names the outcome.
+            </p>
+          </section>
+
+          <section>
+            <h2>Fresh machine setup</h2>
+            <p>New-machine setup installs from the skills repo through Suitcase:</p>
+            <ol>
+              <li>Install <code>skill-suitcase</code> and the packaged operator skill.</li>
+              <li>Clone or update the approved skills catalog at any local path.</li>
+              <li>Run <code>import</code>, strict <code>validate</code>, <code>targets</code>, <code>plan</code>, <code>status</code>, and <code>diff</code>.</li>
+              <li>Stage or lock the reviewed plan.</li>
+              <li>Apply only the approved target changes and verify receipts and status.</li>
+            </ol>
+            <p>
+              The <a href="upstream-refresh.html">catalog-only upstream lane</a>
+              may refresh selected reviewed source before this flow, but it is not
+              a shortcut for writing into live agent homes.
+            </p>
+          </section>
+
+          <section>
+            <h2>Verify and report</h2>
+            <pre><code>skill-suitcase status --source "$SRC" --json</code></pre>
+            <p>
+              Finish every session by reporting the catalog branch and SHA, the
+              target IDs inspected, any live mutations run, final summary counts,
+              receipt or backup paths, and anything skipped. Keep secrets, tokens,
+              and private prompts out of chat, issues, and logs.
+            </p>
+            <p>
+              The step-by-step runbook version of this page is
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md">INSTALL.md</a>;
+              the packaged
+              <a href="https://github.com/calvinnwq/skill-suitcase/tree/main/skills/skill-suitcase">operator skill</a>
+              teaches the same loop to the agent itself.
+            </p>
+          </section>
+        </article>
+        <footer class="pager" id="pager"></footer>
+      </main>
+
+      <aside class="toc-col"><p class="toc-title">On this page</p><nav id="toc" aria-label="On this page"></nav></aside>
+    </div>
+
+    <footer class="colophon"><div class="colophon-inner"><span>Skill Suitcase docs</span><span>MIT</span><a href="https://github.com/calvinnwq/skill-suitcase">GitHub</a></div></footer>
+  </body>
+</html>

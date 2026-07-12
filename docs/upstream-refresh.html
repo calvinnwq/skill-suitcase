@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Upstream refresh · Skill Suitcase docs</title>
+    <meta name="description" content="Pinned upstream providers refresh catalog source only: isolated fetch, diff, catalog import, and Git review. Never a direct target installer.">
+    <script>(function(){var stored=null;try{stored=localStorage.getItem("skill-suitcase-docs-theme");}catch(e){}var dark=false;try{dark=matchMedia("(prefers-color-scheme: dark)").matches;}catch(e){}document.documentElement.dataset.theme=stored||(dark?"dark":"light");})();</script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%B3%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,450..680;1,9..144,450..680&family=Newsreader:ital,opsz,wght@0,6..72,400..650;1,6..72,400..650&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="site.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body data-page="upstream-refresh.html">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <button class="menu-btn" type="button" data-menu aria-label="Toggle navigation" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 3.5h14M1 8h14M1 12.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <a class="brand" href="index.html">Skill Suitcase<span class="brand-tag">docs</span></a>
+        <button class="search-btn" type="button" data-search-open><span>Search docs</span><kbd>/</kbd></button>
+        <div class="masthead-tools">
+          <a class="gh" href="https://github.com/calvinnwq/skill-suitcase">GitHub</a>
+          <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+            <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
+            <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="frame">
+      <nav id="sidebar" class="sidebar" aria-label="Documentation"></nav>
+
+      <main id="content" class="article-col">
+        <article>
+          <p class="kicker"><span class="n">05</span>Model · Upstream refresh</p>
+          <h1>Refresh source, never targets.</h1>
+          <p class="lede">
+            Pinned upstream providers are a source refresh lane for the catalog.
+            Upstream-to-catalog refresh and catalog-to-target installation are
+            separate decisions, and the upstream lane never writes a live agent
+            home.
+          </p>
+
+          <section>
+            <h2>The lane</h2>
+            <pre><code>upstream check -> isolated temp fetch/diff -> catalog import -> Git review -> pack/apply</code></pre>
+            <p>
+              <code>upstream check</code> and <code>upstream fetch --dry-run</code>
+              are read-only. <code>upstream import --apply</code> writes only the
+              selected catalog skill directory and the upstream lock, leaves
+              ordinary repository diffs, and does not auto-commit. Normal target
+              sync (<code>pack</code>, <code>apply</code>, receipts) picks up from
+              there.
+            </p>
+            <pre><code><span class="c"># validate pinned declarations and lineage, read-only</span>
+skill-suitcase upstream check --source "$SRC" --json
+
+<span class="c"># fetch one named skill into an isolated temp workspace/home and diff it</span>
+skill-suitcase upstream fetch --source "$SRC" --skill &lt;skill-name&gt; --dry-run --json
+
+<span class="c"># after approval for catalog-only source import</span>
+skill-suitcase upstream import --source "$SRC" --skill &lt;skill-name&gt; --apply --json</code></pre>
+          </section>
+
+          <section>
+            <h2>The upstream lock</h2>
+            <p>
+              <code>.skill-suitcase/upstream-lock.json</code> uses schema
+              <code>calvinnwq.skills.upstream-lock.v0</code> to declare pinned
+              <code>skills-sh</code> or Git sources and their last imported
+              provenance:
+            </p>
+            <div class="def-rows">
+              <div><span class="k">provider</span><span class="v">the declared upstream provider, skills-sh or Git</span></div>
+              <div><span class="k">package/version</span><span class="v">the exact pinned upstream package and version</span></div>
+              <div><span class="k">repo/skill</span><span class="v">the upstream repository and skill the declaration references</span></div>
+              <div><span class="k">imported hash</span><span class="v">the content hash recorded at the last import</span></div>
+              <div><span class="k">imported source</span><span class="v">the source provenance recorded at the last import</span></div>
+            </div>
+            <p>
+              <code>validate --strict</code> validates the upstream lock when the
+              catalog has one, and <code>upstream import</code> refuses malformed
+              lock metadata before fetching.
+            </p>
+          </section>
+
+          <section>
+            <h2>Lifecycle policy</h2>
+            <p>Keep upstream-to-catalog drift separate from catalog-to-target drift:</p>
+            <div class="def-rows">
+              <div><span class="k">upstream unchanged</span><span class="v">upstream check reports declaration and lineage metadata only, with no target action implied</span></div>
+              <div><span class="k">upstream changed</span><span class="v">review the fetch dry-run, import only the selected skill after approval, commit the catalog diff, then use normal target sync</span></div>
+              <div><span class="k">local catalog edit</span><span class="v">treat it as catalog-hash drift from the last imported upstream hash; commit, revert, or fork/adopt deliberately</span></div>
+              <div><span class="k">upstream removed or renamed</span><span class="v">keep the reviewed catalog source and lock until an operator chooses keep, fork/adopt, rename, or delete</span></div>
+              <div><span class="k">target drift</span><span class="v">use status and receipt-aware target workflows; do not call npx skills against live homes</span></div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Trust boundary</h2>
+            <div class="callout" data-kind="boundary">
+              <p class="callout-label">Boundary</p>
+              <p>
+                The trust boundary is the declared provider fetched in isolation.
+                Git declarations pin a version tag or full commit SHA.
+                <code>skills.sh</code> declarations pin the installer package
+                version, but the referenced upstream repository content is not
+                pinned to a source revision or content hash, so review every
+                fetched diff. Do not trust upstream tooling to select live roots,
+                write receipts, or prove rollback.
+              </p>
+            </div>
+            <p>
+              New-machine setup remains a catalog checkout followed by ordinary
+              Suitcase planning and apply. The decision record behind this design
+              is
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/skills-sh-delegation.md">skills-sh-delegation.md</a>.
+            </p>
+          </section>
+
+          <section>
+            <h2>Lineage reporting</h2>
+            <p>
+              For an upstream-managed skill, <code>upstream check</code> reports
+              the upstream package/version, upstream repo/skill, imported hash, and
+              current catalog hash. <code>status</code> carries the same lineage
+              and adds target status, receipt hash, and receipt commit when the
+              target skill is upstream-managed. Target-scoped status loads lineage
+              only for reported skills.
+            </p>
+          </section>
+        </article>
+        <footer class="pager" id="pager"></footer>
+      </main>
+
+      <aside class="toc-col"><p class="toc-title">On this page</p><nav id="toc" aria-label="On this page"></nav></aside>
+    </div>
+
+    <footer class="colophon"><div class="colophon-inner"><span>Skill Suitcase docs</span><span>MIT</span><a href="https://github.com/calvinnwq/skill-suitcase">GitHub</a></div></footer>
+  </body>
+</html>

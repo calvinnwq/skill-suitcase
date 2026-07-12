@@ -17,7 +17,7 @@
     "type": "git",
     "url": "git+https://github.com/calvinnwq/skill-suitcase.git"
   },
-  "homepage": "https://github.com/calvinnwq/skill-suitcase#readme",
+  "homepage": "https://calvinnwq.github.io/skill-suitcase/",
   "bugs": {
     "url": "https://github.com/calvinnwq/skill-suitcase/issues"
   },
@@ -63,6 +63,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "pnpm run typecheck",
     "test": "pnpm run build && node scripts/run-tests.mjs",
+    "docs:serve": "python3 -m http.server 8080 --bind 127.0.0.1 --directory docs",
     "format:check": "git diff --check",
     "architecture:check": "node scripts/check-architecture.mjs"
   },

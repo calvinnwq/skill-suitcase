@@ -100,3 +100,9 @@ data rather than depending on a contributor's home directory.
 Examples should use placeholders such as `/path/to/skills-catalog`, `$HOME`, or
 temporary directories. Do not commit credentials, private prompts, real agent
 home contents, or contributor-specific absolute paths.
+
+The static docs site lives in `docs/` as plain HTML with one shared stylesheet
+and client script; there is no build step.
+Preview it locally with `pnpm run docs:serve` at `http://127.0.0.1:8080/`.
+`tests/docs-site.test.ts` is the site's deterministic check and runs inside
+`pnpm test`; deployment goes through `.github/workflows/pages.yml`.
