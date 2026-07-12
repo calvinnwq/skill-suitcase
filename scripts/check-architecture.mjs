@@ -1,69 +1,103 @@
 #!/usr/bin/env node
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const srcRoot = path.join(repoRoot, "src");
-const failures = [];
+const scriptPath = fileURLToPath(import.meta.url);
+const defaultRepoRoot = path.resolve(path.dirname(scriptPath), "..");
+const COMMAND_MODULE_MAX_LINES = 80;
+const CLI_MAX_LINES = 60;
 
-const sourceFiles = await collectTypeScriptFiles(srcRoot);
-const sourceFileSet = new Set(sourceFiles);
-for (const filePath of sourceFiles) {
-  const relative = toRepoRelative(filePath);
-  const text = await readFile(filePath, "utf8");
-  const imported = importedSourceFiles(filePath, text);
+const FORBIDDEN_LAYER_IMPORTS = {
+  adapters: new Set(["cli", "commands", "core", "renderers"]),
+  commands: new Set(["cli", "adapters"]),
+  config: new Set(["cli", "commands", "core", "adapters", "renderers"]),
+  core: new Set(["cli", "commands", "renderers"]),
+  renderers: new Set(["cli", "commands", "core", "adapters"]),
+  shared: new Set(["cli", "commands", "core", "adapters", "renderers"])
+};
 
-  if (relative.startsWith("src/core/")) {
-    for (const target of imported) {
-      if (target.startsWith("src/commands/")) {
-        failures.push(`${relative} imports command boundary ${target}`);
+const COMMAND_SUPPORT_FILES = new Set([
+  "src/commands/helpers.ts",
+  "src/commands/index.ts",
+  "src/commands/target-overrides.ts",
+  "src/commands/types.ts"
+]);
+
+export async function checkArchitecture(repoRoot = defaultRepoRoot) {
+  const resolvedRepoRoot = path.resolve(repoRoot);
+  const srcRoot = path.join(resolvedRepoRoot, "src");
+  const failures = [];
+  const sourceFiles = await collectTypeScriptFiles(srcRoot);
+  const sourceFileSet = new Set(sourceFiles);
+
+  for (const filePath of sourceFiles) {
+    const relative = toRepoRelative(resolvedRepoRoot, filePath);
+    const text = await readFile(filePath, "utf8");
+    const analysis = analyzeSourceFile(filePath, text);
+    const imported = importedSourceFiles(resolvedRepoRoot, sourceFileSet, filePath, analysis.importSpecifiers);
+    const sourceLayer = sourceLayerFor(relative);
+    const forbiddenTargets = sourceLayer === null ? undefined : FORBIDDEN_LAYER_IMPORTS[sourceLayer];
+
+    if (forbiddenTargets !== undefined) {
+      for (const target of imported) {
+        const targetLayer = sourceLayerFor(target);
+        if (targetLayer !== null && forbiddenTargets.has(targetLayer)) {
+          failures.push(`${relative} imports forbidden ${targetLayer} boundary ${target}`);
+        }
       }
-      if (target.startsWith("src/renderers/")) {
-        failures.push(`${relative} imports renderer boundary ${target}`);
+    }
+
+    for (const processMember of analysis.processMembers) {
+      if (relative !== "src/cli.ts") {
+        failures.push(`${relative} uses process.${processMember} outside the CLI boundary`);
+      }
+    }
+
+    if (isCommandBehaviorModule(relative)) {
+      const lines = nonEmptyLineCount(text);
+      if (lines > COMMAND_MODULE_MAX_LINES) {
+        failures.push(
+          `${relative} has ${lines} non-empty lines; command behavior modules must stay at or below ${COMMAND_MODULE_MAX_LINES}`
+        );
       }
     }
   }
 
-  if (relative.startsWith("src/adapters/")) {
-    for (const target of imported) {
-      if (target.startsWith("src/commands/")) {
-        failures.push(`${relative} imports command boundary ${target}`);
-      }
+  const cliPath = path.join(srcRoot, "cli.ts");
+  const cliText = await readFile(cliPath, "utf8");
+  const cliAnalysis = analyzeSourceFile(cliPath, cliText);
+  const cliLines = nonEmptyLineCount(cliText);
+  if (cliLines > CLI_MAX_LINES) {
+    failures.push(`src/cli.ts has ${cliLines} non-empty lines; keep it as a thin entrypoint`);
+  }
+
+  for (const target of importedSourceFiles(resolvedRepoRoot, sourceFileSet, cliPath, cliAnalysis.importSpecifiers)) {
+    const targetLayer = sourceLayerFor(target);
+    if (targetLayer !== null && !new Set(["commands", "config", "renderers", "shared"]).has(targetLayer)) {
+      failures.push(`src/cli.ts imports forbidden ${targetLayer} boundary ${target}`);
     }
   }
 
-  for (const match of text.matchAll(/\bprocess\.(argv|stdout|stderr)\b/g)) {
-    const processMember = match[1];
-    const allowed = processMember === "argv"
-      ? relative === "src/cli.ts"
-      : relative === "src/cli.ts" || relative.startsWith("src/renderers/");
-    if (!allowed) {
-      failures.push(`${relative} uses process.${processMember} outside the CLI/rendering boundary`);
+  if (cliAnalysis.hasSwitchStatement) {
+    failures.push("src/cli.ts contains a switch statement; command dispatch belongs in src/commands/");
+  }
+
+  return failures.sort();
+}
+
+export async function runArchitectureCheck(repoRoot = defaultRepoRoot) {
+  const failures = await checkArchitecture(repoRoot);
+  if (failures.length > 0) {
+    for (const failure of failures) {
+      console.error(`Architecture guardrail failed: ${failure}`);
     }
+    return 1;
   }
-}
 
-const cliPath = path.join(srcRoot, "cli.ts");
-const cliText = await readFile(cliPath, "utf8");
-const cliLines = cliText.split("\n").filter((line) => line.trim() !== "").length;
-if (cliLines > 60) {
-  failures.push(`src/cli.ts has ${cliLines} non-empty lines; keep it as a thin entrypoint`);
-}
-if (/from "\.\/core\//.test(cliText) || /from "\.\/adapters\//.test(cliText)) {
-  failures.push("src/cli.ts imports core/adapters directly instead of using the command boundary");
-}
-if (/\bswitch\s*\(/.test(cliText)) {
-  failures.push("src/cli.ts contains a switch statement; command dispatch belongs in src/commands/");
-}
-
-if (failures.length > 0) {
-  for (const failure of failures) {
-    console.error(`Architecture guardrail failed: ${failure}`);
-  }
-  process.exitCode = 1;
-} else {
   console.log("Architecture guardrails passed.");
+  return 0;
 }
 
 async function collectTypeScriptFiles(directory) {
@@ -80,27 +114,81 @@ async function collectTypeScriptFiles(directory) {
   return files.sort();
 }
 
-function importedSourceFiles(filePath, text) {
+function importedSourceFiles(repoRoot, sourceFileSet, filePath, specifiers) {
   const imports = [];
-  const importPattern = /(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']/g;
-  for (const match of text.matchAll(importPattern)) {
-    const specifier = match[1];
-    if (specifier === undefined || !specifier.startsWith(".")) {
+
+  for (const specifier of specifiers) {
+    if (!specifier.startsWith(".")) {
       continue;
     }
-    const resolved = resolveSourceSpecifier(filePath, specifier);
+    const resolved = resolveSourceSpecifier(repoRoot, sourceFileSet, filePath, specifier);
     if (resolved !== null) {
       imports.push(resolved);
     }
   }
-  return imports;
+  return [...new Set(imports)].sort();
 }
 
-function resolveSourceSpecifier(filePath, specifier) {
+function analyzeSourceFile(filePath, text) {
+  const sourceFile = ts.createSourceFile(filePath, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const importSpecifiers = [];
+  const processMembers = [];
+  let hasSwitchStatement = false;
+
+  function visit(node) {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+      && node.moduleSpecifier !== undefined
+      && ts.isStringLiteralLike(node.moduleSpecifier)) {
+      importSpecifiers.push(node.moduleSpecifier.text);
+    } else if (ts.isImportEqualsDeclaration(node)
+      && ts.isExternalModuleReference(node.moduleReference)
+      && node.moduleReference.expression !== undefined
+      && ts.isStringLiteralLike(node.moduleReference.expression)) {
+      importSpecifiers.push(node.moduleReference.expression.text);
+    } else if (ts.isCallExpression(node)
+      && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments.length === 1
+      && ts.isStringLiteralLike(node.arguments[0])) {
+      importSpecifiers.push(node.arguments[0].text);
+    }
+
+    if (ts.isPropertyAccessExpression(node)
+      && ts.isIdentifier(node.expression)
+      && node.expression.text === "process"
+      && isGuardedProcessMember(node.name.text)) {
+      processMembers.push(node.name.text);
+    } else if (ts.isElementAccessExpression(node)
+      && ts.isIdentifier(node.expression)
+      && node.expression.text === "process"
+      && node.argumentExpression !== undefined
+      && ts.isStringLiteralLike(node.argumentExpression)
+      && isGuardedProcessMember(node.argumentExpression.text)) {
+      processMembers.push(node.argumentExpression.text);
+    }
+
+    if (ts.isSwitchStatement(node)) {
+      hasSwitchStatement = true;
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return {
+    importSpecifiers: [...new Set(importSpecifiers)].sort(),
+    processMembers: [...new Set(processMembers)].sort(),
+    hasSwitchStatement
+  };
+}
+
+function isGuardedProcessMember(value) {
+  return value === "argv" || value === "stdout" || value === "stderr";
+}
+
+function resolveSourceSpecifier(repoRoot, sourceFileSet, filePath, specifier) {
   const resolved = path.resolve(path.dirname(filePath), specifier);
   for (const candidate of candidateSourcePaths(resolved)) {
     if (sourceFileSet.has(candidate)) {
-      return toRepoRelative(candidate);
+      return toRepoRelative(repoRoot, candidate);
     }
   }
   return null;
@@ -115,6 +203,26 @@ function candidateSourcePaths(resolved) {
   return candidates;
 }
 
-function toRepoRelative(filePath) {
+function sourceLayerFor(relative) {
+  if (relative === "src/cli.ts") {
+    return "cli";
+  }
+  const match = relative.match(/^src\/(adapters|commands|config|core|renderers|shared)\//);
+  return match?.[1] ?? null;
+}
+
+function isCommandBehaviorModule(relative) {
+  return relative.startsWith("src/commands/") && !COMMAND_SUPPORT_FILES.has(relative);
+}
+
+function nonEmptyLineCount(text) {
+  return text.split("\n").filter((line) => line.trim() !== "").length;
+}
+
+function toRepoRelative(repoRoot, filePath) {
   return path.relative(repoRoot, filePath).split(path.sep).join("/");
+}
+
+if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === scriptPath) {
+  process.exitCode = await runArchitectureCheck();
 }
