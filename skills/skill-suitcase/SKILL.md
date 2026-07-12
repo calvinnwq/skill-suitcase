@@ -1,6 +1,6 @@
 ---
 name: skill-suitcase
-description: Use when asked to install, audit, sync, track, reconcile, repair, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, shared agents roots, Grok, or another machine using a skills catalog.
+description: Use when asked to install, audit, sync, track, reconcile, repair, prune, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import, obsolete-install pruning, and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, shared agents roots, Grok, or another machine using a skills catalog.
 ---
 
 # Skill Suitcase
@@ -37,6 +37,10 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
   skill, review `repair --dry-run`, then run `repair --apply` for that named
   skill only after explicit approval; use `rollback` to restore the pre-repair
   content. Refuse broad/all-target dirty repair.
+- Use `prune --dry-run` only with an explicit repeated `--skill` list for
+  receipt-owned installs no longer assigned to that target. Apply only after
+  approval naming the target, exact skill list, and returned plan ID. Never
+  substitute manual deletion or broad rollback.
 - Use `import-target` only for the inverse of `repair`: a selected
   receipt-owned, catalog-owned skill that went `dirty` from an **intentional**
   local edit you want as the repo version. Review `import-target --dry-run`, then
@@ -46,7 +50,7 @@ The usual source catalog is `~/repos/skills`; the CLI is either the installed
   skills.
 - Never force provider-managed Codex skills such as Codex `linear` into Suitcase
   ownership.
-- Never run `pack`, `apply`, `track`, `reconcile`, `repair`, or `import-target`
+- Never run `pack`, `apply`, `track`, `reconcile`, `repair`, `prune`, or `import-target`
   to adopt OpenCode, Pi, or other provider-backed adapter roots, even when the
   catalog declares a custom manifest `assignmentPaths` entry for review.
 - The current `rollback` command reverses apply, reconcile, and repair state, but it does not restore promotions.
@@ -241,6 +245,29 @@ approval (`rollback` restores the pre-repair dirty content):
 # after approval:
 "$CLI" repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --apply --json
 ```
+
+For explicit receipt-owned installs that are no longer assigned to the target,
+review one deterministic prune plan. Repeat the identical skill list for apply;
+any receipt, directory, or symlink drift invalidates the plan ID:
+
+```bash
+"$CLI" prune --source "$SRC" --target codex --codex-home "$HOME/.codex" \
+  --skill <obsolete-skill> --dry-run --json
+# after approval naming target, skills, and plan id:
+"$CLI" prune --source "$SRC" --target codex --codex-home "$HOME/.codex" \
+  --skill <obsolete-skill> --plan-id <reviewed-plan-id> --apply --json
+```
+
+Prune quarantines physical directories, removes only symlinks whose live target
+matches their receipt source, atomically updates the receipt, and reports a
+transaction journal plus receipt backup. Register retained quarantine/backup
+paths with the active artifact-retention workflow. If the plan quarantine root
+already exists, apply refuses and preserves it. Do not manually delete it.
+Prune requires `.skill-suitcase-receipt.json` and refuses legacy
+`.skills-sync.json` receipts without migrating them.
+Receipt-owned symlinks created by `promote` are eligible once the skill is no
+longer assigned. Apply refusals keep `dryRun: false` and report `readOnly: true`,
+and a missing install root is refused rather than recreated.
 
 For a selected receipt-owned, catalog-owned skill that went `dirty` from an
 intentional local edit you want in the repo, import it the other direction

@@ -19,7 +19,7 @@ documented in [`SUPPORT.md`](SUPPORT.md), [`SECURITY.md`](SECURITY.md), and
 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 Read-only commands (`plan`, `diff`, `pack --dry-run`, `import`, `validate`,
-`targets`, `status`, `upstream check`, and `upstream fetch`) read a catalog
+`targets`, `status`, `prune --dry-run`, `upstream check`, and `upstream fetch`) read a catalog
 manifest, resolve assignments and assignment paths, and emit JSON plans, diffs,
 import findings, target discovery, bundle manifests, status reports, or upstream
 source-refresh reports without touching target install paths or runtime homes.
@@ -94,6 +94,7 @@ The CLI currently supports:
 | Install catalog skills | `apply` | Requires a plan lock or staged artifact |
 | Adopt exact existing installs | `track` | Writes receipts, not skill files |
 | Recover target state | `rollback`, `reconcile`, `repair` | Explicit, receipt-aware mutation |
+| Remove obsolete managed installs | `prune` | Explicit skills; read-only plan ID before transactional apply |
 | Move target work into Git | `promote`, `import-target` | Dry-run first; `--apply` mutates catalog source |
 | Refresh pinned upstream source | `upstream check`, `upstream fetch`, `upstream import` | Catalog-only; never a direct target installer |
 
@@ -135,7 +136,7 @@ rollback metadata. `status` classifies modeled installs as `current`, `behind`,
 `version`, `dirty`, `missing`, `unknown`, or `blocked`. Provider-modeled
 fallback inventory without a catalog assignment appears with no status entries.
 
-Never run live `apply`, `track`, `reconcile --apply`, `repair --apply`,
+Never run live `apply`, `track`, `reconcile --apply`, `repair --apply`, `prune --apply`,
 `rollback`, `promote --apply`, `import-target --apply`, or
 `upstream import --apply` against a real catalog or runtime home without
 explicit approval for the source, target, and mode.
@@ -149,11 +150,12 @@ Use the target state and ownership model to choose the command:
 | Existing target exactly matches catalog source but has no receipt | `track` |
 | Receiptless target differs from a catalog-planned skill | `reconcile` |
 | Receipt-owned copy install drifted and catalog should win | `repair` |
+| Receipt-owned install is no longer assigned to the target | `prune` |
 | New target-created skill should become catalog source | `promote` |
 | Intentional edit to a receipt-owned catalog skill should return to Git | `import-target` |
 
 Preview `track` candidates with `diff`; `track` has no dry-run flag. Run the
-matching dry-run before `reconcile`, `repair`, `promote`, or `import-target`.
+matching dry-run before `reconcile`, `repair`, `prune`, `promote`, or `import-target`.
 Drift detection is a heartbeat, not permission to overwrite either side; every
 mutation still requires explicit approval.
 
@@ -168,6 +170,29 @@ that status becomes `current`. A later `rollback` restores the pre-repair state.
 `repair` refuses unknown, missing, behind, symlink-mode, read-only, and
 unselected states rather than guessing operator intent.
 
+## `prune` Output
+
+`prune --dry-run` accepts only explicit repeated `--skill` values. It refuses
+skills still assigned to the target, paths without one matching receipt record,
+provider/read-only targets, path escapes, receipt/file drift, and symlinks whose
+current target differs from their receipt source. The plan includes the receipt
+hash, per-object fingerprint, quarantine paths, and a stable plan ID.
+Receipt-owned symlinks created by `promote` are eligible under the same rules
+once the skill is no longer assigned to the selected target.
+Prune requires `.skill-suitcase-receipt.json` and safely refuses a legacy
+`.skills-sync.json` receipt instead of migrating it in this safety-sensitive workflow.
+
+After approval, repeat the exact skill list with
+`--plan-id <reviewed-id> --apply`. Apply recomputes the plan before mutation,
+refuses and preserves any pre-existing plan quarantine root, quarantines physical
+directories, removes exact verified symlinks, writes a plan-scoped transaction
+journal and receipt backup, then atomically replaces the live receipt. Any
+failed apply attempts to restore the prior receipt, directories, and symlinks.
+Retain and review any reported quarantine root, transaction journal, and receipt
+backup; do not manually delete them or use broad rollback.
+An apply refusal preserves apply-mode JSON (`dryRun: false`) while reporting
+`readOnly: true`, and a missing install root is refused rather than recreated.
+
 ## `import-target` Output
 
 `import-target` is the inverse choice for an intentional local edit to a
@@ -177,11 +202,12 @@ without mutation. After approval, `import-target --apply` copies the target
 content into the catalog, verifies it, refreshes the receipt, and leaves
 ordinary Git changes for review; it does not auto-commit.
 
-### Decision tree: `track` vs `reconcile` vs `repair` vs `promote` vs `import-target`
+### Decision tree: `track` vs `reconcile` vs `repair` vs `prune` vs `promote` vs `import-target`
 
 - Use `track` for an exact unreceipted match.
 - Use `reconcile` when an unknown target should be replaced by catalog source.
 - Use `repair` when an accidental dirty edit should be discarded after review.
+- Use `prune` when an explicit receipt-owned install is no longer assigned to its target.
 - Use `promote` for a new target-created skill.
 - Use `import-target` when an intentional dirty edit should become catalog
   source.

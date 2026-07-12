@@ -6,6 +6,7 @@ import type { pack } from "../core/packing/index.js";
 import type { plan } from "../core/planning/index.js";
 import type { importTarget } from "../core/import-target/index.js";
 import type { executePromote, planPromote } from "../core/promote/index.js";
+import type { prune } from "../core/prune/index.js";
 import type { reconcile } from "../core/reconcile/index.js";
 import type { repair } from "../core/repair/index.js";
 import type { rollback } from "../core/rollback/index.js";
@@ -29,6 +30,7 @@ export type CommandName =
   | "reconcile"
   | "repair"
   | "promote"
+  | "prune"
   | "import-target"
   | "upstream";
 
@@ -47,6 +49,7 @@ export type ParsedCommandArgs = {
   artifact?: string;
   mode?: string;
   receipt?: string;
+  planId?: string;
   agentsSkills?: string;
   codexHome?: string;
   codexSkills?: string;
@@ -64,6 +67,7 @@ export type ValueFlagName =
   | "artifact"
   | "mode"
   | "receipt"
+  | "planId"
   | "agentsSkills"
   | "codexHome"
   | "codexSkills"
@@ -85,6 +89,7 @@ export type CommandJsonResult =
   | Awaited<ReturnType<typeof repair>>
   | Awaited<ReturnType<typeof planPromote>>
   | Awaited<ReturnType<typeof executePromote>>
+  | Awaited<ReturnType<typeof prune>>
   | Awaited<ReturnType<typeof importTarget>>
   | Awaited<ReturnType<typeof checkUpstream>>
   | Awaited<ReturnType<typeof fetchUpstreamSkillDryRun>>

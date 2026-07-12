@@ -1,19 +1,25 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
   LEGACY_RECEIPT_SCHEMA,
   RECEIPT_FILE,
+  RECEIPT_LOCK_FILE,
   RECEIPT_SCHEMA,
   Receipt,
   ReceiptInstallRecord,
   buildInstallRecord,
   buildReceipt,
   buildInstalledFiles,
+  readReceipt,
+  rollbackReceiptMutations,
+  type ReceiptLock,
+  type ReceiptMutation,
   upsertAndWriteReceipt,
+  withReceiptLock,
   writeReceipt,
   upsertInstallRecord
 } from "../src/receipt.js";
@@ -525,7 +531,7 @@ test("upsertAndWriteReceipt rejects records with invalid installed file list", a
     sourceCommit: "cafebabe"
   });
 
-  assert.rejects(
+  await assert.rejects(
     async () =>
       upsertAndWriteReceipt({
         installRoot,
@@ -1202,5 +1208,402 @@ test("receipt writers reject custom receipt paths outside install root", async (
         installRecord
       }),
     /receiptPath must stay within installRoot/
+  );
+});
+
+test("receipt rollback removes transaction writes without discarding concurrent records", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-concurrent-rollback-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const mutations: ReceiptMutation[] = [];
+
+  await upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: "transaction-skill",
+    installRecord: buildInstallRecord({
+      skill: "transaction-skill",
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, "transaction-skill"),
+      sourcePath: "/repo/skills/transaction-skill",
+      sourceHash: "transaction-hash"
+    }),
+    onWritten: (mutation) => mutations.push(mutation)
+  });
+  await upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: "concurrent-skill",
+    installRecord: buildInstallRecord({
+      skill: "concurrent-skill",
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, "concurrent-skill"),
+      sourcePath: "/repo/skills/concurrent-skill",
+      sourceHash: "concurrent-hash"
+    })
+  });
+
+  assert.equal(await rollbackReceiptMutations({ installRoot: root, mutations }), true);
+  const receipt = await readReceipt({ installRoot: root });
+  assert.equal(receipt.installs?.["transaction-skill"], undefined);
+  assert.ok(receipt.installs?.["concurrent-skill"]);
+});
+
+test("receipt rollback preserves a concurrent update to the same record", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-concurrent-conflict-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const mutations: ReceiptMutation[] = [];
+
+  await upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: "shared-skill",
+    installRecord: buildInstallRecord({
+      skill: "shared-skill",
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, "shared-skill"),
+      sourcePath: "/repo/skills/shared-skill",
+      version: "1.0.0"
+    }),
+    onWritten: (mutation) => mutations.push(mutation)
+  });
+  await upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: "shared-skill",
+    installRecord: buildInstallRecord({
+      skill: "shared-skill",
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, "shared-skill"),
+      sourcePath: "/repo/skills/shared-skill",
+      version: "2.0.0"
+    })
+  });
+
+  assert.equal(await rollbackReceiptMutations({ installRoot: root, mutations }), false);
+  const receipt = await readReceipt({ installRoot: root });
+  assert.equal(getSingleInstallRecord(receipt.installs?.["shared-skill"], "shared-skill").version, "2.0.0");
+});
+
+test("receipt transaction lock delays concurrent writers until rollback completes", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-transaction-lock-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let concurrentWrite: Promise<string> | null = null;
+  let concurrentFinished = false;
+
+  await withReceiptLock({ installRoot: root }, async (receiptLock) => {
+    const mutations: ReceiptMutation[] = [];
+    await upsertAndWriteReceipt({
+      installRoot: root,
+      skillName: "transaction-skill",
+      installRecord: buildInstallRecord({
+        skill: "transaction-skill",
+        agent: "codex",
+        mode: "copy",
+        targetPath: path.join(root, "transaction-skill"),
+        sourcePath: "/repo/skills/transaction-skill",
+        sourceHash: "transaction-hash"
+      }),
+      onWritten: (mutation) => mutations.push(mutation),
+      receiptLock
+    });
+    concurrentWrite = upsertAndWriteReceipt({
+      installRoot: root,
+      skillName: "concurrent-skill",
+      installRecord: buildInstallRecord({
+        skill: "concurrent-skill",
+        agent: "codex",
+        mode: "copy",
+        targetPath: path.join(root, "concurrent-skill"),
+        sourcePath: "/repo/skills/concurrent-skill",
+        sourceHash: "concurrent-hash"
+      })
+    }).finally(() => {
+      concurrentFinished = true;
+    });
+    await Promise.resolve();
+    assert.equal(concurrentFinished, false);
+    assert.equal(await rollbackReceiptMutations({ installRoot: root, mutations, receiptLock }), true);
+  });
+
+  assert.ok(concurrentWrite);
+  await concurrentWrite;
+  const receipt = await readReceipt({ installRoot: root });
+  assert.equal(receipt.installs?.["transaction-skill"], undefined);
+  assert.ok(receipt.installs?.["concurrent-skill"]);
+});
+
+test("receipt lock tokens expire after their callback", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-expired-receipt-token-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let expiredToken: ReceiptLock | null = null;
+  await withReceiptLock({ installRoot: root }, async (receiptLock) => {
+    expiredToken = receiptLock;
+  });
+  assert.ok(expiredToken);
+  let writer: Promise<string> | null = null;
+  let writerFinished = false;
+
+  await withReceiptLock({ installRoot: root }, async () => {
+    writer = writeReceipt({
+      installRoot: root,
+      receipt: { installs: {} },
+      receiptLock: expiredToken!
+    }).finally(() => {
+      writerFinished = true;
+    });
+    await Promise.resolve();
+    assert.equal(writerFinished, false);
+  });
+
+  assert.ok(writer);
+  await writer;
+});
+
+test("receipt writers recover an old empty legacy prune lock", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-legacy-lock-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const lockPath = path.join(root, RECEIPT_LOCK_FILE);
+  await mkdir(lockPath);
+  const old = new Date(Date.now() - 2 * 86_400_000);
+  await utimes(lockPath, old, old);
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  const receipt = await readReceipt({ installRoot: root });
+  assert.deepEqual(receipt.installs, {});
+});
+
+test("receipt writers recover a lock left by a terminated owner", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-crash-lock-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(
+    path.join(root, RECEIPT_LOCK_FILE),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token: "terminated-owner",
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+});
+
+test("receipt writers recover an orphaned stale-lock recovery claim", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-orphaned-recovery-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const lockPath = path.join(root, RECEIPT_LOCK_FILE);
+  await writeFile(
+    lockPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token: "terminated-owner",
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+  const lockInfo = await stat(lockPath);
+  const recoveryPath = `${lockPath}.${lockInfo.dev}-${lockInfo.ino}.recover`;
+  await link(lockPath, recoveryPath);
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  await assert.rejects(stat(recoveryPath), { code: "ENOENT" });
+});
+
+test("receipt writers recover a terminated recovery claimant", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-terminated-recovery-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const lockPath = path.join(root, RECEIPT_LOCK_FILE);
+  await writeFile(
+    lockPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token: "terminated-owner",
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+  const recoveryPath = `${lockPath}.recover.2147483647.terminated-claimant`;
+  await link(lockPath, recoveryPath);
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  await assert.rejects(stat(recoveryPath), { code: "ENOENT" });
+});
+
+test("receipt writers recover a pending claim left by a terminated owner", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-terminated-pending-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const token = "terminated-pending-claimant";
+  const pendingPath = path.join(root, `${RECEIPT_LOCK_FILE}.${token}.pending`);
+  await writeFile(
+    pendingPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token,
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  await assert.rejects(stat(pendingPath), { code: "ENOENT" });
+});
+
+test("receipt writers preserve pending claims owned by live processes", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-live-pending-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const token = "live-pending-claimant";
+  const pendingPath = path.join(root, `${RECEIPT_LOCK_FILE}.${token}.pending`);
+  const pendingText = `${JSON.stringify({
+    schema: "calvinnwq.skills.receipt-lock.v1",
+    pid: process.pid,
+    token,
+    createdAt: new Date().toISOString()
+  })}\n`;
+  await writeFile(pendingPath, pendingText, { encoding: "utf8", mode: 0o600 });
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  assert.equal(await readFile(pendingPath, "utf8"), pendingText);
+});
+
+test("receipt writers preserve pending claims with mismatched ownership", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-mismatched-pending-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const pendingPath = path.join(root, `${RECEIPT_LOCK_FILE}.recorded-token.pending`);
+  const pendingText = `${JSON.stringify({
+    schema: "calvinnwq.skills.receipt-lock.v1",
+    pid: 2_147_483_647,
+    token: "different-token",
+    createdAt: new Date().toISOString()
+  })}\n`;
+  await writeFile(pendingPath, pendingText, { encoding: "utf8", mode: 0o600 });
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  assert.equal(await readFile(pendingPath, "utf8"), pendingText);
+});
+
+test("concurrent stale-lock waiters preserve every receipt update", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-stale-waiters-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(
+    path.join(root, RECEIPT_LOCK_FILE),
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token: "terminated-owner",
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+
+  const skills = Array.from({ length: 24 }, (_, index) => `concurrent-${index}`);
+  await Promise.all(skills.map((skill) => upsertAndWriteReceipt({
+    installRoot: root,
+    skillName: skill,
+    installRecord: buildInstallRecord({
+      skill,
+      agent: "codex",
+      mode: "copy",
+      targetPath: path.join(root, skill),
+      sourcePath: `/repo/skills/${skill}`,
+      sourceHash: `${skill}-hash`
+    })
+  })));
+
+  const receipt = await readReceipt({ installRoot: root });
+  assert.deepEqual(Object.keys(receipt.installs ?? {}).sort(), skills.sort());
+});
+
+test("receipt writers recover a legacy file lock left by a terminated owner", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-legacy-crash-lock-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, RECEIPT_LOCK_FILE), "2147483647\n", {
+    encoding: "utf8",
+    mode: 0o600
+  });
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+});
+
+test("receipt replacement preserves existing permissions", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-mode-existing-"));
+  const receiptPath = path.join(root, RECEIPT_FILE);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(receiptPath, `${JSON.stringify({ schema: RECEIPT_SCHEMA, installs: {} })}\n`);
+  await chmod(receiptPath, 0o640);
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.equal((await stat(receiptPath)).mode & 0o777, 0o640);
+});
+
+test("receipt replacement preserves permissions under a restrictive umask", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-mode-umask-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const receiptPath = path.join(root, RECEIPT_FILE);
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+  await chmod(receiptPath, 0o640);
+  const previousUmask = process.umask(0o077);
+  try {
+    await writeReceipt({ installRoot: root, receipt: { installs: {}, updated: true } });
+  } finally {
+    process.umask(previousUmask);
+  }
+  assert.equal((await stat(receiptPath)).mode & 0o777, 0o640);
+});
+
+test("new receipt files use restrictive permissions", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-mode-new-"));
+  const receiptPath = path.join(root, RECEIPT_FILE);
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.equal((await stat(receiptPath)).mode & 0o777, 0o600);
+});
+
+test("custom receipt writers lock beside the receipt file", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-custom-receipt-lock-"));
+  const receiptDirectory = path.join(root, "state");
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(receiptDirectory);
+  let writer: Promise<string> | null = null;
+  let writerFinished = false;
+
+  await withReceiptLock({ installRoot: receiptDirectory }, async () => {
+    writer = writeReceipt({
+      installRoot: root,
+      receiptPath: "state/receipt.json",
+      receipt: { installs: {} }
+    }).finally(() => {
+      writerFinished = true;
+    });
+    await Promise.resolve();
+    assert.equal(writerFinished, false);
+  });
+
+  assert.ok(writer);
+  await writer;
+  assert.deepEqual(
+    (await readReceipt({ installRoot: root, receiptPath: "state/receipt.json" })).installs,
+    {}
   );
 });

@@ -538,6 +538,35 @@ test("track reports receipt write failures without partial adoption", async (t) 
   await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
 });
 
+test("track preserves invalid_receipt for malformed existing receipt JSON", async (t) => {
+  const { sourceRoot, targetRoot } = await createLiveMatchingInstall(t);
+  await writeFile(path.join(targetRoot, RECEIPT_FILE), "{invalid\n");
+
+  const result = await track({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "invalid_receipt"), true);
+  assert.equal(result.errors.some((error) => error.code === "receipt_write_failed"), false);
+  assert.equal(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), "{invalid\n");
+});
+
+test("track preserves invalid_receipt for unreadable existing receipts", async (t) => {
+  const { sourceRoot, targetRoot } = await createLiveMatchingInstall(t);
+  const receiptPath = path.join(targetRoot, RECEIPT_FILE);
+  const receiptText = `${JSON.stringify({ schema: "calvinnwq.skills.receipt.v0", installs: {} }, null, 2)}\n`;
+  await writeFile(receiptPath, receiptText);
+  await chmod(receiptPath, 0o000);
+  t.after(() => chmod(receiptPath, 0o600).catch(() => undefined));
+
+  const result = await track({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "invalid_receipt"), true);
+  assert.equal(result.errors.some((error) => error.code === "receipt_write_failed"), false);
+  await chmod(receiptPath, 0o600);
+  assert.equal(await readFile(receiptPath, "utf8"), receiptText);
+});
+
 async function createSymlinkAdoptionFixture(t: { after(fn: () => Promise<void> | void): void }): Promise<{
   sourceRoot: string;
   targetRoot: string;

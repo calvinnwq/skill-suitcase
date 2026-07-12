@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { constants, realpathSync } from "node:fs";
+import { access, lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
 import {
   buildInstalledFiles,
   RECEIPT_FILE,
   RECEIPT_SCHEMA,
+  updateAndWriteReceipt,
+  withReceiptLock,
   type Receipt,
   type ReceiptInstallRecord
 } from "../receipts/index.js";
@@ -114,7 +117,8 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
   }
 
   const receiptPath = await resolveReceiptPath(receipt);
-  const installRoot = path.dirname(receiptPath);
+  const receiptDirectory = path.dirname(receiptPath);
+  const installRoot = await resolveReceiptInstallRoot(receiptDirectory);
   const result: RollbackResult = {
     ok: true,
     receipt: receiptPath,
@@ -130,6 +134,20 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     errors: []
   };
 
+  try {
+    await readReceipt(receiptPath);
+  } catch (error) {
+    result.ok = false;
+    result.errors.push({
+      code: "invalid_receipt",
+      message: `Invalid receipt ${receiptPath}: ${errorMessage(error)}`,
+      path: receiptPath
+    });
+    return result;
+  }
+
+  try {
+    return await withReceiptLock({ installRoot, createInstallRoot: false }, async (receiptLock) => {
   let receiptPayload: Receipt;
   try {
     receiptPayload = await readReceipt(receiptPath);
@@ -148,6 +166,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     result.errors.push({ code: "invalid_receipt", message: "Receipt installs must be an object." });
     return result;
   }
+  const originalInstalls = structuredClone(installs);
 
   let changedReceipt = false;
   const receiptChangedSkills = new Set<string>();
@@ -188,7 +207,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
       // and apply-refreshed links record created:false; in both cases Suitcase
       // did not create the link, so there is nothing to reverse and rollback is
       // a safe no-op that leaves the link and its source untouched.
-      const appliedSymlink = parseAppliedSymlinkRollback(record, installRoot);
+      const appliedSymlink = parseAppliedSymlinkRollback(record, installRoot, receiptDirectory);
       if (appliedSymlink.kind === "apply-created") {
         const removal = await removeAppliedSymlink(appliedSymlink);
         if (removal.kind === "removed") {
@@ -256,7 +275,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     }
 
     const parsedRollback = hasOwn(record, "rollback")
-      ? normalizeRollback(record.rollback, installRoot)
+      ? normalizeRollback(record.rollback, installRoot, receiptDirectory)
       : { kind: "none" as const };
     if (parsedRollback.kind === "none") {
       result.summary.noop += 1;
@@ -468,7 +487,25 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
 
   if (changedReceipt) {
     try {
-      await writeFile(receiptPath, `${JSON.stringify(receiptPayload, null, 2)}\n`, "utf8");
+      await access(receiptPath, constants.W_OK);
+      await updateAndWriteReceipt({
+        installRoot,
+        receiptPath: path.basename(receiptPath),
+        receiptLock,
+        update: (currentReceipt) => {
+          const currentInstalls = isRecord(currentReceipt.installs)
+            ? { ...currentReceipt.installs }
+            : {};
+          for (const skill of receiptChangedSkills) {
+            if (JSON.stringify(currentInstalls[skill]) !== JSON.stringify(originalInstalls[skill])) {
+              throw new Error(`Receipt record for ${skill} changed during rollback.`);
+            }
+            if (installs[skill] === undefined) delete currentInstalls[skill];
+            else currentInstalls[skill] = installs[skill] as ReceiptInstallRecord | ReceiptInstallRecord[];
+          }
+          return { ...currentReceipt, installs: currentInstalls };
+        }
+      });
     } catch (error) {
       result.ok = false;
       let affectedItems = 0;
@@ -492,6 +529,24 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     result.ok = false;
   }
   return result;
+    });
+  } catch (error) {
+    result.ok = false;
+    result.errors.push({
+      code: "receipt_lock_failed",
+      message: errorMessage(error),
+      path: receiptPath
+    });
+    return result;
+  }
+}
+
+async function resolveReceiptInstallRoot(receiptDirectory: string): Promise<string> {
+  try {
+    return await realpath(receiptDirectory);
+  } catch {
+    return receiptDirectory;
+  }
 }
 
 async function resolveReceiptPath(receipt: string): Promise<string> {
@@ -555,7 +610,11 @@ function removeReceiptInstallRecord(
  * links (no rollback field), apply-refreshed links (created:false), and
  * already-rolled-back links all return "none" so rollback leaves them alone.
  */
-function parseAppliedSymlinkRollback(record: ReceiptInstallRecord, installRoot: string): AppliedSymlinkRollback {
+function parseAppliedSymlinkRollback(
+  record: ReceiptInstallRecord,
+  installRoot: string,
+  receiptDirectory: string
+): AppliedSymlinkRollback {
   const rollback = record.rollback;
   if (!isRecord(rollback) || rollback.schema !== SYMLINK_ROLLBACK_SCHEMA) {
     return { kind: "none" };
@@ -567,7 +626,7 @@ function parseAppliedSymlinkRollback(record: ReceiptInstallRecord, installRoot: 
   if (targetPathValue === null) {
     return { kind: "none" };
   }
-  const targetPath = resolveReceiptPathUnderRoot(installRoot, targetPathValue);
+  const targetPath = resolveReceiptPathUnderRoot(installRoot, targetPathValue, receiptDirectory);
   if (targetPath === null) {
     return { kind: "none" };
   }
@@ -627,7 +686,7 @@ async function removeAppliedSymlink(rollback: { targetPath: string; expectedSour
   }
 }
 
-function normalizeRollback(value: unknown, installRoot: string): RollbackParseResult {
+function normalizeRollback(value: unknown, installRoot: string, receiptDirectory: string): RollbackParseResult {
   if (!isRecord(value)) {
     return { kind: "invalid", targetPath: null, message: "rollback state must be an object." };
   }
@@ -639,7 +698,7 @@ function normalizeRollback(value: unknown, installRoot: string): RollbackParseRe
   if (targetPathValue === null) {
     return { kind: "invalid", targetPath: null, message: "rollback targetPath must be a non-empty string." };
   }
-  const targetPath = resolveReceiptPathUnderRoot(installRoot, targetPathValue);
+  const targetPath = resolveReceiptPathUnderRoot(installRoot, targetPathValue, receiptDirectory);
   if (targetPath === null) {
     return {
       kind: "invalid",
@@ -662,15 +721,18 @@ function normalizeRollback(value: unknown, installRoot: string): RollbackParseRe
     if (backupPathValue === null) {
       return { kind: "invalid", targetPath, message: "rollback backupPath must be a non-empty string." };
     }
-    backupPath = resolveReceiptPathUnderRoot(installRoot, backupPathValue);
+    backupPath = resolveReceiptPathUnderRoot(installRoot, backupPathValue, receiptDirectory);
     if (backupPath === null || path.resolve(backupPath) === path.resolve(installRoot)) {
       return { kind: "invalid", targetPath, message: "rollback backupPath must stay within the receipt install root." };
     }
   }
 
   const files: RollbackFileRecord[] = [];
+  const targetAliasRoot = path.isAbsolute(targetPathValue)
+    ? path.resolve(targetPathValue)
+    : path.resolve(receiptDirectory, targetPathValue);
   for (const file of raw.files) {
-    const normalized = normalizeRollbackFile(file, targetPath);
+    const normalized = normalizeRollbackFile(file, targetPath, targetAliasRoot);
     if (normalized.kind === "invalid") {
       return { kind: "invalid", targetPath, message: normalized.message };
     }
@@ -699,7 +761,7 @@ function normalizeRollback(value: unknown, installRoot: string): RollbackParseRe
   };
 }
 
-function normalizeRollbackFile(value: unknown, targetRoot: string): {
+function normalizeRollbackFile(value: unknown, targetRoot: string, targetAliasRoot: string): {
   kind: "valid";
   file: RollbackFileRecord;
 } | {
@@ -718,7 +780,7 @@ function normalizeRollbackFile(value: unknown, targetRoot: string): {
   if (recordedTargetPathValue === null) {
     return { kind: "invalid", message: "rollback file targetPath must be a non-empty string." };
   }
-  const recordedTargetPath = resolveReceiptPathUnderRoot(targetRoot, recordedTargetPathValue);
+  const recordedTargetPath = resolveReceiptPathUnderRoot(targetRoot, recordedTargetPathValue, targetAliasRoot);
   if (recordedTargetPath === null || recordedTargetPath !== targetPath) {
     return { kind: "invalid", message: `rollback file targetPath for ${relativePath} must match the target-relative path.` };
   }
@@ -1131,12 +1193,27 @@ function normalizeRelativePath(value: unknown): string | null {
   return normalized;
 }
 
-function resolveReceiptPathUnderRoot(root: string, candidate: string): string | null {
+function resolveReceiptPathUnderRoot(root: string, candidate: string, aliasRoot: string = root): string | null {
   const resolvedRoot = path.resolve(root);
+  const resolvedAliasRoot = path.resolve(aliasRoot);
   const resolvedCandidate = path.isAbsolute(candidate)
     ? path.resolve(candidate)
-    : path.resolve(resolvedRoot, candidate);
-  return isPathInsideOrSame(resolvedRoot, resolvedCandidate) ? resolvedCandidate : null;
+    : path.resolve(resolvedAliasRoot, candidate);
+  if (isPathInsideOrSame(resolvedRoot, resolvedCandidate)) {
+    return resolvedCandidate;
+  }
+  try {
+    const canonicalParent = realpathSync(path.dirname(resolvedCandidate));
+    const canonicalCandidate = path.join(canonicalParent, path.basename(resolvedCandidate));
+    if (isPathInsideOrSame(resolvedRoot, canonicalCandidate)) {
+      return canonicalCandidate;
+    }
+  } catch {
+  }
+  if (!isPathInsideOrSame(resolvedAliasRoot, resolvedCandidate)) {
+    return null;
+  }
+  return path.resolve(resolvedRoot, path.relative(resolvedAliasRoot, resolvedCandidate));
 }
 
 function resolveRelativePath(root: string, relativePath: string): string {

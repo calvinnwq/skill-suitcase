@@ -33,7 +33,7 @@ node dist/src/cli.js targets --source tests/fixtures/skills-catalog --json
 
 Use disposable fixtures or temporary directories when exercising mutating
 commands. Do not point `apply`, `rollback`, `track`, `reconcile --apply`,
-`repair --apply`, `promote --apply`, `import-target --apply`, or
+`repair --apply`, `promote --apply`, `import-target --apply`, `prune --apply`, or
 `upstream import --apply` at a real agent home or catalog unless that mutation
 is intentional and approved.
 

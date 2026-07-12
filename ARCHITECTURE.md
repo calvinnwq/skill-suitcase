@@ -28,6 +28,7 @@ src/
     track.ts
     reconcile.ts
     repair.ts
+    prune.ts
     promote.ts
     import-target.ts
     upstream.ts
@@ -41,6 +42,7 @@ src/
     track/
     reconcile/
     repair/
+    prune/
     promote/
     import-target/
     upstream/
@@ -91,7 +93,7 @@ Command modules should stay thin because they adapt parsed CLI arguments to core
 - packing and artifact construction
 - import/onboarding inspection
 - apply/install workflows
-- rollback, reconcile, repair, import-target, and existing-install adoption
+- rollback, reconcile, repair, prune, import-target, and existing-install adoption
   workflows
 - upstream-managed catalog source refresh workflows
 - install mode classification and safety checks
@@ -151,7 +153,8 @@ The durable state model belongs to Skill Suitcase:
   refuse with path-level evidence before any target write
 - manifest `validationPolicy.skillify.skip` records reviewed exceptions for referenced skills that strict validation must not score against the local Skillify-10 authoring contract
 - receipts record ownership, source provenance, install mode, file hashes, and
-  rollback state
+  rollback state; receipt writers use atomic replacement and a receipt-local
+  transaction lock so concurrent workflows cannot discard one another's state
 - status uses the complete `current`, `missing`, `version`, `behind`, `dirty`, `blocked`, and `unknown` enum for catalog-planned entries
 - provider fallback inventory without a catalog assignment has no status entries; read-only is target metadata, not a status value
 - rollback restores or removes what Skill Suitcase installed
@@ -404,6 +407,18 @@ Keep the command verbs separate:
   state, and must leave status current. Repair must not adopt unknown targets
   (use `track` or `reconcile`), install missing or behind skills (use `apply`),
   mutate symlink-mode installs, or operate without explicit `--skill` filters.
+- `prune` removes only explicitly selected receipt-owned installs that are no
+  longer assigned to the chosen writable target. `--dry-run` fingerprints the
+  receipt and each directory or symlink into a stable plan ID. `--apply`
+  requires that exact ID, recomputes the plan, quarantines directories, removes
+  only verified symlinks, journals the transaction, and atomically updates the
+  receipt. Apply never reuses or removes a pre-existing plan quarantine root.
+  Assigned, unreceipted, drifted, provider-managed, and path-escaping candidates
+  are refusals rather than cleanup guesses.
+  Promotion receipts remain valid ownership proof for this workflow when the
+  promoted symlink is no longer assigned. Apply refusals preserve apply-mode
+  JSON (`dryRun: false`) while remaining read-only, and prune must not recreate
+  a missing install root.
 - `import-target` imports an intentionally-edited receipt-owned copy-mode target
   skill back into the catalog as the source-of-truth inverse of `repair`:
   `repair` discards the local edit (catalog -> target), while `import-target`
@@ -419,6 +434,9 @@ Keep the command verbs separate:
   report.
 - `rollback` reverses prior `apply`, `reconcile`, or `repair` mutations using
   receipt rollback state.
+  A valid symlink alias in the receipt path may name the install root or an
+  earlier path component, but a symlinked target leaf remains unsafe.
+  Missing receipt parents must not be created while acquiring the receipt lock.
   It does not restore promotions; promotion receipts are safe no-ops in the current rollback command.
 - `promote` turns a target-created skill (for example a skill an agent wrote
   into an agent home directory) into a repo-owned catalog skill. `--dry-run`
@@ -458,7 +476,7 @@ they must not create target roots, receipts, symlinks, or source repo files.
 Provider-backed adapter kinds such as OpenCode and Pi remain read-only even
 when a catalog declares a custom `assignmentPaths` entry for review. Broad
 materialization flows such as `pack`, `apply`, `track`, `reconcile`, `repair`,
-and `import-target` must refuse them instead of converting provider-owned homes
+`prune`, and `import-target` must refuse them instead of converting provider-owned homes
 into Suitcase-managed install roots.
 
 Pack output must stay outside the catalog and every resolved target root.
@@ -477,7 +495,7 @@ Live mutations require explicit approval input or an approved command mode:
 
 The default path for new platform coverage is read-only first: `targets`,
 `status`, and `diff` should prove the target model before `track`, `apply`,
-`reconcile --apply`, `repair --apply`, `promote`, or `import-target --apply`
+`reconcile --apply`, `repair --apply`, `prune --apply`, `promote`, or `import-target --apply`
 touches live paths.
 
 ## Import Direction

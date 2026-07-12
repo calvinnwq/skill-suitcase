@@ -308,6 +308,49 @@ At least one `--skill` is required, and the flag is repeatable.
 Dry-run reports receipt/catalog/live hashes, file changes, and the backup plan.
 Apply backs up live content, installs catalog source, refreshes the receipt, and verifies `current` status.
 
+### `prune`
+
+```bash
+skill-suitcase prune \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill obsolete-skill \
+  --dry-run \
+  --json
+
+skill-suitcase prune \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill obsolete-skill \
+  --plan-id <reviewed-plan-id> \
+  --apply \
+  --json
+```
+
+Prunes only explicit receipt-owned installs that are no longer assigned to the
+selected writable target. Dry-run is read-only and returns a stable plan ID
+derived from the receipt hash, selected skills, object kinds, directory file
+hashes, and symlink targets. Apply requires the same skill list and exact plan
+ID, then recomputes all state before mutation.
+
+Physical directories move into a plan-scoped quarantine. Symlinks are removed
+only when their current target still matches their receipt source. Apply writes
+a transaction journal and receipt backup, updates the receipt atomically, and
+attempts to restore the prior receipt and completed filesystem mutations after
+any failure. Apply refuses and preserves a pre-existing plan quarantine root
+instead of reusing or cleaning it. Assigned,
+unreceipted, drifted, read-only/provider-backed, and path-escaping candidates
+are refused. Retain the reported quarantine and backup paths for reviewed
+cleanup; never replace prune with manual deletion or broad rollback.
+Prune requires the modern `.skill-suitcase-receipt.json` receipt and safely
+refuses legacy `.skills-sync.json` instead of migrating it.
+Receipt-owned symlinks created by `promote` are prunable once they are no longer
+assigned to the selected target. A missing install root is refused and is not
+recreated. Apply refusals keep `dryRun: false` to represent the requested mode,
+set `readOnly: true`, and perform no mutation.
+
 ### `rollback`
 
 ```bash
@@ -320,6 +363,9 @@ Reverses recorded apply, reconcile, or repair state. Rollback first verifies
 that current target bytes still match the applied receipt; drift is a refusal,
 not something it overwrites. The current rollback command does not restore
 promotions.
+The receipt may be addressed through a valid symlinked install-root or parent
+alias. Rollback resolves that alias for containment checks, still refuses a
+symlinked target leaf, and does not create parents for a missing receipt path.
 
 ### `promote`
 
@@ -413,6 +459,11 @@ await upsertAndWriteReceipt({
 `buildInstalledFiles` hashes regular files while skipping `__pycache__` directories and `.pyc` files; its optional `{ exclude }` iterable omits selected paths.
 `buildReceipt` creates a receipt shell, `upsertInstallRecord` merges an install record in memory, and `upsertAndWriteReceipt` merges against disk before writing `.skill-suitcase-receipt.json`.
 `readReceipt` reads modern receipts or migrates legacy `.skills-sync.json` data in memory without writing, while `writeReceipt` replaces the full receipt payload.
+All receipt writers serialize through a receipt-local lock, replace receipt files atomically, preserve an existing receipt's permissions, and create new receipts with mode `0600`.
+`updateAndWriteReceipt` performs an arbitrary read-modify-write while holding that lock.
+Use `withReceiptLock` to serialize a multi-step transaction, and pass its callback token to nested receipt writers so they reuse the active lock.
+Writers can report `ReceiptMutation` values through `onWritten`; `rollbackReceiptMutations` reverses only those writes and returns `false` rather than overwriting a conflicting concurrent update.
+The lock is released when its callback ends, and orphaned locks from terminated processes are recovered automatically.
 Custom receipt paths must remain inside `installRoot`, and multiple installs for one skill are represented as an array under that skill name.
 
 ## Common Refusal Codes
@@ -431,7 +482,9 @@ codes include:
   `plan_lock_source_mismatch`
 - `symlink_source_escape`: requested link would leave the approved catalog root
 - `symlink_target_conflict`: live target shape cannot be replaced implicitly
-- state-specific repair/reconcile/import refusals when the selected skill does
+- `receipt_lock_failed`: a mutating workflow could not acquire or use the
+  serialized receipt transaction lock
+- state-specific repair/reconcile/prune/import refusals when the selected skill does
   not meet that workflow's ownership and drift contract
 
 Treat a refusal as a request to inspect state and choose the correct workflow,

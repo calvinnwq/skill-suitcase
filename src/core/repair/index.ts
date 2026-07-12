@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
@@ -9,9 +9,13 @@ import {
   buildInstallRecord,
   buildInstalledFiles,
   readReceipt,
+  rollbackReceiptMutations,
   type Receipt,
   type ReceiptInstallRecord,
-  upsertAndWriteReceipt
+  type ReceiptLock,
+  type ReceiptMutation,
+  upsertAndWriteReceipt,
+  withReceiptLock
 } from "../receipts/index.js";
 import { SYMLINK_MODE } from "../install-modes.js";
 import { readSkillVersion } from "../skill-metadata.js";
@@ -627,17 +631,31 @@ async function executeRepair(input: RepairInput, plan: RepairBaseResult): Promis
   if (installRoot === null) {
     return applyFailure(plan, "missing_install_root", "could not resolve install root for repair");
   }
-
-  const receiptPath = path.join(installRoot, RECEIPT_FILE);
-  let previousReceiptText: string | null;
   try {
-    previousReceiptText = await readOptionalText(receiptPath);
+    return await withReceiptLock(
+      { installRoot },
+      (receiptLock) => executeRepairLocked(input, plan, installRoot, receiptLock)
+    );
+  } catch (error) {
+    return applyFailure(plan, "receipt_lock_failed", errorMessage(error));
+  }
+}
+
+async function executeRepairLocked(
+  input: RepairInput,
+  plan: RepairBaseResult,
+  installRoot: string,
+  receiptLock: ReceiptLock
+): Promise<RepairApplyResult> {
+  try {
+    await readOptionalText(path.join(installRoot, RECEIPT_FILE));
   } catch (error) {
     return applyFailure(plan, "invalid_receipt", `Could not read receipt before repair: ${errorMessage(error)}`);
   }
 
   const repairedSkills: string[] = [];
   const backups: RepairedBackup[] = [];
+  const receiptMutations: ReceiptMutation[] = [];
   let repairedFiles = 0;
   let receiptPathWritten: string | null = null;
   const { manifest } = await loadCatalog(input.source, { targetOverrides: input.targetOverrides });
@@ -719,7 +737,9 @@ async function executeRepair(input: RepairInput, plan: RepairBaseResult): Promis
       receiptPathWritten = await upsertAndWriteReceipt({
         installRoot,
         skillName: candidate.skill,
-        installRecord: buildInstallRecord(installRecord)
+        installRecord: buildInstallRecord(installRecord),
+        onWritten: (mutation) => receiptMutations.push(mutation),
+        receiptLock
       });
       repairedSkills.push(candidate.skill);
       repairedFiles += installedFiles.length;
@@ -738,7 +758,7 @@ async function executeRepair(input: RepairInput, plan: RepairBaseResult): Promis
       if (copied) {
         await removePath(tmpPath);
       }
-      await restoreOriginalReceipt({ receiptPath, previousReceiptText });
+      const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
       for (const completed of backups.reverse()) {
         await removePath(completed.targetPath);
         await restorePath(completed.backupPath, completed.targetPath);
@@ -766,7 +786,11 @@ async function executeRepair(input: RepairInput, plan: RepairBaseResult): Promis
             message: errorMessage(error),
             skill: candidate.skill,
             path: candidate.targetPath
-          })
+          }),
+          ...receiptRollbackComplete ? [] : [repairError({
+            code: "receipt_rollback_failed",
+            message: "Receipt rollback was incomplete after repair failed."
+          })]
         ],
         repaired: {
           skills: repairedSkills.sort(),
@@ -1564,24 +1588,6 @@ async function readOptionalText(filePath: string): Promise<string | null> {
       return null;
     }
     throw error;
-  }
-}
-
-async function restoreOriginalReceipt({
-  receiptPath,
-  previousReceiptText
-}: {
-  receiptPath: string;
-  previousReceiptText: string | null;
-}): Promise<void> {
-  try {
-    if (previousReceiptText === null) {
-      await unlink(receiptPath);
-      return;
-    }
-    await writeFile(receiptPath, previousReceiptText, "utf8");
-  } catch {
-    // best effort restore only
   }
 }
 

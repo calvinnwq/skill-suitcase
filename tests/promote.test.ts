@@ -392,6 +392,27 @@ test("promote --apply restores the existing receipt when receipt persistence fai
   await assert.rejects(stat(repoSkillPath));
 });
 
+test("promote reports an incomplete receipt rollback", async (t) => {
+  const sourceRoot = await makeRepo(t);
+  const { home, skillPath } = await makeTargetSkill(t);
+  const receiptPath = path.join(home, "skills", ".skill-suitcase-receipt.json");
+  await writeFile(receiptPath, `${JSON.stringify({
+    schema: "calvinnwq.skills.receipt.v0",
+    installs: {}
+  }, null, 2)}\n`);
+
+  const result = await executePromote({
+    source: sourceRoot,
+    targetSkill: skillPath,
+    __test: { conflictReceiptBeforeFailure: true }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "receipt_rollback_failed"), true);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as { installs?: Record<string, unknown> };
+  assert.ok(receipt.installs?.["partial"]);
+});
+
 test("promote --apply preserves an unreadable existing receipt when receipt snapshot fails", async (t) => {
   const sourceRoot = await makeRepo(t);
   const { home, skillPath } = await makeTargetSkill(t);

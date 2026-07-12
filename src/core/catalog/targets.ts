@@ -188,7 +188,10 @@ async function describeTarget(
       adapter: adapter.id,
       installRoot: normalizeValue(assignmentPath[adapter.installRootField]),
       compatibility: [...adapter.compatibilityNames],
-      metadata: { ...adapter.metadata }
+      metadata: {
+        ...adapter.metadata,
+        ...(registryEntry.readOnly ? { readOnly: true } : {})
+      }
     };
   }
   const hasKnownKind = adapter !== null;
