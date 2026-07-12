@@ -52,16 +52,21 @@
               pinned pnpm version runs without changing Corepack or global
               package-manager shims:
             </p>
-            <pre><code>mkdir -p "$HOME/repos"
-test -d "$HOME/repos/skill-suitcase" || git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase"
-git -C "$HOME/repos/skill-suitcase" pull --ff-only
-cd "$HOME/repos/skill-suitcase"
-pnpm() {
-  npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
-}
-test "$(pnpm --version)" = "10.34.4"
-pnpm install --frozen-lockfile
-pnpm run build</code></pre>
+            <pre><code>if mkdir -p "$HOME/repos" &amp;&amp;
+  (test -d "$HOME/repos/skill-suitcase" || git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase") &amp;&amp;
+  git -C "$HOME/repos/skill-suitcase" pull --ff-only &amp;&amp;
+  cd "$HOME/repos/skill-suitcase"
+then
+  pnpm() {
+    npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
+  }
+  test "$(pnpm --version)" = "10.34.4"
+  pnpm install --frozen-lockfile
+  pnpm run build
+else
+  printf 'Source checkout setup failed.\n' &gt;&amp;2
+  false
+fi</code></pre>
             <p>Then invoke the source build directly:</p>
             <pre><code>export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
 node "$CLI" targets --source "/path/to/skills-catalog" --json</code></pre>
