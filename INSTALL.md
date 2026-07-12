@@ -7,8 +7,7 @@ machine. If you are human, paste this line into your agent:
 > install the Skill Suitcase CLI and operator skill, then audit my local skill
 > targets without mutating them until I approve.
 
-If you are a human setting up a machine by hand, start with the walkthrough in
-[`docs/getting-started.md`](docs/getting-started.md).
+If you are a human setting up a machine by hand, start with the walkthrough in [`docs/getting-started.md`](docs/getting-started.md).
 
 Never paste secrets, tokens, API keys, private prompts, or credential dumps into
 chat, issues, PRs, logs, or release notes.
@@ -147,15 +146,16 @@ Restart the agent runtime after installing or replacing a skill.
 
 ## 3. Install Or Refresh The Skills Catalog
 
-Use the reviewed catalog repository the operator names; the examples below call
-its remote `<your-catalog-remote>` and clone it to a portable local path:
+Use the reviewed catalog repository the operator names.
+Replace `<your-catalog-remote>` with its remote URL, then clone it to a portable local path:
 
 ```bash
 if mkdir -p "$HOME/repos"; then
+  CATALOG_REMOTE="<your-catalog-remote>"
   if test -d "$HOME/repos/skills-catalog/.git"; then
     git -C "$HOME/repos/skills-catalog" pull --ff-only
   else
-    git clone <your-catalog-remote> "$HOME/repos/skills-catalog"
+    git clone "$CATALOG_REMOTE" "$HOME/repos/skills-catalog"
   fi
 else
   printf 'Catalog checkout setup failed.\n' >&2
@@ -163,8 +163,7 @@ else
 fi
 ```
 
-If no catalog exists yet, create a minimal one by following
-[`docs/getting-started.md`](docs/getting-started.md).
+If no catalog exists yet, create a minimal one by following [`docs/getting-started.md`](docs/getting-started.md).
 
 Use the catalog as the source of truth:
 

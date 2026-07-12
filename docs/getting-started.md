@@ -5,7 +5,7 @@ Every example uses portable paths, and the managed-install steps target a dispos
 The optional operator-skill step in section 2 is the one step that writes into a real agent runtime directory.
 
 Skill Suitcase is JSON-first.
-Every command takes `--json` and prints one deterministic result object, including structured `ok: false` errors, to stdout.
+Structured command invocations require `--json`, and their result objects, including structured `ok: false` errors, go to stdout.
 Read the JSON before every mutation.
 
 If a coding agent is doing this setup for you, hand it [`INSTALL.md`](../INSTALL.md) instead.
@@ -48,10 +48,11 @@ Restart the agent runtime after installing or replacing a skill.
 A catalog is a directory with a `skill-suitcase.yaml` manifest and one directory per skill under `skills/`.
 The catalog, not any live agent home, is the source of truth.
 
-If your team already has a reviewed catalog repository, clone it:
+If your team already has a reviewed catalog repository, replace `<your-catalog-remote>` with its remote URL and clone it:
 
 ```bash
-git clone <your-catalog-remote> "$HOME/repos/skills-catalog"
+CATALOG_REMOTE="<your-catalog-remote>"
+git clone "$CATALOG_REMOTE" "$HOME/repos/skills-catalog"
 SRC="$HOME/repos/skills-catalog"
 ```
 
@@ -124,7 +125,7 @@ skill-suitcase targets --source "$SRC" --claude-skills "$TARGET" --json
 ```
 
 `targets` reports every modeled target, its resolved install root, per-path existence, and safety classification without writing anything.
-When you are ready to manage a real skills root, replace `"$TARGET"` with a path such as `"$HOME/.claude/skills"` — after the read-only audit below and explicit approval.
+When you are ready to manage a real skills root, complete the read-only audit below and get explicit approval before replacing `"$TARGET"` with a path such as `"$HOME/.claude/skills"`.
 
 ## 5. Audit Read-Only First
 
@@ -153,7 +154,7 @@ A minimal starter skill fails that contract with `skillify_contract_failed` find
 ## 6. Stage With `pack`, Install With `apply`
 
 Mutation requires an explicit approval input.
-Stage an immutable artifact into a temporary directory, inspect it, then apply it:
+Stage a review artifact into a temporary directory, inspect it, then apply it:
 
 ```bash
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
@@ -207,7 +208,7 @@ After the rollback, `status` reports the skill as `missing` again and the walkth
 
 ## Where To Go Next
 
-- [`command-reference.md`](command-reference.md) — flags, approval requirements, state meanings, and refusal codes for every command.
-- [`README.md`](../README.md) — the safety model and the recovery decision tree (`track`, `reconcile`, `repair`, `prune`, `promote`, `import-target`).
-- [`INSTALL.md`](../INSTALL.md) — the agent-facing setup runbook, including source installs and per-runtime skills roots.
-- [`SPEC.md`](../SPEC.md) — the normative current-state contract.
+- [`command-reference.md`](command-reference.md) covers flags, approval requirements, state meanings, and refusal codes for every command.
+- [`README.md`](../README.md) explains the safety model and the recovery decision tree (`track`, `reconcile`, `repair`, `prune`, `promote`, `import-target`).
+- [`INSTALL.md`](../INSTALL.md) is the agent-facing setup runbook, including source installs and per-runtime skills roots.
+- [`SPEC.md`](../SPEC.md) defines the normative current-state contract.
