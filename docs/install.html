@@ -108,10 +108,9 @@ fi</code></pre>
               <code>skills/&lt;name&gt;/SKILL.md</code>. Git backing is the
               preferred operating model.
             </p>
-            <pre><code>mkdir -p "$HOME/repos"
-test -d "$HOME/repos/skills" || git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills"
-git -C "$HOME/repos/skills" pull --ff-only
-
+            <pre><code>mkdir -p "$HOME/repos" &amp;&amp;
+(test -d "$HOME/repos/skills" || git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills") &amp;&amp;
+git -C "$HOME/repos/skills" pull --ff-only &amp;&amp;
 export SRC="$HOME/repos/skills"</code></pre>
             <div class="callout" data-kind="note">
               <p class="callout-label">Note</p>

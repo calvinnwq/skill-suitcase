@@ -799,10 +799,15 @@ table.opts td:first-child { font-family: var(--mono); font-size: var(--fs-mono);
     background: var(--paper);
     padding: 26px 24px 40px;
     transform: translateX(-102%);
-    transition: transform 200ms ease;
+    visibility: hidden;
+    transition: transform 200ms ease, visibility 0s linear 200ms;
     border-right: 1px solid var(--rule);
   }
   body.nav-open .sidebar { transform: none; }
+  body.nav-open .sidebar {
+    visibility: visible;
+    transition-delay: 0s;
+  }
   body.nav-open { overflow: hidden; }
 
   .article-col { max-width: none; }
