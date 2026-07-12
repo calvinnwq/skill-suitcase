@@ -213,7 +213,11 @@ surfaces, even when the catalog declares a custom `assignmentPaths` review root.
 Treat `read_only_target` from `pack`, `apply`, `track`, `reconcile`, `repair`,
 `prune`, or `import-target` as the expected boundary instead of trying to adopt that
 provider-owned home.
-Provider fallback inventory without a catalog assignment has no status entries; a custom assigned provider path may have ordinary status entries, but it remains read-only for materialization and mutation.
+Provider fallback inventory without a catalog assignment has no status entries.
+A custom assigned provider path may have ordinary status entries, but it remains
+read-only for target-aware materialization and mutation.
+Path-driven `promote` and receipt-driven `rollback` use separate explicit scope
+and ownership boundaries rather than target adapters.
 
 ## 5. Mutate Only After Approval
 

@@ -158,7 +158,8 @@ Operators should first review the corresponding read-only plan, fetch, or diff, 
 | `import-target --apply` | `--apply` plus explicitly named skills | intentional receipt-owned target edit copied to catalog |
 | `upstream import --apply` | `--apply` plus exactly one named skill | selected catalog source and upstream lock only |
 
-Mutation is limited to writable, resolved roots and named or planned skills.
+Mutation is limited to writable resolved roots or explicit path and receipt
+scopes, and to named or planned skills.
 Commands validate containment, ownership, current filesystem state, and relevant
 hashes before destructive work. Transactional workflows attempt to restore
 their pre-operation receipt and filesystem state when an operation fails. They
@@ -193,7 +194,7 @@ by [receipt tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/r
 ## Rollback And Recovery
 
 Rollback is receipt-driven and scoped to rollback metadata that `apply`, `reconcile`, or `repair` captured.
-It restores prior copy content, removes a Suitcase-created symlink only when the link still matches its recorded source, and updates the receipt.
+It restores prior copy content or removes copy installs that were previously missing, removes a Suitcase-created symlink only when the link still matches its recorded source, and updates the receipt.
 It refuses missing, invalid, escaped, or drifted state rather than deleting an unproven path.
 It is not a general Git rollback and does not undo promotions or arbitrary catalog edits.
 

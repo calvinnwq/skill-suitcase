@@ -100,10 +100,14 @@ The modeled targets are `openclaw`, `codex`, `openclaw-codex`, `agents`,
 `--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`, and
 `--grok-skills`.
 
-OpenCode and Pi are provider-backed compatibility targets. They are read-only
-even when the catalog declares a custom `assignmentPaths` entry. Mutating or
-materializing commands refuse those roots with `read_only_target` rather than
-silently treating provider-managed locations as Suitcase-owned installs.
+OpenCode and Pi are provider-backed compatibility targets.
+They are read-only even when the catalog declares a custom `assignmentPaths` entry.
+Target-aware materialization and mutation commands (`pack`, `apply`, `track`,
+`reconcile`, `repair`, `prune`, and `import-target`) refuse those roots with
+`read_only_target` rather than silently treating provider-managed locations as
+Suitcase-owned installs.
+Path-driven `promote` and receipt-driven `rollback` do not resolve target
+adapters and instead enforce their own explicit scope and ownership checks.
 
 See [`docs/command-reference.md`](docs/command-reference.md) for command
 guidance, approval requirements, state meanings, and common refusal codes.
@@ -284,9 +288,13 @@ or target assignment semantics.
 ### Manifest `sourcePolicy`
 
 `sourcePolicy.exclude` omits approved generated or cache paths from pack,
-plan-lock, diff, and apply materialization. `sourcePolicy.deny` blocks unsafe or
-secret-like source paths before any target write. Refusals identify the skill
-and relative path with `source_denied_path` or `diff_source_denied_path`.
+plan-lock, diff, and copy-mode apply materialization.
+Symlink apply cannot omit descendants, so it refuses any non-empty exclude
+policy with `symlink_source_policy_exclude`, even when no path currently matches.
+`sourcePolicy.deny` blocks unsafe or secret-like source paths before any target
+write.
+Refusals identify the skill and relative path with `source_denied_path` or
+`diff_source_denied_path`.
 
 ### Strict Validation Policy
 

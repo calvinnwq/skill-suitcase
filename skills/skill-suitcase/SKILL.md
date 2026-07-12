@@ -167,10 +167,13 @@ logical groups. Broken group references are catalog metadata problems; do not
 turn a group into an implicit install target.
 
 Manifest `sourcePolicy` is a materialization boundary. `exclude` patterns omit
-reviewed generated/cache paths from packs, plan locks, diffs, and apply writes;
+reviewed generated/cache paths from packs, plan locks, diffs, and copy-mode apply
+writes.
+Symlink apply refuses every non-empty exclude policy with
+`symlink_source_policy_exclude`, including one with no current matches.
 `deny` patterns and built-in secret-like denials block selected source skills
-with `source_denied_path`/`diff_source_denied_path`. Do not work around a denied
-path by copying it manually into a target home.
+with `source_denied_path`/`diff_source_denied_path`.
+Do not work around a denied path by copying it manually into a target home.
 Manifest `validationPolicy.skillify.skip` is a strict-validation boundary only.
 It does not change planning, packing, installation, receipt ownership, or target drift handling.
 
@@ -217,8 +220,13 @@ Use local overrides on machines whose homes differ from the catalog defaults:
 For nested or provider-specific homes, inspect `targets` first and use only
 install roots that exist on the machine and are intended to be Suitcase-owned.
 Provider-backed OpenCode and Pi roots are not Suitcase-owned, so a
-`read_only_target` refusal is the correct outcome for pack or mutation flows.
-Provider fallback inventory without a catalog assignment has no status entries; a custom assigned provider path may have ordinary status entries while remaining read-only for pack and mutation flows.
+`read_only_target` refusal is the correct outcome for target-aware pack or
+mutation flows.
+Provider fallback inventory without a catalog assignment has no status entries.
+A custom assigned provider path may have ordinary status entries while remaining
+read-only for target-aware pack and mutation flows.
+Path-driven `promote` and receipt-driven `rollback` use separate explicit scope
+and ownership boundaries rather than target adapters.
 
 ## Sync Workflow
 
@@ -306,8 +314,11 @@ Pack guards only absolute manifest-declared target paths and does not account fo
 For Git-backed catalogs, `pack`, plan-lock creation, and `apply` refuse selected
 source skills that contain untracked, non-ignored files. Track or remove scratch
 files in the selected skill before trying to materialize it. Manifest
-`sourcePolicy.exclude` can deliberately omit reviewed generated/cache paths;
-manifest `sourcePolicy.deny` and built-in secret-like denials block materialization.
+`sourcePolicy.exclude` can deliberately omit reviewed generated/cache paths from
+copy-mode materialization.
+Symlink apply cannot omit descendants and refuses any non-empty exclude policy
+with `symlink_source_policy_exclude`, including one with no current matches.
+Manifest `sourcePolicy.deny` and built-in secret-like denials block materialization.
 Plan-lock creation is available only through the compiled library API; there is no CLI command that writes a lock file.
 
 For another target, keep the same pattern and replace only the target id and

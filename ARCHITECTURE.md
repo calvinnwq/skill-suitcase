@@ -4,8 +4,10 @@ This is the source of truth for how Skill Suitcase's TypeScript CLI should be
 structured as it grows. It applies the shared TypeScript CLI refactor pattern
 from Linear `NGX-420` to this repo.
 
-The product north star lives in [`VISION.md`](VISION.md). Keep this file focused
-on the implementation boundaries that make that vision reliable.
+The product north star lives in [`VISION.md`](VISION.md), and the normative
+shipped behavior lives in [`SPEC.md`](SPEC.md).
+Keep this file focused on the implementation boundaries that make those product
+contracts reliable.
 
 ## End State
 
@@ -149,8 +151,9 @@ The durable state model belongs to Skill Suitcase:
   selected Git-backed source skills after untracked, non-ignored files are
   removed or tracked
 - manifest `sourcePolicy` gates omit approved generated/cache paths from pack,
-  plan-lock, diff, and apply materialization, while denied or secret-like paths
-  refuse with path-level evidence before any target write
+  plan-lock, diff, and copy-mode apply materialization; symlink apply refuses a
+  non-empty exclude policy, while denied or secret-like paths refuse with
+  path-level evidence before any target write
 - manifest `validationPolicy.skillify.skip` records reviewed exceptions for referenced skills that strict validation must not score against the local Skillify-10 authoring contract
 - receipts record ownership, source provenance, install mode, file hashes, and
   rollback state; receipt writers use atomic replacement and a receipt-local
@@ -172,12 +175,17 @@ semantics unless a later feature explicitly wires that behavior.
 Manifest source policy is part of the same catalog contract, not target policy.
 `sourcePolicy.exclude` is an explicit omission list for generated or cache paths
 that remain in the source tree but must not be copied, hashed into plan locks, or
-installed into agent homes. `sourcePolicy.deny` is a hard block for unsafe
-source content such as secrets or provider-owned payloads; built-in denials cover
-common secret-like filenames. These checks run on materialization paths
-(`pack`, plan-lock creation, and `apply` through `diff`) and must report the
-skill plus offending relative path through `source_denied_path` or
-`diff_source_denied_path` without mutating live targets.
+installed by copy-mode materialization.
+Symlink materialization cannot hide excluded descendants, so apply must refuse
+every non-empty exclude policy with `symlink_source_policy_exclude`, including a
+policy with no current matches.
+`sourcePolicy.deny` is a hard block for unsafe source content such as secrets or
+provider-owned payloads; built-in denials cover common secret-like filenames.
+These checks run on materialization paths (`pack`, plan-lock creation, and
+`apply` through `diff`) without mutating live targets on refusal.
+Denied paths report the skill and offending relative path through
+`source_denied_path` or `diff_source_denied_path`; excluded symlink source
+reports the skill and policy conflict through `symlink_source_policy_exclude`.
 
 Manifest validation policy is also catalog policy, not target policy.
 `validationPolicy.skillify.skip` may exempt referenced skills from strict Skillify-10 scoring only after validation proves the skip provenance.
