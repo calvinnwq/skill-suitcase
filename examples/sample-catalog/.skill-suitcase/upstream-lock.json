@@ -1,0 +1,14 @@
+{
+  "schema": "calvinnwq.skills.upstream-lock.v0",
+  "skills": {
+    "hello-suitcase": {
+      "provider": "git",
+      "packageVersion": "v3.8.1",
+      "upstream": {
+        "repo": "mvanhorn/last30days-skill",
+        "skill": "."
+      },
+      "group": "portable-demo"
+    }
+  }
+}
