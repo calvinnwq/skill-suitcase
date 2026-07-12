@@ -63,7 +63,7 @@ Use the source CLI as:
 
 ```bash
 export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
-node "$CLI" targets --source "$HOME/repos/skills" --json
+node "$CLI" targets --source "$HOME/repos/skills-catalog" --json
 ```
 
 ## 2. Install The Operator Skill

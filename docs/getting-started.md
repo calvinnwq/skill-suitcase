@@ -1,7 +1,8 @@
 # Getting Started
 
 This walkthrough takes you from `npm install` to a first managed skill install and a receipt-backed rollback.
-Every example uses portable paths and a disposable target directory, so you can run the whole flow without touching a real agent home.
+Every example uses portable paths, and the managed-install steps target a disposable directory, so you can exercise the audit, staging, apply, and rollback flow without touching a real agent home.
+The optional operator-skill step in section 2 is the one step that writes into a real agent runtime directory.
 
 Skill Suitcase is JSON-first.
 Every command takes `--json` and prints one deterministic result object, including structured `ok: false` errors, to stdout.
@@ -24,6 +25,7 @@ Command results always go to stdout; usage and fatal diagnostics go to stderr.
 ## 2. Install The Operator Skill Into Your Agent
 
 The npm package ships an operator skill that teaches a coding agent the conservative Suitcase workflow: read-only audit first, mutation only after explicit approval.
+This step writes into your agent runtime's skills root; skip it for now if you only want to try the CLI.
 
 ```bash
 SKILL_SRC="$(npm root -g)/skill-suitcase/skills/skill-suitcase"
@@ -32,8 +34,11 @@ SKILL_SRC="$(npm root -g)/skill-suitcase/skills/skill-suitcase"
 AGENT_SKILLS_DIR="$HOME/.claude/skills"
 
 mkdir -p "$AGENT_SKILLS_DIR"
+rm -rf "$AGENT_SKILLS_DIR/skill-suitcase"
 cp -R "$SKILL_SRC" "$AGENT_SKILLS_DIR/"
 ```
+
+Copy the whole directory and remove any previous install first, so a replacement never leaves stale files behind.
 
 Restart the agent runtime after installing or replacing a skill.
 [`INSTALL.md`](../INSTALL.md) lists the common skills roots for other runtimes.
