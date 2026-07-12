@@ -69,6 +69,7 @@ can manage real skill catalogs safely today.
 
 ## Relationship To Other Docs
 
+- `SPEC.md` defines the normative current-state product contract.
 - `ARCHITECTURE.md` defines the implementation boundaries that preserve this
   vision.
 - `README.md` explains the current public CLI surface.

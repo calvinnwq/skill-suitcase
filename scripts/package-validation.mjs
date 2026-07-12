@@ -21,6 +21,7 @@ const EXPECTED_FILES_ALLOWLIST = [
   "skills/skill-suitcase/agents/openai.yaml",
   "LICENSE",
   "VISION.md",
+  "SPEC.md",
   "README.md",
   "INSTALL.md",
   "CHANGELOG.md",

@@ -134,6 +134,38 @@ test("README and architecture point to VISION for product direction", async () =
   assert.ok(architecture.includes("](VISION.md)"), "ARCHITECTURE.md should link to VISION.md");
 });
 
+test("SPEC defines the shipped contract without taking over adjacent documentation roles", async () => {
+  const spec = await readFile("SPEC.md", "utf8");
+  const normalized = normalize(spec);
+
+  for (const heading of [
+    "## catalog",
+    "## target adapters and resolution",
+    "## read-only commands",
+    "## staging and approval inputs",
+    "## live mutation",
+    "## receipts",
+    "## rollback and recovery",
+    "## upstream refresh",
+    "## output contract",
+    "## non-goals"
+  ]) {
+    assert.ok(normalized.includes(heading), `SPEC.md should include ${heading}`);
+  }
+
+  assert.ok(spec.includes("](VISION.md)"), "SPEC.md should route product direction to VISION.md");
+  assert.ok(spec.includes("](ARCHITECTURE.md)"), "SPEC.md should route implementation structure to ARCHITECTURE.md");
+  assert.ok(spec.includes("](docs/command-reference.md)"), "SPEC.md should route detailed usage to the command reference");
+  assert.ok(spec.includes("](tests/apply.test.ts)"), "SPEC.md should link contract claims to tests");
+  assert.doesNotMatch(spec, /\/Users\//, "SPEC.md examples must not contain maintainer-local paths");
+  assert.doesNotMatch(spec, /\b(?:roadmap|planned milestone|future command)\b/i, "SPEC.md should describe shipped behavior only");
+
+  const vision = await readFile("VISION.md", "utf8");
+  const readme = await readFile("README.md", "utf8");
+  assert.ok(vision.includes("`SPEC.md` defines the normative current-state product contract"));
+  assert.ok(readme.includes("](SPEC.md)"), "README.md should link to the current contract");
+});
+
 /**
  * The shared dirty-repair guidance every operator-facing doc must carry. Each
  * entry is matched against whitespace-normalized, lowercased file content so
