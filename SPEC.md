@@ -49,7 +49,8 @@ patterns have no current matches.
 `sourcePolicy.deny`, including built-in secret-like path denials, blocks the
 materialization before a target write and reports path-level evidence.
 
-See the [catalog fixture](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/fixtures/skills-catalog/skill-suitcase.yaml),
+See the [public sample catalog](examples/sample-catalog/README.md),
+[internal regression fixture](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/fixtures/skills-catalog/skill-suitcase.yaml),
 [manifest tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/suitcase-manifest.test.ts),
 [validation tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/validator.test.ts), and
 [source-policy tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/source-policy.test.ts).
