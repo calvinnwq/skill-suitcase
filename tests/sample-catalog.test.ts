@@ -179,8 +179,11 @@ test("portable sample catalog contains placeholders instead of local homes or se
     fixtureFiles.map((file) => readFile(file, "utf8"))
   )).join("\n");
   const manifest = await readFile(path.join(sampleCatalog, "skill-suitcase.yaml"), "utf8");
+  const walkthrough = await readFile(path.join(sampleCatalog, "README.md"), "utf8");
 
   assert.match(manifest, /path: \/path\/to\/disposable\/agent-skills/);
+  assert.match(walkthrough, /SANDBOX=.*mktemp.*\|\| exit 1/);
+  assert.match(walkthrough, /test -n "\$SANDBOX" \|\| exit 1/);
   assert.doesNotMatch(fixtureText, /\/Users\/|\/home\/[^/\s]+|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
   assert.doesNotMatch(fixtureText, /(?:api[_-]?key|access[_-]?token|password)\s*[:=]\s*\S+/i);
 });

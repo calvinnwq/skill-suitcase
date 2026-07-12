@@ -25,7 +25,8 @@ SRC="$(npm root --global)/skill-suitcase/examples/sample-catalog"
 After either setup, run the walkthrough:
 
 ```bash
-SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-demo.XXXXXX")"
+SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-demo.XXXXXX")" || exit 1
+test -n "$SANDBOX" || exit 1
 TARGET="$SANDBOX/agent-skills"
 PACK="$SANDBOX/pack"
 mkdir -p "$TARGET"
