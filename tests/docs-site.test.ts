@@ -187,6 +187,17 @@ test("docs site collapses to a mobile drawer", () => {
   assert.match(js, /e\.key === "Escape"[\s\S]*?closeDrawer\(\)/);
 });
 
+test("docs option tables stay within the mobile viewport", () => {
+  const css = read("docs/site.css");
+  const mobileCss = css.slice(css.indexOf("@media (max-width: 560px)"));
+
+  assert.match(read("docs/safety-model.html"), /<table class="opts">/);
+  assert.match(read("docs/troubleshooting.html"), /<table class="opts">/);
+  assert.match(mobileCss, /table\.opts \{ table-layout: fixed; \}/);
+  assert.match(mobileCss, /table\.opts th, table\.opts td \{ overflow-wrap: anywhere; \}/);
+  assert.match(mobileCss, /table\.opts td:first-child \{ white-space: normal; \}/);
+});
+
 test("docs site uses ledger visual components instead of dense prose only", () => {
   const css = read("docs/site.css");
 
