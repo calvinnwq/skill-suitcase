@@ -141,6 +141,8 @@ function analyzeSourceFile(filePath, text) {
   const processAliases = new Set();
   let hasSwitchStatement = false;
 
+  collectStableProcessAliases(sourceFile, checker, processAliases);
+
   function visit(node, aliases = processAliases) {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
       && node.moduleSpecifier !== undefined
@@ -225,6 +227,35 @@ function analyzeSourceFile(filePath, text) {
     processMembers: [...new Set(processMembers)].sort(),
     hasSwitchStatement
   };
+}
+
+function collectStableProcessAliases(sourceFile, checker, processAliases) {
+  const declarations = [];
+
+  function visit(node) {
+    if (ts.isImportDeclaration(node) || ts.isImportEqualsDeclaration(node)) {
+      updateProcessAliases(node, checker, processAliases);
+    } else if (ts.isVariableDeclaration(node)
+      && node.initializer !== undefined
+      && ts.isIdentifier(node.name)
+      && ts.isVariableDeclarationList(node.parent)
+      && (node.parent.flags & ts.NodeFlags.Const) !== 0) {
+      declarations.push(node);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  let changed = true;
+  while (changed) {
+    const aliasCount = processAliases.size;
+    for (const declaration of declarations) {
+      if (isProcessObject(declaration.initializer, checker, processAliases)) {
+        setIdentifierAlias(declaration.name, true, checker, processAliases);
+      }
+    }
+    changed = processAliases.size !== aliasCount;
+  }
 }
 
 function createTypeChecker(filePath, sourceFile) {

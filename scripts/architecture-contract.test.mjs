@@ -220,6 +220,21 @@ test("architecture contract tracks process assignment aliases", async () => {
   ]);
 });
 
+test("architecture contract resolves immutable process aliases before closures", async () => {
+  const root = await createFixture({
+    "src/core/process-closure.ts": [
+      "export function write() {",
+      "  runtime.stdout.write('result');",
+      "}",
+      "const runtime = process;"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/core/process-closure.ts uses process.stdout outside the CLI boundary"
+  ]);
+});
+
 test("architecture contract invalidates reassigned process aliases", async () => {
   const root = await createFixture({
     "src/core/process-assignments.ts": [
