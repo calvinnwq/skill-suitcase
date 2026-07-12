@@ -163,6 +163,108 @@ test("architecture contract keeps argv and process output at the CLI boundary", 
   }
 });
 
+test("architecture contract resolves constant computed process access", async () => {
+  const root = await createFixture({
+    "src/core/computed-process.ts": [
+      'const channel = "std" + "out";',
+      'const processKey = `pro${"cess"}`;',
+      "process[channel].write('result');",
+      "globalThis[processKey].stderr.write('warning');",
+      "const { [channel]: output } = process;",
+      "void output;"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/core/computed-process.ts uses process.stderr outside the CLI boundary",
+    "src/core/computed-process.ts uses process.stdout outside the CLI boundary"
+  ]);
+});
+
+test("architecture contract ignores non-constant computed process access", async () => {
+  const root = await createFixture({
+    "src/core/computed-process.ts": [
+      "export function write(channel, processKey) {",
+      "  process[channel].write('unknown channel');",
+      "  globalThis[processKey].stderr.write('unknown object');",
+      "}"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract tracks process assignment aliases", async () => {
+  const root = await createFixture({
+    "src/core/process-assignments.ts": [
+      "let runtime;",
+      "runtime = process;",
+      "runtime.stdout.write('result');",
+      "let chained;",
+      "chained = runtime;",
+      "export const args = chained.argv;",
+      "const { process: globalRuntime } = globalThis;",
+      "globalRuntime.stderr.write('warning');",
+      "let assignedRuntime;",
+      "({ process: assignedRuntime } = globalThis);",
+      "assignedRuntime.stdout.write('result');",
+      "let output;",
+      "({ stderr: output } = process);"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/core/process-assignments.ts uses process.argv outside the CLI boundary",
+    "src/core/process-assignments.ts uses process.stderr outside the CLI boundary",
+    "src/core/process-assignments.ts uses process.stdout outside the CLI boundary"
+  ]);
+});
+
+test("architecture contract invalidates reassigned process aliases", async () => {
+  const root = await createFixture({
+    "src/core/process-assignments.ts": [
+      "let runtime = process;",
+      "runtime = { stdout: { write() {} } };",
+      "runtime.stdout.write('local');",
+      "let assignedRuntime;",
+      "assignedRuntime = process;",
+      "assignedRuntime = createRuntime();",
+      "assignedRuntime.stderr.write('local');",
+      "let computedRuntime = process;",
+      "const runtimeKey = createRuntimeKey();",
+      "({ [runtimeKey]: computedRuntime } = createRuntime());",
+      "computedRuntime.stdout.write('local');",
+      "let arrayRuntime = process;",
+      "[arrayRuntime] = [createRuntime()];",
+      "arrayRuntime.stderr.write('local');",
+      "let updatedRuntime = process;",
+      "updatedRuntime ||= createRuntime();",
+      "updatedRuntime.stdout.write('local');",
+      "function createRuntime() {",
+      "  return { stderr: { write() {} } };",
+      "}",
+      "function createRuntimeKey() {",
+      "  return 'runtime';",
+      "}"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract inspects aliases before reassigning them", async () => {
+  const root = await createFixture({
+    "src/core/process-assignment-order.ts": [
+      "let runtime = process;",
+      "runtime = runtime.stderr;"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/core/process-assignment-order.ts uses process.stderr outside the CLI boundary"
+  ]);
+});
+
 test("architecture contract rejects process capability re-export facades", async () => {
   const root = await createFixture({
     "src/core/process-facade.ts": 'export { stdout } from "node:process";',

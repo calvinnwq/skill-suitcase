@@ -141,9 +141,7 @@ function analyzeSourceFile(filePath, text) {
   const processAliases = new Set();
   let hasSwitchStatement = false;
 
-  collectProcessAliases(sourceFile, checker, processAliases);
-
-  function visit(node) {
+  function visit(node, aliases = processAliases) {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
       && node.moduleSpecifier !== undefined
       && ts.isStringLiteralLike(node.moduleSpecifier)) {
@@ -175,29 +173,50 @@ function analyzeSourceFile(filePath, text) {
 
     if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
       if (ts.isObjectBindingPattern(node.name)
-        && isProcessObject(node.initializer, checker, processAliases)) {
-        collectProcessBindings(node.name, processMembers);
+        && isProcessObject(node.initializer, checker, aliases)) {
+        collectProcessBindings(node.name, checker, processMembers);
       }
+    } else if (ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && isProcessObject(node.right, checker, aliases)) {
+      collectProcessAssignmentBindings(node.left, checker, processMembers);
     }
 
     if (ts.isPropertyAccessExpression(node)
       && !isInTypeOnlyContext(node)
-      && isProcessObject(node.expression, checker, processAliases)
+      && isProcessObject(node.expression, checker, aliases)
       && isGuardedProcessMember(node.name.text)) {
       processMembers.push(node.name.text);
     } else if (ts.isElementAccessExpression(node)
       && !isInTypeOnlyContext(node)
-      && isProcessObject(node.expression, checker, processAliases)
-      && node.argumentExpression !== undefined
-      && ts.isStringLiteralLike(node.argumentExpression)
-      && isGuardedProcessMember(node.argumentExpression.text)) {
-      processMembers.push(node.argumentExpression.text);
+      && isProcessObject(node.expression, checker, aliases)
+      && node.argumentExpression !== undefined) {
+      const member = staticStringValue(node.argumentExpression, checker);
+      if (member !== null && isGuardedProcessMember(member)) {
+        processMembers.push(member);
+      }
     }
 
     if (ts.isSwitchStatement(node)) {
       hasSwitchStatement = true;
     }
-    ts.forEachChild(node, visit);
+
+    if (ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind)) {
+      visit(node.left, aliases);
+      visit(node.right, aliases);
+      updateProcessAliases(node, checker, aliases);
+      return;
+    }
+    if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+      && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) {
+      visit(node.operand, aliases);
+      updateProcessAliases(node, checker, aliases);
+      return;
+    }
+
+    updateProcessAliases(node, checker, aliases);
+    const childAliases = ts.isFunctionLike(node) ? new Set(aliases) : aliases;
+    ts.forEachChild(node, (child) => visit(child, childAliases));
   }
 
   visit(sourceFile);
@@ -222,86 +241,106 @@ function isNodeProcessSpecifier(specifier) {
   return specifier === "node:process" || specifier === "process";
 }
 
-function collectProcessAliases(sourceFile, checker, processAliases) {
-  const declarations = [];
-
-  function visit(node) {
-    if (ts.isImportDeclaration(node)
+function updateProcessAliases(node, checker, processAliases) {
+  if (ts.isImportDeclaration(node)
       && ts.isStringLiteralLike(node.moduleSpecifier)
       && isNodeProcessSpecifier(node.moduleSpecifier.text)) {
-      const importClause = node.importClause;
-      if (importClause?.name !== undefined && !importClause.isTypeOnly) {
-        addIdentifierSymbol(importClause.name, checker, processAliases);
-      }
-      if (importClause?.namedBindings !== undefined && !importClause.isTypeOnly) {
-        if (ts.isNamespaceImport(importClause.namedBindings)) {
-          addIdentifierSymbol(importClause.namedBindings.name, checker, processAliases);
-        } else {
-          for (const element of importClause.namedBindings.elements) {
-            if (element.isTypeOnly) {
-              continue;
-            }
-            const importedName = element.propertyName?.text ?? element.name.text;
-            if (importedName === "default" || importedName === "process") {
-              addIdentifierSymbol(element.name, checker, processAliases);
-            }
+    const importClause = node.importClause;
+    if (importClause?.name !== undefined && !importClause.isTypeOnly) {
+      setIdentifierAlias(importClause.name, true, checker, processAliases);
+    }
+    if (importClause?.namedBindings !== undefined && !importClause.isTypeOnly) {
+      if (ts.isNamespaceImport(importClause.namedBindings)) {
+        setIdentifierAlias(importClause.namedBindings.name, true, checker, processAliases);
+      } else {
+        for (const element of importClause.namedBindings.elements) {
+          if (element.isTypeOnly) {
+            continue;
+          }
+          const importedName = element.propertyName?.text ?? element.name.text;
+          if (importedName === "default" || importedName === "process") {
+            setIdentifierAlias(element.name, true, checker, processAliases);
           }
         }
       }
-    } else if (ts.isImportEqualsDeclaration(node)
-      && ts.isExternalModuleReference(node.moduleReference)
-      && node.moduleReference.expression !== undefined
-      && ts.isStringLiteralLike(node.moduleReference.expression)
-      && isNodeProcessSpecifier(node.moduleReference.expression.text)
-      && !node.isTypeOnly) {
-      addIdentifierSymbol(node.name, checker, processAliases);
-    } else if (ts.isVariableDeclaration(node)
-      && node.initializer !== undefined) {
-      declarations.push(node);
     }
-    ts.forEachChild(node, visit);
+    return;
   }
-
-  visit(sourceFile);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const declaration of declarations) {
-      if (isProcessObject(declaration.initializer, checker, processAliases)) {
-        if (ts.isIdentifier(declaration.name)) {
-          changed = addIdentifierSymbol(declaration.name, checker, processAliases) || changed;
-        } else if (ts.isObjectBindingPattern(declaration.name)) {
-          changed = collectProcessBindingAliases(declaration.name, checker, processAliases) || changed;
-        }
-      }
+  if (ts.isImportEqualsDeclaration(node)
+    && ts.isExternalModuleReference(node.moduleReference)
+    && node.moduleReference.expression !== undefined
+    && ts.isStringLiteralLike(node.moduleReference.expression)
+    && isNodeProcessSpecifier(node.moduleReference.expression.text)
+    && !node.isTypeOnly) {
+    setIdentifierAlias(node.name, true, checker, processAliases);
+    return;
+  }
+  if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+    if (ts.isIdentifier(node.name)) {
+      setIdentifierAlias(
+        node.name,
+        isProcessObject(node.initializer, checker, processAliases),
+        checker,
+        processAliases
+      );
+    } else if (ts.isObjectBindingPattern(node.name)) {
+      updateDestructuredAliases(node.name, node.initializer, checker, processAliases);
+    }
+    return;
+  }
+  if (ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind)) {
+    const left = unwrapExpression(node.left);
+    if (ts.isIdentifier(left)) {
+      setIdentifierAlias(
+        left,
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+          && isProcessObject(node.right, checker, processAliases),
+        checker,
+        processAliases
+      );
+    } else if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      updateDestructuredAliases(left, node.right, checker, processAliases);
+    }
+    return;
+  }
+  if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+    && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) {
+    const operand = unwrapExpression(node.operand);
+    if (ts.isIdentifier(operand)) {
+      setIdentifierAlias(operand, false, checker, processAliases);
     }
   }
 }
 
-function collectProcessBindingAliases(pattern, checker, processAliases) {
-  let changed = false;
-  for (const element of pattern.elements) {
-    if (ts.isOmittedExpression(element) || !ts.isIdentifier(element.name)) {
-      continue;
-    }
-    const propertyName = element.propertyName ?? element.name;
-    const importedName = ts.isIdentifier(propertyName) || ts.isStringLiteralLike(propertyName)
-      ? propertyName.text
-      : null;
-    if (importedName === "default" || importedName === "process") {
-      changed = addIdentifierSymbol(element.name, checker, processAliases) || changed;
-    }
-  }
-  return changed;
-}
-
-function addIdentifierSymbol(identifier, checker, symbols) {
+function setIdentifierAlias(identifier, isAlias, checker, symbols) {
   const symbol = checker.getSymbolAtLocation(identifier);
-  if (symbol === undefined || symbols.has(symbol)) {
-    return false;
+  if (symbol === undefined) {
+    return;
   }
-  symbols.add(symbol);
-  return true;
+  if (isAlias) {
+    symbols.add(symbol);
+  } else {
+    symbols.delete(symbol);
+  }
+}
+
+function updateDestructuredAliases(pattern, initializer, checker, processAliases) {
+  const entries = destructuringEntries(pattern, checker);
+  const fromProcess = isProcessObject(initializer, checker, processAliases);
+  const fromGlobal = isGlobalObject(initializer, checker);
+  for (const { key, target } of entries) {
+    setIdentifierAlias(
+      target,
+      (fromProcess && (key === "default" || key === "process")) || (fromGlobal && key === "process"),
+      checker,
+      processAliases
+    );
+  }
+  for (const target of assignedIdentifiers(pattern)) {
+    if (!entries.some((entry) => entry.target === target)) {
+      setIdentifierAlias(target, false, checker, processAliases);
+    }
+  }
 }
 
 function collectProcessImport(importClause, processMembers) {
@@ -362,18 +401,94 @@ function isInTypeOnlyContext(node) {
   return false;
 }
 
-function collectProcessBindings(pattern, processMembers) {
-  for (const element of pattern.elements) {
-    if (ts.isOmittedExpression(element)) {
-      continue;
-    }
-    const propertyName = element.propertyName ?? element.name;
-    if (ts.isIdentifier(propertyName) && isGuardedProcessMember(propertyName.text)) {
-      processMembers.push(propertyName.text);
-    } else if (ts.isStringLiteralLike(propertyName) && isGuardedProcessMember(propertyName.text)) {
-      processMembers.push(propertyName.text);
+function collectProcessBindings(pattern, checker, processMembers) {
+  for (const { key } of destructuringEntries(pattern, checker)) {
+    if (isGuardedProcessMember(key)) {
+      processMembers.push(key);
     }
   }
+}
+
+function collectProcessAssignmentBindings(pattern, checker, processMembers) {
+  collectProcessBindings(pattern, checker, processMembers);
+}
+
+function destructuringEntries(pattern, checker) {
+  if (ts.isObjectBindingPattern(pattern)) {
+    return pattern.elements.flatMap((element) => {
+      if (ts.isOmittedExpression(element) || !ts.isIdentifier(element.name)) {
+        return [];
+      }
+      const key = staticPropertyName(element.propertyName ?? element.name, checker);
+      return [{ key, target: element.name }];
+    });
+  }
+  if (!ts.isObjectLiteralExpression(pattern)) {
+    return [];
+  }
+  return pattern.properties.flatMap((property) => {
+    if (ts.isShorthandPropertyAssignment(property)) {
+      return [{ key: property.name.text, target: property.name }];
+    }
+    if (!ts.isPropertyAssignment(property)) {
+      return [];
+    }
+    const target = unwrapExpression(property.initializer);
+    const key = staticPropertyName(property.name, checker);
+    return ts.isIdentifier(target) ? [{ key, target }] : [];
+  });
+}
+
+function assignedIdentifiers(pattern) {
+  const identifiers = [];
+
+  function visit(node) {
+    const target = unwrapExpression(node);
+    if (ts.isIdentifier(target)) {
+      identifiers.push(target);
+      return;
+    }
+    if (ts.isBindingElement(target)) {
+      visit(target.name);
+      return;
+    }
+    if (ts.isPropertyAssignment(target)) {
+      visit(target.initializer);
+      return;
+    }
+    if (ts.isShorthandPropertyAssignment(target)) {
+      identifiers.push(target.name);
+      return;
+    }
+    if (ts.isSpreadAssignment(target) || ts.isSpreadElement(target)) {
+      visit(target.expression);
+      return;
+    }
+    if (ts.isObjectBindingPattern(target)
+      || ts.isArrayBindingPattern(target)
+      || ts.isObjectLiteralExpression(target)
+      || ts.isArrayLiteralExpression(target)) {
+      for (const element of target.elements ?? target.properties) {
+        if (!ts.isOmittedExpression(element)) {
+          visit(element);
+        }
+      }
+    }
+  }
+
+  visit(pattern);
+  return identifiers;
+}
+
+function staticPropertyName(name, checker) {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) {
+    return name.text;
+  }
+  return ts.isComputedPropertyName(name) ? staticStringValue(name.expression, checker) : null;
+}
+
+function isAssignmentOperator(kind) {
+  return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
 }
 
 function isProcessObject(node, checker, processAliases) {
@@ -394,23 +509,24 @@ function isProcessObject(node, checker, processAliases) {
       && isProcessObject(expression.expression, checker, processAliases)) {
       return true;
     }
-    return expression.name.text === "process"
-      && ts.isIdentifier(expression.expression)
-      && (expression.expression.text === "global" || expression.expression.text === "globalThis")
-      && isUnshadowedGlobal(expression.expression, checker);
+    return expression.name.text === "process" && isGlobalObject(expression.expression, checker);
   }
   if (!ts.isElementAccessExpression(expression)
-    || expression.argumentExpression === undefined
-    || !ts.isStringLiteralLike(expression.argumentExpression)) {
+    || expression.argumentExpression === undefined) {
     return false;
   }
-  if (expression.argumentExpression.text === "default") {
+  const member = staticStringValue(expression.argumentExpression, checker);
+  if (member === "default") {
     return isProcessObject(expression.expression, checker, processAliases);
   }
-  return expression.argumentExpression.text === "process"
-    && ts.isIdentifier(expression.expression)
-    && (expression.expression.text === "global" || expression.expression.text === "globalThis")
-    && isUnshadowedGlobal(expression.expression, checker);
+  return member === "process" && isGlobalObject(expression.expression, checker);
+}
+
+function isGlobalObject(node, checker) {
+  const expression = unwrapExpression(node);
+  return ts.isIdentifier(expression)
+    && (expression.text === "global" || expression.text === "globalThis")
+    && isUnshadowedGlobal(expression, checker);
 }
 
 function isProcessModuleLoader(node, checker) {
