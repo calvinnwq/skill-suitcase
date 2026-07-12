@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, symlink, unlink } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SKILLS_DIRECTORY } from "../../config/defaults.js";
 import { isPathWithinRoot, SYMLINK_MODE } from "../install-modes.js";
@@ -101,6 +101,7 @@ type ExecutePromoteInput = {
     failBeforeSwap?: boolean;
     failAfterBackup?: boolean;
     corruptReceiptBeforeFailure?: boolean;
+    conflictReceiptBeforeFailure?: boolean;
   };
 };
 
@@ -462,13 +463,34 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
 
   // Phase 4: write a receipt linking the target to the promoted catalog source.
   try {
-    if (__test?.corruptReceiptBeforeFailure === true) {
+    if (__test?.corruptReceiptBeforeFailure === true || __test?.conflictReceiptBeforeFailure === true) {
       await writeReceipt({
         installRoot,
-        receipt: { installs: {} },
+        receipt: __test.conflictReceiptBeforeFailure === true
+          ? {
+            installs: {
+              partial: buildInstallRecord({
+                skill: "partial",
+                agent: installRoot,
+                target: installRoot,
+                mode: "copy",
+                sourcePath: repoSkillPath,
+                targetPath: targetSkillPath,
+                sourceHash: "partial",
+                installedFiles: []
+              })
+            }
+          }
+          : { installs: {} },
         onWritten: (mutation) => receiptMutations.push(mutation),
         receiptLock
       });
+      if (__test.conflictReceiptBeforeFailure === true) {
+        await writeFile(receiptPath, `${JSON.stringify({
+          schema: "calvinnwq.skills.receipt.v0",
+          installs: { partial: { skill: "concurrent" } }
+        }, null, 2)}\n`);
+      }
       throw new Error("Injected receipt failure after partial receipt write.");
     }
     const installRecord = buildInstallRecord({
@@ -509,9 +531,15 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
     await removeLink(targetSkillPath);
     await restorePath(backupPath, targetSkillPath);
     await removeTree(repoSkillPath);
-    await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
+    const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
     result.backupPath = null;
     result.errors.push({ code: "promote_receipt_failed", message: describeError(error) });
+    if (!receiptRollbackComplete) {
+      result.errors.push({
+        code: "receipt_rollback_failed",
+        message: "Receipt rollback was incomplete after promote failed."
+      });
+    }
     return result;
   }
   steps.push({ action: "receipt", to: result.receiptPath });

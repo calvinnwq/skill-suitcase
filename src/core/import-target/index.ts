@@ -342,7 +342,7 @@ async function executeImportLocked(
       if (copied) {
         await removePath(tmpPath);
       }
-      await restoreCompletedImports({ completed, installRoot, receiptMutations, receiptLock });
+      const receiptRollbackComplete = await restoreCompletedImports({ completed, installRoot, receiptMutations, receiptLock });
       importedSkills.length = 0;
       importedFiles = 0;
       completed.length = 0;
@@ -366,7 +366,11 @@ async function executeImportLocked(
             message: errorMessage(error),
             skill: candidate.skill,
             path: catalogPath
-          })
+          }),
+          ...receiptRollbackComplete ? [] : [importError({
+            code: "receipt_rollback_failed",
+            message: "Receipt rollback was incomplete after import-target failed."
+          })]
         ],
         imported: {
           skills: [],
@@ -394,7 +398,7 @@ async function executeImportLocked(
     inputTarget: input.target
   });
   if (postStatusErrors.length > 0) {
-    await restoreCompletedImports({ completed, installRoot, receiptMutations, receiptLock });
+    const receiptRollbackComplete = await restoreCompletedImports({ completed, installRoot, receiptMutations, receiptLock });
     return {
       ...plan,
       ok: false,
@@ -409,7 +413,11 @@ async function executeImportLocked(
       },
       errors: [
         ...plan.errors,
-        ...postStatusErrors
+        ...postStatusErrors,
+        ...receiptRollbackComplete ? [] : [importError({
+          code: "receipt_rollback_failed",
+          message: "Receipt rollback was incomplete after import-target verification failed."
+        })]
       ],
       imported: {
         skills: [],
@@ -451,12 +459,13 @@ async function restoreCompletedImports({
   installRoot: string;
   receiptMutations: ReceiptMutation[];
   receiptLock: ReceiptLock;
-}): Promise<void> {
-  await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
+}): Promise<boolean> {
+  const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
   for (const done of [...completed].reverse()) {
     await removePath(done.catalogPath);
     await restorePath(done.backupPath, done.catalogPath);
   }
+  return receiptRollbackComplete;
 }
 
 /**

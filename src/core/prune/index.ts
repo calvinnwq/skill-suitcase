@@ -17,7 +17,6 @@ import { plan } from "../planning/index.js";
 import { targets } from "../catalog/targets.js";
 import type { TargetOverrides } from "../catalog/index.js";
 import {
-  readReceipt,
   RECEIPT_FILE,
   RECEIPT_SCHEMA,
   withReceiptLock,
@@ -39,6 +38,7 @@ type PruneInput = {
   targetOverrides?: TargetOverrides | undefined;
   __test?: {
     beforeLock?: () => Promise<void> | void;
+    afterReceiptSnapshot?: () => Promise<void> | void;
     failAfterMutationForSkill?: string;
     failBeforeReceipt?: boolean;
     beforeMutationForSkill?: (skill: string) => Promise<void> | void;
@@ -217,7 +217,8 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
       }
       const receiptText = await readFile(receiptPath, "utf8");
       receiptHash = sha256(receiptText);
-      const loadedReceipt = await readReceipt({ installRoot });
+      await input.__test?.afterReceiptSnapshot?.();
+      const loadedReceipt = parseModernReceipt(receiptText);
       const invalidRecord = invalidReceiptRecord(loadedReceipt);
       if (invalidRecord !== null) {
         throw new Error(invalidRecord);
@@ -422,6 +423,9 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       }
       if (input.__test?.failAfterMutationForSkill === candidate.skill) throw new Error(`Injected failure after ${candidate.skill}`);
     }
+    for (const candidate of planned.candidates) {
+      await revalidateAssignment(input, planned, candidate.skill);
+    }
     if (input.__test?.failBeforeReceipt) throw new Error("Injected failure before receipt write");
     const nextReceipt = removeCandidateRecords(
       planned.receipt!,
@@ -602,6 +606,18 @@ function invalidReceiptRecord(receipt: Receipt): string | null {
     }
   }
   return null;
+}
+
+function parseModernReceipt(text: string): Receipt {
+  const parsed: unknown = JSON.parse(text);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Receipt payload must be an object.");
+  }
+  const receipt = parsed as Receipt;
+  if (receipt.schema !== RECEIPT_SCHEMA) {
+    throw new Error("Prune receipt has an unsupported schema.");
+  }
+  return receipt;
 }
 
 async function revalidateCandidate(planned: PlannedPrune, candidate: PruneCandidate): Promise<void> {

@@ -632,7 +632,7 @@ export async function apply({
     await rollbackApplyWrites({
       restorePlan
     });
-    await rollbackReceiptMutations({
+    const receiptRollbackComplete = await rollbackReceiptMutations({
       installRoot,
       mutations: receiptMutations,
       receiptLock
@@ -655,7 +655,10 @@ export async function apply({
       errors: [{
         code: "write_error",
         message: error instanceof Error ? error.message : "Unknown write error"
-      }]
+      }, ...receiptRollbackComplete ? [] : [{
+        code: "receipt_rollback_failed",
+        message: "Receipt rollback was incomplete after apply failed."
+      }]]
     });
   }
 
@@ -957,11 +960,14 @@ async function applySymlinkInstalls({
     for (const linkPath of [...createdLinks].reverse()) {
       await unlinkSafe(linkPath);
     }
-    await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
+    const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
     return failSymlink([{
       code: "symlink_write_error",
       message: error instanceof Error ? error.message : "Unknown symlink write error"
-    }]);
+    }, ...receiptRollbackComplete ? [] : [{
+      code: "receipt_rollback_failed",
+      message: "Receipt rollback was incomplete after symlink apply failed."
+    }]]);
   }
 
   let postApplyStatus: StatusResult | null = null;

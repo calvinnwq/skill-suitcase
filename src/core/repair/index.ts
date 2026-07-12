@@ -758,7 +758,7 @@ async function executeRepairLocked(
       if (copied) {
         await removePath(tmpPath);
       }
-      await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
+      const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
       for (const completed of backups.reverse()) {
         await removePath(completed.targetPath);
         await restorePath(completed.backupPath, completed.targetPath);
@@ -786,7 +786,11 @@ async function executeRepairLocked(
             message: errorMessage(error),
             skill: candidate.skill,
             path: candidate.targetPath
-          })
+          }),
+          ...receiptRollbackComplete ? [] : [repairError({
+            code: "receipt_rollback_failed",
+            message: "Receipt rollback was incomplete after repair failed."
+          })]
         ],
         repaired: {
           skills: repairedSkills.sort(),

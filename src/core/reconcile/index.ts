@@ -603,7 +603,7 @@ async function executeReconcileLocked(
       if (copied) {
         await removePath(tmpPath);
       }
-      await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
+      const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
       for (const completed of backups.reverse()) {
         await removePath(completed.targetPath);
         await restorePath(completed.backupPath, completed.targetPath);
@@ -631,7 +631,11 @@ async function executeReconcileLocked(
             message: errorMessage(error),
             skill: candidate.skill,
             path: candidate.targetPath
-          })
+          }),
+          ...receiptRollbackComplete ? [] : [reconcileError({
+            code: "receipt_rollback_failed",
+            message: "Receipt rollback was incomplete after reconcile failed."
+          })]
         ],
         reconciled: {
           skills: reconciledSkills.sort(),

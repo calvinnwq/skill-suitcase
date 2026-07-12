@@ -11,6 +11,7 @@ import {
 import {
   buildInstallRecord,
   buildInstalledFiles,
+  ReceiptReadError,
   upsertInstallRecord,
   updateAndWriteReceipt
 } from "../receipts/index.js";
@@ -303,8 +304,10 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
       blocked: blockedForTrack,
       selected: selectedSkills,
       errors: [trackError({
-        code: "receipt_write_failed",
-        message: `Failed to write track receipt: ${errorMessage(error)}`,
+        code: error instanceof ReceiptReadError ? "invalid_receipt" : "receipt_write_failed",
+        message: error instanceof ReceiptReadError
+          ? `Could not read track receipt: ${errorMessage(error)}`
+          : `Failed to write track receipt: ${errorMessage(error)}`,
         path: installRoot
       })]
     });

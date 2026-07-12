@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -189,6 +190,30 @@ test("prune refuses legacy receipts without migrating them", async (t) => {
   await assert.rejects(stat(modernReceiptPath), /ENOENT/);
   assert.equal((await stat(path.join(fixture.targetRoot, ".skills-sync.json"))).isFile(), true);
   assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+});
+
+test("prune builds its receipt hash and candidates from one snapshot", async (t) => {
+  const fixture = await createFixture(t);
+  const receiptPath = path.join(fixture.targetRoot, RECEIPT_FILE);
+  const receiptText = await readFile(receiptPath, "utf8");
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    dryRun: true,
+    __test: {
+      afterReceiptSnapshot: async () => {
+        await writeReceipt({ installRoot: fixture.targetRoot, receipt: { installs: {} } });
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.candidates[0]?.skill, "dir-old");
+  assert.equal(result.plan.receiptHash, createHash("sha256").update(receiptText).digest("hex"));
+  const currentReceipt = await readReceipt({ installRoot: fixture.targetRoot });
+  assert.equal(currentReceipt.installs?.["dir-old"], undefined);
 });
 
 test("prune apply quarantines directories, removes symlinks, and updates receipt", async (t) => {
@@ -496,6 +521,41 @@ test("prune refuses a skill assigned after planning but before mutation", async 
   assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
   const receipt = await readReceipt({ installRoot: fixture.targetRoot });
   assert.ok(receipt.installs?.["dir-old"]);
+});
+
+test("prune revalidates every assignment before committing the receipt", async (t) => {
+  const fixture = await createFixture(t);
+  const dryRun = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old", "link-old"],
+    dryRun: true
+  });
+  assert.ok(dryRun.plan.id);
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old", "link-old"],
+    planId: dryRun.plan.id,
+    apply: true,
+    __test: {
+      beforeMutationForSkill: async (skill) => {
+        if (skill !== "link-old") return;
+        const manifestPath = path.join(fixture.sourceRoot, "skill-suitcase.yaml");
+        const manifest = await readFile(manifestPath, "utf8");
+        await writeFile(manifestPath, manifest.replace("      - current", "      - current\n      - dir-old"));
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.message.includes("dir-old became assigned")), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+  assert.equal(await readlink(fixture.symlinkTarget), path.join(fixture.sourceRoot, "skills", "link-old"));
+  const receipt = await readReceipt({ installRoot: fixture.targetRoot });
+  assert.ok(receipt.installs?.["dir-old"]);
+  assert.ok(receipt.installs?.["link-old"]);
 });
 
 test("prune preserves a receipt update that starts during apply", async (t) => {

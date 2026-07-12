@@ -538,6 +538,18 @@ test("track reports receipt write failures without partial adoption", async (t) 
   await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
 });
 
+test("track preserves invalid_receipt for malformed existing receipt JSON", async (t) => {
+  const { sourceRoot, targetRoot } = await createLiveMatchingInstall(t);
+  await writeFile(path.join(targetRoot, RECEIPT_FILE), "{invalid\n");
+
+  const result = await track({ source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "invalid_receipt"), true);
+  assert.equal(result.errors.some((error) => error.code === "receipt_write_failed"), false);
+  assert.equal(await readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), "{invalid\n");
+});
+
 async function createSymlinkAdoptionFixture(t: { after(fn: () => Promise<void> | void): void }): Promise<{
   sourceRoot: string;
   targetRoot: string;

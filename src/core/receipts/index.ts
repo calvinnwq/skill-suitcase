@@ -8,6 +8,10 @@ export const LEGACY_RECEIPT_SCHEMA = "calvinnwq.skills.sync-lock.v0";
 export const LEGACY_RECEIPT_FILE = ".skills-sync.json";
 export const RECEIPT_LOCK_FILE = ".skill-suitcase-receipt.lock";
 
+export class ReceiptReadError extends Error {
+  override name = "ReceiptReadError";
+}
+
 const RECEIPT_LOCK_RETRY_MS = 25;
 const RECEIPT_LOCK_TIMEOUT_MS = 10_000;
 const RECEIPT_LEGACY_LOCK_STALE_MS = 86_400_000;
@@ -709,9 +713,9 @@ async function readReceiptFileForUpsert(
       return { found: false, receipt: {} };
     }
     if (error instanceof SyntaxError) {
-      throw new Error(`Receipt ${receiptPath} must be valid JSON.`);
+      throw new ReceiptReadError(`Receipt ${receiptPath} must be valid JSON.`);
     }
-    throw error;
+    throw new ReceiptReadError(error instanceof Error ? error.message : String(error));
   }
 }
 
