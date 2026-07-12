@@ -155,9 +155,11 @@ function analyzeSourceFile(filePath, text) {
       importSpecifiers.push(node.moduleReference.expression.text);
     } else if (ts.isCallExpression(node)
       && node.expression.kind === ts.SyntaxKind.ImportKeyword
-      && node.arguments.length === 1
-      && ts.isStringLiteralLike(node.arguments[0])) {
-      importSpecifiers.push(node.arguments[0].text);
+      && node.arguments.length >= 1) {
+      const specifier = staticStringValue(node.arguments[0], checker);
+      if (specifier !== null) {
+        importSpecifiers.push(specifier);
+      }
     }
 
     if (ts.isImportDeclaration(node)
@@ -235,14 +237,19 @@ function collectProcessAliases(sourceFile, checker, processAliases) {
         } else {
           for (const element of importClause.namedBindings.elements) {
             const importedName = element.propertyName?.text ?? element.name.text;
-            if (importedName === "process") {
+            if (importedName === "default" || importedName === "process") {
               addIdentifierSymbol(element.name, checker, processAliases);
             }
           }
         }
       }
+    } else if (ts.isImportEqualsDeclaration(node)
+      && ts.isExternalModuleReference(node.moduleReference)
+      && node.moduleReference.expression !== undefined
+      && ts.isStringLiteralLike(node.moduleReference.expression)
+      && isNodeProcessSpecifier(node.moduleReference.expression.text)) {
+      addIdentifierSymbol(node.name, checker, processAliases);
     } else if (ts.isVariableDeclaration(node)
-      && ts.isIdentifier(node.name)
       && node.initializer !== undefined) {
       declarations.push(node);
     }
@@ -255,10 +262,31 @@ function collectProcessAliases(sourceFile, checker, processAliases) {
     changed = false;
     for (const declaration of declarations) {
       if (isProcessObject(declaration.initializer, checker, processAliases)) {
-        changed = addIdentifierSymbol(declaration.name, checker, processAliases) || changed;
+        if (ts.isIdentifier(declaration.name)) {
+          changed = addIdentifierSymbol(declaration.name, checker, processAliases) || changed;
+        } else if (ts.isObjectBindingPattern(declaration.name)) {
+          changed = collectProcessBindingAliases(declaration.name, checker, processAliases) || changed;
+        }
       }
     }
   }
+}
+
+function collectProcessBindingAliases(pattern, checker, processAliases) {
+  let changed = false;
+  for (const element of pattern.elements) {
+    if (ts.isOmittedExpression(element) || !ts.isIdentifier(element.name)) {
+      continue;
+    }
+    const propertyName = element.propertyName ?? element.name;
+    const importedName = ts.isIdentifier(propertyName) || ts.isStringLiteralLike(propertyName)
+      ? propertyName.text
+      : null;
+    if (importedName === "default" || importedName === "process") {
+      changed = addIdentifierSymbol(element.name, checker, processAliases) || changed;
+    }
+  }
+  return changed;
 }
 
 function addIdentifierSymbol(identifier, checker, symbols) {
@@ -318,27 +346,114 @@ function collectProcessBindings(pattern, processMembers) {
 }
 
 function isProcessObject(node, checker, processAliases) {
-  if (ts.isParenthesizedExpression(node)) {
-    return isProcessObject(node.expression, checker, processAliases);
+  const expression = unwrapExpression(node);
+  if (ts.isAwaitExpression(expression)) {
+    return isProcessObject(expression.expression, checker, processAliases);
   }
-  if (ts.isIdentifier(node)) {
-    const symbol = checker.getSymbolAtLocation(node);
+  if (ts.isIdentifier(expression)) {
+    const symbol = checker.getSymbolAtLocation(expression);
     return (symbol !== undefined && processAliases.has(symbol))
-      || (node.text === "process" && isUnshadowedGlobal(node, checker));
+      || (expression.text === "process" && isUnshadowedGlobal(expression, checker));
   }
-  if (ts.isPropertyAccessExpression(node)) {
-    return node.name.text === "process"
-      && ts.isIdentifier(node.expression)
-      && node.expression.text === "globalThis"
-      && isUnshadowedGlobal(node.expression, checker);
+  if (isProcessModuleLoader(expression, checker)) {
+    return true;
   }
-  return ts.isElementAccessExpression(node)
-    && ts.isIdentifier(node.expression)
-    && node.expression.text === "globalThis"
-    && isUnshadowedGlobal(node.expression, checker)
-    && node.argumentExpression !== undefined
-    && ts.isStringLiteralLike(node.argumentExpression)
-    && node.argumentExpression.text === "process";
+  if (ts.isPropertyAccessExpression(expression)) {
+    if (expression.name.text === "default"
+      && isProcessObject(expression.expression, checker, processAliases)) {
+      return true;
+    }
+    return expression.name.text === "process"
+      && ts.isIdentifier(expression.expression)
+      && (expression.expression.text === "global" || expression.expression.text === "globalThis")
+      && isUnshadowedGlobal(expression.expression, checker);
+  }
+  if (!ts.isElementAccessExpression(expression)
+    || expression.argumentExpression === undefined
+    || !ts.isStringLiteralLike(expression.argumentExpression)) {
+    return false;
+  }
+  if (expression.argumentExpression.text === "default") {
+    return isProcessObject(expression.expression, checker, processAliases);
+  }
+  return expression.argumentExpression.text === "process"
+    && ts.isIdentifier(expression.expression)
+    && (expression.expression.text === "global" || expression.expression.text === "globalThis")
+    && isUnshadowedGlobal(expression.expression, checker);
+}
+
+function isProcessModuleLoader(node, checker) {
+  if (!ts.isCallExpression(node) || node.arguments.length < 1) {
+    return false;
+  }
+  const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+  const isRequire = ts.isIdentifier(node.expression)
+    && node.expression.text === "require"
+    && isUnshadowedGlobal(node.expression, checker);
+  if (!isDynamicImport && !isRequire) {
+    return false;
+  }
+  const specifier = staticStringValue(node.arguments[0], checker);
+  return specifier !== null && isNodeProcessSpecifier(specifier);
+}
+
+function staticStringValue(node, checker, resolvingSymbols = new Set()) {
+  const expression = unwrapExpression(node);
+  if (ts.isStringLiteralLike(expression)) {
+    return expression.text;
+  }
+  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticStringValue(expression.left, checker, resolvingSymbols);
+    if (left === null) {
+      return null;
+    }
+    const right = staticStringValue(expression.right, checker, resolvingSymbols);
+    return right === null ? null : left + right;
+  }
+  if (ts.isTemplateExpression(expression)) {
+    let value = expression.head.text;
+    for (const span of expression.templateSpans) {
+      const replacement = staticStringValue(span.expression, checker, resolvingSymbols);
+      if (replacement === null) {
+        return null;
+      }
+      value += replacement + span.literal.text;
+    }
+    return value;
+  }
+  if (!ts.isIdentifier(expression)) {
+    return null;
+  }
+  const symbol = checker.getSymbolAtLocation(expression);
+  if (symbol === undefined || resolvingSymbols.has(symbol)) {
+    return null;
+  }
+  const declarations = symbol.declarations?.filter((declaration) => ts.isVariableDeclaration(declaration)) ?? [];
+  if (declarations.length !== 1) {
+    return null;
+  }
+  const [declaration] = declarations;
+  if (declaration.initializer === undefined
+    || !ts.isVariableDeclarationList(declaration.parent)
+    || (declaration.parent.flags & ts.NodeFlags.Const) === 0) {
+    return null;
+  }
+  resolvingSymbols.add(symbol);
+  const value = staticStringValue(declaration.initializer, checker, resolvingSymbols);
+  resolvingSymbols.delete(symbol);
+  return value;
+}
+
+function unwrapExpression(node) {
+  let expression = node;
+  while (ts.isParenthesizedExpression(expression)
+    || ts.isAsExpression(expression)
+    || ts.isTypeAssertionExpression(expression)
+    || ts.isSatisfiesExpression(expression)
+    || ts.isNonNullExpression(expression)) {
+    expression = expression.expression;
+  }
+  return expression;
 }
 
 function isUnshadowedGlobal(identifier, checker) {

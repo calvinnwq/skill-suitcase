@@ -64,6 +64,43 @@ test("architecture contract rejects dynamic imports that cross boundaries", asyn
   ]);
 });
 
+test("architecture contract resolves constant dynamic import specifiers", async () => {
+  const root = await createFixture({
+    "src/core/planning/concatenated.ts": 'export const load = () => import("../../commands/" + "plan.js");',
+    "src/core/planning/identifier.ts": [
+      'const target = "../../commands/plan.js";',
+      "export const load = () => import(target);"
+    ].join("\n"),
+    "src/core/planning/template.ts": [
+      'const directory = "../../commands";',
+      "export const load = () => import(`${directory}/plan.js`);"
+    ].join("\n"),
+    "src/core/planning/options.ts": [
+      'const target = "../../commands/plan.js";',
+      'export const load = () => import(target, { with: { type: "json" } });'
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/core/planning/concatenated.ts imports forbidden commands boundary src/commands/plan.ts",
+    "src/core/planning/identifier.ts imports forbidden commands boundary src/commands/plan.ts",
+    "src/core/planning/options.ts imports forbidden commands boundary src/commands/plan.ts",
+    "src/core/planning/template.ts imports forbidden commands boundary src/commands/plan.ts"
+  ]);
+});
+
+test("architecture contract ignores non-constant dynamic import specifiers", async () => {
+  const root = await createFixture({
+    "src/core/planning/index.ts": [
+      "export const loadParameter = (target) => import(target);",
+      'let target = "../../commands/plan.js";',
+      "export const loadMutable = () => import(target);"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
 test("architecture contract ignores import and process examples in comments and strings", async () => {
   const root = await createFixture({
     "src/core/planning/index.ts": [
@@ -91,8 +128,27 @@ test("architecture contract keeps argv and process output at the CLI boundary", 
     ["renderer stdout", "src/renderers/json.ts", 'process.stdout.write("result");', "process.stdout"],
     ["destructured stdout", "src/core/planning/index.ts", "const { stdout } = process;", "process.stdout"],
     ["global process stdout", "src/core/planning/index.ts", "globalThis.process.stdout.write('result');", "process.stdout"],
+    ["Node global process stdout", "src/core/planning/index.ts", "global.process.stdout.write('result');", "process.stdout"],
     ["imported stderr", "src/core/planning/index.ts", "import { stderr } from 'node:process';", "process.stderr"],
-    ["aliased process argv", "src/core/planning/index.ts", "const runtime = process; export const args = runtime.argv;", "process.argv"]
+    ["aliased process argv", "src/core/planning/index.ts", "const runtime = process; export const args = runtime.argv;", "process.argv"],
+    [
+      "import-equals process argv",
+      "src/core/planning/index.ts",
+      'import runtime = require("node:process"); export const args = runtime.argv;',
+      "process.argv"
+    ],
+    [
+      "dynamic-import destructured stdout",
+      "src/core/planning/index.ts",
+      'const { stdout } = await import("node:process"); stdout.write("result");',
+      "process.stdout"
+    ],
+    [
+      "dynamic-import process alias",
+      "src/core/planning/index.ts",
+      'const moduleName = "node:" + "process"; const runtime = await import(moduleName); runtime.stderr.write("warning");',
+      "process.stderr"
+    ]
   ];
 
   for (const [name, source, contents, processMember] of cases) {
@@ -124,6 +180,35 @@ test("architecture contract ignores members on a locally shadowed process", asyn
       "process.stdout.write('result');",
       "const { stderr } = process;",
       "export { process, stderr };"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract ignores locally shadowed process loaders", async () => {
+  const root = await createFixture({
+    "src/core/planning/index.ts": [
+      "const global = { process: { stdout: { write() {} } } };",
+      "global.process.stdout.write('local');",
+      "function load(require) {",
+      '  const runtime = require("node:process");',
+      "  return runtime.argv;",
+      "}",
+      "export { load };"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract ignores non-constant process loaders", async () => {
+  const root = await createFixture({
+    "src/core/planning/index.ts": [
+      "export async function write(moduleName) {",
+      "  const runtime = await import(moduleName);",
+      "  runtime.stdout.write('unknown module');",
+      "}"
     ].join("\n")
   });
 
