@@ -321,6 +321,16 @@ test("install page covers the npm install and pinned source fallback", () => {
   assert.ok(install.includes('test "$(pnpm --version)" = "10.34.4"'));
   assert.ok(install.includes("pnpm install --frozen-lockfile"));
   assert.ok(install.includes("skills/skill-suitcase"));
+  assert.ok(install.includes('INSTALL_TMP="$(mktemp -d "$AGENT_SKILLS_DIR/.skill-suitcase.install.XXXXXX")"'));
+  assert.ok(install.includes('cp -R "$SKILL_SRC/." "$INSTALL_TMP/replacement/"'));
+  assert.ok(install.includes('mv "$TARGET" "$INSTALL_TMP/previous"'));
+  assert.ok(install.includes('mv "$INSTALL_TMP/replacement" "$TARGET"'));
+  assert.match(install, /Skill source not found:[\s\S]*?return 1/);
+  assert.ok(
+    install.indexOf('cp -R "$SKILL_SRC/." "$INSTALL_TMP/replacement/"')
+      < install.indexOf('mv "$TARGET" "$INSTALL_TMP/previous"'),
+    "the replacement must be staged before the installed skill moves"
+  );
   assert.ok(install.includes("Restart the agent runtime"));
 });
 

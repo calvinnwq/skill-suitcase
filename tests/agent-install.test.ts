@@ -49,7 +49,10 @@ test("agent install guide tells agents how to install and verify the skill", asy
   assert.doesNotMatch(install, /These instructions are for Codex, Claude/);
   assert.match(install, /AGENT_SKILLS_DIR="\$HOME\/\.codex\/skills"/);
   assert.match(install, /AGENT_SKILLS_DIR="\$HOME\/\.claude\/skills"/);
-  assert.match(install, /cp -R "\$SKILL_SRC" "\$AGENT_SKILLS_DIR\/"/);
+  assert.match(install, /cp -R "\$SKILL_SRC\/\." "\$INSTALL_TMP\/replacement\/"/);
+  assert.match(install, /mv "\$TARGET" "\$INSTALL_TMP\/previous"/);
+  assert.match(install, /mv "\$INSTALL_TMP\/replacement" "\$TARGET"/);
+  assert.match(install, /Skill source not found:[\s\S]*?return 1/);
   assert.match(install, /Restart the agent runtime after installing or replacing a skill/);
   assert.match(install, /Read-Only Audit First/);
   assert.match(install, /Mutate Only After Approval/);
