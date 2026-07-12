@@ -412,6 +412,7 @@ async function receiptLockRecoveryIsClear(lockPath: string): Promise<boolean> {
   const lockName = path.basename(lockPath);
   const recoveryPrefix = `${lockName}.recover.`;
   const legacyPrefix = `${lockName}.`;
+  const pendingSuffix = ".pending";
   const entries = await readdir(directory);
   const current = await readReceiptLockOwner(lockPath);
   let clear = true;
@@ -436,6 +437,18 @@ async function receiptLockRecoveryIsClear(lockPath: string): Promise<boolean> {
       continue;
     }
 
+    if (entry.startsWith(legacyPrefix) && entry.endsWith(pendingSuffix)) {
+      const token = entry.slice(legacyPrefix.length, -pendingSuffix.length);
+      if (token.length > 0) {
+        await removeTerminatedPendingReceiptLockClaim({
+          pendingPath: path.join(directory, entry),
+          recoveryPrefix: path.join(directory, recoveryPrefix),
+          token
+        });
+      }
+      continue;
+    }
+
     if (!entry.startsWith(legacyPrefix) || !entry.endsWith(".recover")) continue;
     const identity = entry.slice(legacyPrefix.length, -".recover".length);
     if (!/^\d+-\d+$/.test(identity)) continue;
@@ -456,6 +469,54 @@ async function receiptLockRecoveryIsClear(lockPath: string): Promise<boolean> {
   }
 
   return clear;
+}
+
+async function removeTerminatedPendingReceiptLockClaim({
+  pendingPath,
+  recoveryPrefix,
+  token
+}: {
+  pendingPath: string;
+  recoveryPrefix: string;
+  token: string;
+}): Promise<void> {
+  const initial = await readReceiptLockOwner(pendingPath);
+  if (
+    initial === null
+    || initial.owner.token !== token
+    || isProcessAlive(initial.owner.pid)
+  ) {
+    return;
+  }
+  const recoveryPath = `${recoveryPrefix}${process.pid}.${randomUUID()}`;
+  try {
+    await link(pendingPath, recoveryPath);
+  } catch {
+    return;
+  }
+  try {
+    const [current, recovery] = await Promise.all([
+      readReceiptLockOwner(pendingPath),
+      readReceiptLockOwner(recoveryPath)
+    ]);
+    if (
+      current === null
+      || recovery === null
+      || current.owner.token !== token
+      || current.text !== initial.text
+      || current.info.dev !== initial.info.dev
+      || current.info.ino !== initial.info.ino
+      || recovery.info.dev !== initial.info.dev
+      || recovery.info.ino !== initial.info.ino
+      || isProcessAlive(current.owner.pid)
+    ) {
+      return;
+    }
+    await rm(pendingPath);
+  } catch {
+  } finally {
+    await rm(recoveryPath, { force: true }).catch(() => undefined);
+  }
 }
 
 async function readReceiptLockOwner(

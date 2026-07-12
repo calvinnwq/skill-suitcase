@@ -1439,6 +1439,65 @@ test("receipt writers recover a terminated recovery claimant", async (t) => {
   await assert.rejects(stat(recoveryPath), { code: "ENOENT" });
 });
 
+test("receipt writers recover a pending claim left by a terminated owner", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-terminated-pending-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const token = "terminated-pending-claimant";
+  const pendingPath = path.join(root, `${RECEIPT_LOCK_FILE}.${token}.pending`);
+  await writeFile(
+    pendingPath,
+    `${JSON.stringify({
+      schema: "calvinnwq.skills.receipt-lock.v1",
+      pid: 2_147_483_647,
+      token,
+      createdAt: new Date().toISOString()
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 }
+  );
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  await assert.rejects(stat(pendingPath), { code: "ENOENT" });
+});
+
+test("receipt writers preserve pending claims owned by live processes", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-live-pending-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const token = "live-pending-claimant";
+  const pendingPath = path.join(root, `${RECEIPT_LOCK_FILE}.${token}.pending`);
+  const pendingText = `${JSON.stringify({
+    schema: "calvinnwq.skills.receipt-lock.v1",
+    pid: process.pid,
+    token,
+    createdAt: new Date().toISOString()
+  })}\n`;
+  await writeFile(pendingPath, pendingText, { encoding: "utf8", mode: 0o600 });
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  assert.equal(await readFile(pendingPath, "utf8"), pendingText);
+});
+
+test("receipt writers preserve pending claims with mismatched ownership", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-mismatched-pending-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const pendingPath = path.join(root, `${RECEIPT_LOCK_FILE}.recorded-token.pending`);
+  const pendingText = `${JSON.stringify({
+    schema: "calvinnwq.skills.receipt-lock.v1",
+    pid: 2_147_483_647,
+    token: "different-token",
+    createdAt: new Date().toISOString()
+  })}\n`;
+  await writeFile(pendingPath, pendingText, { encoding: "utf8", mode: 0o600 });
+
+  await writeReceipt({ installRoot: root, receipt: { installs: {} } });
+
+  assert.deepEqual((await readReceipt({ installRoot: root })).installs, {});
+  assert.equal(await readFile(pendingPath, "utf8"), pendingText);
+});
+
 test("concurrent stale-lock waiters preserve every receipt update", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-receipt-stale-waiters-"));
   t.after(() => rm(root, { recursive: true, force: true }));
