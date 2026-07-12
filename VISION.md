@@ -69,8 +69,10 @@ can manage real skill catalogs safely today.
 
 ## Relationship To Other Docs
 
-- `ARCHITECTURE.md` defines the implementation boundaries that preserve this
+- `SPEC.md` defines the normative current-state product contract and is linked
+  from the package README.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) defines the implementation boundaries that preserve this
   vision.
-- `README.md` explains the current public CLI surface.
-- `INSTALL.md` explains agent/runtime setup.
-- `docs/skills-sh-delegation.md` records the current upstream-provider boundary.
+- [`README.md`](README.md) explains the current public CLI surface.
+- [`INSTALL.md`](INSTALL.md) explains agent/runtime setup.
+- [`docs/skills-sh-delegation.md`](docs/skills-sh-delegation.md) records the current upstream-provider boundary.

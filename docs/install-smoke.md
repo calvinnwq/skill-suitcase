@@ -53,8 +53,11 @@ planning or install semantics.
 
 If the catalog declares manifest `sourcePolicy`, smoke both sides of the
 materialization boundary: excluded generated/cache paths should be omitted from
-`pack --dry-run`, while `sourcePolicy.deny` paths should report
-`source_denied_path` or `diff_source_denied_path` and write no target files.
+`pack --dry-run` and copy-mode apply.
+Symlink apply should refuse every non-empty exclude policy with
+`symlink_source_policy_exclude`, including one with no current matches.
+`sourcePolicy.deny` paths should report `source_denied_path` or
+`diff_source_denied_path` and write no target files.
 
 If the catalog declares manifest `validationPolicy.skillify.skip`, smoke it through `validate --strict --json` as a strict-validation boundary only.
 Valid `external-managed` entries should increase `summary.contractsSkippedExternal`, while valid `legacy-local` entries should increase `summary.contractsSkippedLegacy` and emit `legacy_skillify_skip`.
@@ -66,8 +69,8 @@ before expecting the pack smoke to pass.
 When a catalog declares a custom `assignmentPaths` entry with a provider-backed
 kind such as `opencode-skills-root` or `pi-skills-root`, smoke the boundary as
 read-only: `targets`, `status`, and `diff` may report the target, but `pack`,
-`apply`, `track`, `reconcile`, `repair`, and `import-target` should return
-`read_only_target` instead of writing artifacts, receipts, or target files.
+`apply`, `track`, `reconcile`, `repair`, `prune`, and `import-target` should
+return `read_only_target` instead of writing artifacts, receipts, or target files.
 
 If the catalog declares upstream-managed skills in
 `.skill-suitcase/upstream-lock.json`, smoke the source-refresh read-only

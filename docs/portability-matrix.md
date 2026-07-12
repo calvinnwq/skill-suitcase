@@ -69,9 +69,11 @@ non-ignored files inside the selected variant source path. Track or remove those
 files before generating a pack so the snapshot only contains reviewed source
 state.
 Manifest `sourcePolicy.exclude` patterns intentionally omit generated/cache
-paths from packs, plan locks, diffs, and apply writes. Manifest
-`sourcePolicy.deny` and built-in secret-like deny patterns refuse unsafe source
-content before materialization with `source_denied_path` or
+paths from packs, plan locks, diffs, and copy-mode apply writes.
+Symlink apply cannot omit descendants, so it refuses every non-empty exclude
+policy with `symlink_source_policy_exclude`, including one with no current matches.
+Manifest `sourcePolicy.deny` and built-in secret-like deny patterns refuse unsafe
+source content before materialization with `source_denied_path` or
 `diff_source_denied_path` so excluded files do not become receipts and denied
 files do not reach target homes.
 

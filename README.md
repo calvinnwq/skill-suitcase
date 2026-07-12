@@ -18,11 +18,7 @@ support, private vulnerability reporting, and community expectations are
 documented in [`SUPPORT.md`](SUPPORT.md), [`SECURITY.md`](SECURITY.md), and
 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
-Read-only commands (`plan`, `diff`, `pack --dry-run`, `import`, `validate`,
-`targets`, `status`, `prune --dry-run`, `upstream check`, and `upstream fetch`) read a catalog
-manifest, resolve assignments and assignment paths, and emit JSON plans, diffs,
-import findings, target discovery, bundle manifests, status reports, or upstream
-source-refresh reports without touching target install paths or runtime homes.
+Read-only command modes (`plan`, `diff`, `pack --dry-run`, `import`, `validate`, `targets`, `status`, `reconcile --dry-run`, `repair --dry-run`, `prune --dry-run`, `promote --dry-run`, `import-target --dry-run`, `upstream check`, and `upstream fetch --dry-run`) inspect catalog, target, or upstream state and emit JSON plans, diffs, findings, discovery metadata, status reports, or source-refresh reports without changing catalog source, target installs, receipts, or live runtime homes.
 
 - Git-backed catalog source stays reviewable before it reaches a runtime.
 - Read-only commands explain current state before any mutation.
@@ -33,6 +29,7 @@ source-refresh reports without touching target install paths or runtime homes.
 - Copy and symlink installs are tracked with receipts and recoverable workflows.
 
 Read [`VISION.md`](VISION.md) for the product north star and
+[`SPEC.md`](SPEC.md) for the normative current-state contract. See
 [`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md)
 for the CLI boundaries.
 
@@ -103,10 +100,14 @@ The modeled targets are `openclaw`, `codex`, `openclaw-codex`, `agents`,
 `--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`, and
 `--grok-skills`.
 
-OpenCode and Pi are provider-backed compatibility targets. They are read-only
-even when the catalog declares a custom `assignmentPaths` entry. Mutating or
-materializing commands refuse those roots with `read_only_target` rather than
-silently treating provider-managed locations as Suitcase-owned installs.
+OpenCode and Pi are provider-backed compatibility targets.
+They are read-only even when the catalog declares a custom `assignmentPaths` entry.
+Target-aware materialization and mutation commands (`pack`, `apply`, `track`,
+`reconcile`, `repair`, `prune`, and `import-target`) refuse those roots with
+`read_only_target` rather than silently treating provider-managed locations as
+Suitcase-owned installs.
+Path-driven `promote` and receipt-driven `rollback` do not resolve target
+adapters and instead enforce their own explicit scope and ownership checks.
 
 See [`docs/command-reference.md`](docs/command-reference.md) for command
 guidance, approval requirements, state meanings, and common refusal codes.
@@ -115,8 +116,7 @@ guidance, approval requirements, state meanings, and common refusal codes.
 
 Skill Suitcase separates three phases:
 
-1. Inspect with `import`, `validate`, `targets`, `plan`, `status`, `diff`, and
-   `upstream check`.
+1. Inspect with `import`, `validate`, `targets`, `plan`, `status`, `diff`, the recovery and promotion `--dry-run` modes, `upstream check`, and `upstream fetch --dry-run`.
 2. Stage with `pack` or a plan lock, and review the ordinary filesystem/Git
    changes.
 3. Mutate only with explicit approval through `apply`, a targeted `--apply`
@@ -274,9 +274,9 @@ loads lineage only for reported skills.
 
 ## Catalog Contract
 
-A catalog is a Git repository with `skill-suitcase.yaml` and skill directories
-under `skills/`. The manifest owns skills, variants, assignments, compatibility,
-target paths, logical groups, source policy, and validation policy.
+A catalog is a directory with `skill-suitcase.yaml` and skill directories under `skills/`.
+Git backing is the preferred operating model and is required by workflows such as upstream import, but ordinary planning and target materialization also accept a non-Git catalog directory.
+The manifest owns skills, variants, assignments, compatibility, target paths, logical groups, source policy, and validation policy.
 
 ### Manifest Logical Groups
 
@@ -288,9 +288,13 @@ or target assignment semantics.
 ### Manifest `sourcePolicy`
 
 `sourcePolicy.exclude` omits approved generated or cache paths from pack,
-plan-lock, diff, and apply materialization. `sourcePolicy.deny` blocks unsafe or
-secret-like source paths before any target write. Refusals identify the skill
-and relative path with `source_denied_path` or `diff_source_denied_path`.
+plan-lock, diff, and copy-mode apply materialization.
+Symlink apply cannot omit descendants, so it refuses any non-empty exclude
+policy with `symlink_source_policy_exclude`, even when no path currently matches.
+`sourcePolicy.deny` blocks unsafe or secret-like source paths before any target
+write.
+Refusals identify the skill and relative path with `source_denied_path` or
+`diff_source_denied_path`.
 
 ### Strict Validation Policy
 

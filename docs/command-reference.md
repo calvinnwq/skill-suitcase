@@ -1,8 +1,9 @@
 # Command Reference
 
-This reference describes the current `skill-suitcase` command surface. The
-README is the product overview and safe starting path; this document carries
-the longer operational detail.
+This reference describes the current `skill-suitcase` command surface.
+The README is the product overview and safe starting path, [`SPEC.md`](../SPEC.md)
+is the normative current-state contract, and this document carries the longer
+operational detail.
 
 All CLI command forms require `--json`.
 Result objects go to stdout, including structured `ok: false` results with machine-readable errors.
@@ -242,6 +243,9 @@ Re-run `pack` immediately before artifact apply and inspect the current `diff`; 
 Important refusals include stale or malformed approval input, blocked variants,
 unmanaged existing targets, unapproved dirty content, source-policy failures,
 read-only targets, and symlink source escapes/conflicts.
+Copy mode omits paths selected by `sourcePolicy.exclude`.
+Symlink mode cannot omit descendants and refuses every non-empty exclude policy
+with `symlink_source_policy_exclude`, including one with no current matches.
 
 ### `track`
 
@@ -471,8 +475,11 @@ Custom receipt paths must remain inside `installRoot`, and multiple installs for
 Command results use command-specific machine-readable errors. Common safety
 codes include:
 
-- `read_only_target`: provider-managed target cannot be materialized or mutated
+- `read_only_target`: a target-aware materialization or mutation flow cannot
+  adopt or write a provider-managed target
 - `source_denied_path` / `diff_source_denied_path`: source policy blocked a path
+- `symlink_source_policy_exclude`: symlink apply cannot enforce a non-empty
+  source exclusion policy
 - `source_untracked_files`: selected materialized source is not fully reviewable
   in Git; reported by pack and apply rather than `diff` (plan-lock creation
   enforces the same gate through a thrown error)

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { posix } from "node:path";
 import { test } from "node:test";
 
 test("README stays product-forward, portable, and free of roadmap drift", async () => {
@@ -132,6 +133,69 @@ test("README and architecture point to VISION for product direction", async () =
   const architecture = await readFile("ARCHITECTURE.md", "utf8");
   assert.ok(readme.includes("](VISION.md)"), "README should link to VISION.md");
   assert.ok(architecture.includes("](VISION.md)"), "ARCHITECTURE.md should link to VISION.md");
+});
+
+test("SPEC defines the shipped contract without taking over adjacent documentation roles", async () => {
+  const spec = await readFile("SPEC.md", "utf8");
+  const normalized = normalize(spec);
+
+  for (const heading of [
+    "## catalog",
+    "## target adapters and resolution",
+    "## read-only commands",
+    "## staging and approval inputs",
+    "## live mutation",
+    "## receipts",
+    "## rollback and recovery",
+    "## upstream refresh",
+    "## output contract",
+    "## non-goals"
+  ]) {
+    assert.ok(normalized.includes(heading), `SPEC.md should include ${heading}`);
+  }
+
+  assert.ok(spec.includes("](VISION.md)"), "SPEC.md should route product direction to VISION.md");
+  assert.ok(
+    spec.includes("](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md)"),
+    "SPEC.md should route implementation structure to ARCHITECTURE.md"
+  );
+  assert.ok(spec.includes("](docs/command-reference.md)"), "SPEC.md should route detailed usage to the command reference");
+  assert.ok(
+    spec.includes("](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/apply.test.ts)"),
+    "SPEC.md should link contract claims to tests"
+  );
+  assert.ok(spec.includes("planning and target materialization also accept a non-Git catalog directory"));
+  assert.ok(normalized.includes("copy-mode materialization"));
+  assert.ok(normalized.includes("symlink_source_policy_exclude"));
+  assert.ok(normalized.includes("patterns have no current matches"));
+  assert.ok(normalized.includes("target-aware materialization and mutation flows"));
+  assert.ok(normalized.includes("path-driven `promote` and receipt-driven `rollback` do not resolve target adapters"));
+  assert.ok(!normalized.includes("materializing or mutating commands return `read_only_target`"));
+  assert.ok(spec.includes("Neither approval input binds the resolved live install root"));
+  assert.ok(spec.includes("copy-versus-symlink mode"));
+  assert.ok(spec.includes("the CLI does not bind that review to the later mutation"));
+  assert.ok(spec.includes("](docs/command-reference.md#explicit-mutation-commands)"));
+  assert.ok(!spec.includes("](docs/command-reference.md#mutating-commands)"));
+  assert.doesNotMatch(spec, /\/Users\//, "SPEC.md examples must not contain maintainer-local paths");
+  assert.doesNotMatch(spec, /\b(?:roadmap|planned milestone|future command)\b/i, "SPEC.md should describe shipped behavior only");
+
+  const vision = await readFile("VISION.md", "utf8");
+  const readme = await readFile("README.md", "utf8");
+  assert.ok(vision.includes("`SPEC.md` defines the normative current-state product contract"));
+  assert.ok(readme.includes("](SPEC.md)"), "README.md should link to the current contract");
+});
+
+test("SPEC relative links resolve within the public package", async () => {
+  const spec = await readFile("SPEC.md", "utf8");
+  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files: string[] };
+  const relativeTargets = [...spec.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)]
+    .flatMap((match) => match[1] === undefined ? [] : [match[1].split("#", 1)[0] ?? ""])
+    .filter((target) => target !== "" && !target.startsWith("#") && !/^[a-z][a-z\d+.-]*:/i.test(target))
+    .map((target) => posix.normalize(target));
+
+  for (const target of relativeTargets) {
+    assert.ok(packageJson.files.includes(target), `Packaged SPEC.md contains a relative link to omitted file: ${target}`);
+  }
 });
 
 /**
