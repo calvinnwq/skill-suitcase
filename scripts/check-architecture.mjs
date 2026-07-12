@@ -40,6 +40,10 @@ export async function checkArchitecture(repoRoot = defaultRepoRoot) {
     const sourceLayer = sourceLayerFor(relative);
     const forbiddenTargets = sourceLayer === null ? undefined : FORBIDDEN_LAYER_IMPORTS[sourceLayer];
 
+    if (sourceLayer === null) {
+      failures.push(`${relative} is outside the recognized architecture layers`);
+    }
+
     if (forbiddenTargets !== undefined) {
       for (const target of imported) {
         const targetLayer = sourceLayerFor(target);
@@ -160,6 +164,11 @@ function analyzeSourceFile(filePath, text) {
       && ts.isStringLiteralLike(node.moduleSpecifier)
       && isNodeProcessSpecifier(node.moduleSpecifier.text)) {
       collectProcessImport(node.importClause, processMembers);
+    } else if (ts.isExportDeclaration(node)
+      && node.moduleSpecifier !== undefined
+      && ts.isStringLiteralLike(node.moduleSpecifier)
+      && isNodeProcessSpecifier(node.moduleSpecifier.text)) {
+      collectProcessExport(node.exportClause, processMembers);
     }
 
     if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
@@ -275,6 +284,21 @@ function collectProcessImport(importClause, processMembers) {
     const importedName = element.propertyName?.text ?? element.name.text;
     if (isGuardedProcessMember(importedName)) {
       processMembers.push(importedName);
+    }
+  }
+}
+
+function collectProcessExport(exportClause, processMembers) {
+  if (exportClause === undefined || ts.isNamespaceExport(exportClause)) {
+    processMembers.push("argv", "stdout", "stderr");
+    return;
+  }
+  for (const element of exportClause.elements) {
+    const exportedName = element.propertyName?.text ?? element.name.text;
+    if (exportedName === "default") {
+      processMembers.push("argv", "stdout", "stderr");
+    } else if (isGuardedProcessMember(exportedName)) {
+      processMembers.push(exportedName);
     }
   }
 }

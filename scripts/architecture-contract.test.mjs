@@ -106,6 +106,17 @@ test("architecture contract keeps argv and process output at the CLI boundary", 
   }
 });
 
+test("architecture contract rejects process capability re-export facades", async () => {
+  const root = await createFixture({
+    "src/core/process-facade.ts": 'export { stdout } from "node:process";',
+    "src/core/write.ts": 'import { stdout } from "./process-facade.js";\nstdout.write("result");'
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/core/process-facade.ts uses process.stdout outside the CLI boundary"
+  ]);
+});
+
 test("architecture contract ignores members on a locally shadowed process", async () => {
   const root = await createFixture({
     "src/core/planning/index.ts": [
@@ -161,6 +172,16 @@ test("architecture contract rejects a CLI that bypasses commands through a core 
 
   assert.deepEqual(await checkArchitecture(root), [
     "src/cli.ts imports forbidden core boundary src/planner.ts"
+  ]);
+});
+
+test("architecture contract rejects source files outside recognized layers", async () => {
+  const root = await createFixture({
+    "src/services/bridge.ts": 'import { command } from "../commands/plan.js";\nvoid command;'
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/services/bridge.ts is outside the recognized architecture layers"
   ]);
 });
 
