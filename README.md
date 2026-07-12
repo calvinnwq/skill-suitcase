@@ -19,7 +19,7 @@ documented in [`SUPPORT.md`](SUPPORT.md), [`SECURITY.md`](SECURITY.md), and
 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 Read-only commands (`plan`, `diff`, `pack --dry-run`, `import`, `validate`,
-`targets`, `status`, `upstream check`, and `upstream fetch`) read a catalog
+`targets`, `status`, `prune --dry-run`, `upstream check`, and `upstream fetch`) read a catalog
 manifest, resolve assignments and assignment paths, and emit JSON plans, diffs,
 import findings, target discovery, bundle manifests, status reports, or upstream
 source-refresh reports without touching target install paths or runtime homes.
@@ -155,7 +155,7 @@ Use the target state and ownership model to choose the command:
 | Intentional edit to a receipt-owned catalog skill should return to Git | `import-target` |
 
 Preview `track` candidates with `diff`; `track` has no dry-run flag. Run the
-matching dry-run before `reconcile`, `repair`, `promote`, or `import-target`.
+matching dry-run before `reconcile`, `repair`, `prune`, `promote`, or `import-target`.
 Drift detection is a heartbeat, not permission to overwrite either side; every
 mutation still requires explicit approval.
 
@@ -177,6 +177,8 @@ skills still assigned to the target, paths without one matching receipt record,
 provider/read-only targets, path escapes, receipt/file drift, and symlinks whose
 current target differs from their receipt source. The plan includes the receipt
 hash, per-object fingerprint, quarantine paths, and a stable plan ID.
+Receipt-owned symlinks created by `promote` are eligible under the same rules
+once the skill is no longer assigned to the selected target.
 Prune requires `.skill-suitcase-receipt.json` and safely refuses a legacy
 `.skills-sync.json` receipt instead of migrating it in this safety-sensitive workflow.
 
@@ -188,6 +190,8 @@ journal and receipt backup, then atomically replaces the live receipt. Any
 failed apply attempts to restore the prior receipt, directories, and symlinks.
 Retain and review any reported quarantine root, transaction journal, and receipt
 backup; do not manually delete them or use broad rollback.
+An apply refusal preserves apply-mode JSON (`dryRun: false`) while reporting
+`readOnly: true`, and a missing install root is refused rather than recreated.
 
 ## `import-target` Output
 

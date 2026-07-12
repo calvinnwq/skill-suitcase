@@ -346,6 +346,10 @@ are refused. Retain the reported quarantine and backup paths for reviewed
 cleanup; never replace prune with manual deletion or broad rollback.
 Prune requires the modern `.skill-suitcase-receipt.json` receipt and safely
 refuses legacy `.skills-sync.json` instead of migrating it.
+Receipt-owned symlinks created by `promote` are prunable once they are no longer
+assigned to the selected target. A missing install root is refused and is not
+recreated. Apply refusals keep `dryRun: false` to represent the requested mode,
+set `readOnly: true`, and perform no mutation.
 
 ### `rollback`
 
@@ -359,6 +363,9 @@ Reverses recorded apply, reconcile, or repair state. Rollback first verifies
 that current target bytes still match the applied receipt; drift is a refusal,
 not something it overwrites. The current rollback command does not restore
 promotions.
+The receipt may be addressed through a valid symlinked install-root or parent
+alias. Rollback resolves that alias for containment checks, still refuses a
+symlinked target leaf, and does not create parents for a missing receipt path.
 
 ### `promote`
 
@@ -477,7 +484,7 @@ codes include:
 - `symlink_target_conflict`: live target shape cannot be replaced implicitly
 - `receipt_lock_failed`: a mutating workflow could not acquire or use the
   serialized receipt transaction lock
-- state-specific repair/reconcile/import refusals when the selected skill does
+- state-specific repair/reconcile/prune/import refusals when the selected skill does
   not meet that workflow's ownership and drift contract
 
 Treat a refusal as a request to inspect state and choose the correct workflow,

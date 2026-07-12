@@ -265,6 +265,9 @@ paths with the active artifact-retention workflow. If the plan quarantine root
 already exists, apply refuses and preserves it. Do not manually delete it.
 Prune requires `.skill-suitcase-receipt.json` and refuses legacy
 `.skills-sync.json` receipts without migrating them.
+Receipt-owned symlinks created by `promote` are eligible once the skill is no
+longer assigned. Apply refusals keep `dryRun: false` and report `readOnly: true`,
+and a missing install root is refused rather than recreated.
 
 For a selected receipt-owned, catalog-owned skill that went `dirty` from an
 intentional local edit you want in the repo, import it the other direction

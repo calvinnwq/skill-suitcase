@@ -248,6 +248,8 @@ assigned to the selected target. Review the read-only plan, then apply only
 after approval names the target, exact skill list, and returned plan ID:
 Prune requires `.skill-suitcase-receipt.json` and refuses legacy
 `.skills-sync.json` receipts without migrating them.
+Receipt-owned symlinks created by `promote` can be pruned through this workflow
+once the skill is no longer assigned to the selected target.
 
 ```bash
 skill-suitcase prune --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <obsolete-skill> --dry-run --json
@@ -259,6 +261,8 @@ Keep the reported quarantine root, transaction journal, and receipt backup for
 review. If the plan-scoped quarantine root already exists, apply refuses the
 collision and preserves that root. Do not manually delete obsolete paths or use
 broad rollback.
+Apply refusals retain apply-mode JSON with `dryRun: false` and `readOnly: true`.
+Prune refuses a missing install root instead of recreating it.
 
 Use `import-target` for the opposite of `repair`: a selected receipt-owned,
 catalog-owned skill that went `dirty` because you edited it **intentionally** in
@@ -266,7 +270,7 @@ a writable target and want that local version to become the repo version through
 review (it moves target → catalog, the inverse of `repair`). The six-way
 decision tree for a single skill is: `track` for an exact match that only needs a
 receipt, `reconcile` for catalog-owned receiptless drift, `promote` for a
-brand-new target-created skill, `repair` to discard an accidental dirty edit, and
+brand-new target-created skill, `repair` to discard an accidental dirty edit,
 `prune` to remove an obsolete receipt-owned target install, and `import-target`
 to keep an intentional edit. Dry-run first, then apply only after
 explicit approval:

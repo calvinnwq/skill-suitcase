@@ -41,7 +41,7 @@ Skill Suitcase owns the local management layer:
 - target discovery and assignment resolution
 - plans, diffs, bundles, and lock/hash proof
 - receipts, status, rollback, and dirty-drift classification
-- safe apply, track, reconcile, repair, promote, and import-target workflows
+- safe apply, track, reconcile, repair, prune, promote, and import-target workflows
 - upstream source refresh into the catalog before ordinary target sync
 
 Upstream-to-catalog drift and catalog-to-target drift are separate decisions.
