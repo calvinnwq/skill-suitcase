@@ -18,11 +18,7 @@ support, private vulnerability reporting, and community expectations are
 documented in [`SUPPORT.md`](SUPPORT.md), [`SECURITY.md`](SECURITY.md), and
 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
-Read-only commands (`plan`, `diff`, `pack --dry-run`, `import`, `validate`,
-`targets`, `status`, `prune --dry-run`, `upstream check`, and `upstream fetch`) read a catalog
-manifest, resolve assignments and assignment paths, and emit JSON plans, diffs,
-import findings, target discovery, bundle manifests, status reports, or upstream
-source-refresh reports without touching target install paths or runtime homes.
+Read-only command modes (`plan`, `diff`, `pack --dry-run`, `import`, `validate`, `targets`, `status`, `reconcile --dry-run`, `repair --dry-run`, `prune --dry-run`, `promote --dry-run`, `import-target --dry-run`, `upstream check`, and `upstream fetch --dry-run`) inspect catalog, target, or upstream state and emit JSON plans, diffs, findings, discovery metadata, status reports, or source-refresh reports without changing catalog source, target installs, receipts, or live runtime homes.
 
 - Git-backed catalog source stays reviewable before it reaches a runtime.
 - Read-only commands explain current state before any mutation.
@@ -116,8 +112,7 @@ guidance, approval requirements, state meanings, and common refusal codes.
 
 Skill Suitcase separates three phases:
 
-1. Inspect with `import`, `validate`, `targets`, `plan`, `status`, `diff`, and
-   `upstream check`.
+1. Inspect with `import`, `validate`, `targets`, `plan`, `status`, `diff`, the recovery and promotion `--dry-run` modes, `upstream check`, and `upstream fetch --dry-run`.
 2. Stage with `pack` or a plan lock, and review the ordinary filesystem/Git
    changes.
 3. Mutate only with explicit approval through `apply`, a targeted `--apply`
@@ -275,9 +270,9 @@ loads lineage only for reported skills.
 
 ## Catalog Contract
 
-A catalog is a Git repository with `skill-suitcase.yaml` and skill directories
-under `skills/`. The manifest owns skills, variants, assignments, compatibility,
-target paths, logical groups, source policy, and validation policy.
+A catalog is a directory with `skill-suitcase.yaml` and skill directories under `skills/`.
+Git backing is the preferred operating model and is required by workflows such as upstream import, but ordinary planning and target materialization also accept a non-Git catalog directory.
+The manifest owns skills, variants, assignments, compatibility, target paths, logical groups, source policy, and validation policy.
 
 ### Manifest Logical Groups
 

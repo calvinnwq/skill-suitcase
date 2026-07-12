@@ -89,9 +89,13 @@ The default inspection path is read-only:
 | `status` | Classifies catalog-planned target entries without mutation. |
 | `diff` | Compares catalog and target state without mutation. |
 | `pack --dry-run` | Reports the bundle that would be staged. |
+| `reconcile --dry-run` | Plans replacement of explicitly named receiptless mismatches from catalog source. |
+| `repair --dry-run` | Plans restoration of explicitly named dirty receipt-owned copies from catalog source. |
 | `prune --dry-run` | Builds a removal plan for explicitly named managed skills. |
+| `promote --dry-run` | Plans moving one new target-created skill into catalog ownership. |
+| `import-target --dry-run` | Plans importing explicitly named intentional target edits into catalog source. |
 | `upstream check` | Validates pinned upstream declarations and lineage. |
-| `upstream fetch` | Fetches into an isolated temporary workspace and reports catalog differences. |
+| `upstream fetch --dry-run` | Fetches into an isolated temporary workspace and reports catalog differences. |
 
 The complete status enum for catalog-planned entries is `current`, `missing`,
 `version`, `behind`, `dirty`, `blocked`, and `unknown`. Read-only is target
@@ -182,14 +186,12 @@ by [receipt tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/r
 
 ## Rollback And Recovery
 
-Rollback is receipt-driven and scoped to rollback metadata that the installing
-or repair workflow captured. It restores prior copy content, removes a
-Suitcase-created symlink only when the link still matches its recorded source,
-and updates the receipt. It refuses missing, invalid, escaped, or drifted state
-rather than deleting an unproven path. It is not a general Git rollback and does
-not undo promotions or arbitrary catalog edits.
+Rollback is receipt-driven and scoped to rollback metadata that `apply`, `reconcile`, or `repair` captured.
+It restores prior copy content, removes a Suitcase-created symlink only when the link still matches its recorded source, and updates the receipt.
+It refuses missing, invalid, escaped, or drifted state rather than deleting an unproven path.
+It is not a general Git rollback and does not undo promotions or arbitrary catalog edits.
 
-Recovery commands have distinct ownership meanings:
+Recovery and promotion commands have distinct ownership meanings:
 
 - `track` adopts an existing target only when it exactly matches catalog source;
 - `reconcile` replaces a receiptless mismatch with catalog source;
@@ -198,12 +200,10 @@ Recovery commands have distinct ownership meanings:
 - `promote` imports a new target-created skill into catalog ownership;
 - `import-target` imports an intentional edit to an existing catalog-owned skill.
 
-`repair`, `prune`, and `import-target` provide read-only plans with hashes and
-affected paths before apply. `prune` additionally binds apply to a stable plan
-ID and quarantines physical directories transactionally. Recovery semantics are
-covered by [rollback tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/rollback.test.ts),
-[repair tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/repair.test.ts), [prune tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/prune.test.ts), and
-[import-target tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/import-target.test.ts).
+`reconcile`, `repair`, `prune`, `promote`, and `import-target` provide read-only plans before apply.
+Those plans report the evidence relevant to their workflows, including affected paths, hashes, differences, backup locations, or planned steps.
+`prune` additionally binds apply to a stable plan ID and quarantines physical directories transactionally.
+Recovery and promotion semantics are covered by [rollback tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/rollback.test.ts), [reconcile tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/reconcile.test.ts), [repair tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/repair.test.ts), [prune tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/prune.test.ts), [promote tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/promote.test.ts), and [import-target tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/import-target.test.ts).
 
 ## Upstream Refresh
 
@@ -215,12 +215,11 @@ and their last imported provenance. Upstream refresh is catalog-only:
 pinned fetch -> isolated temporary workspace -> catalog diff -> catalog import
 ```
 
-`upstream check` and `upstream fetch` are read-only. `upstream import --apply`
-writes only the selected catalog skill and lock metadata, then leaves the Git
-diff for review. It never installs directly into a live agent home and never
-replaces target receipts. `skills-sh` declarations pin the installer package
-version, not the referenced repository content revision, so every fetched diff
-still requires review. Git declarations pin a version tag or full commit SHA.
+`upstream check` and `upstream fetch --dry-run` are read-only.
+`upstream import --apply` writes only the selected catalog skill and lock metadata, then leaves the Git diff for review.
+It never installs directly into a live agent home and never replaces target receipts.
+`skills-sh` declarations pin the installer package version, not the referenced repository content revision, so every fetched diff still requires review.
+Git declarations pin a version tag or full commit SHA.
 
 See [upstream tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/upstream.test.ts) and
 [`docs/skills-sh-delegation.md`](docs/skills-sh-delegation.md).
