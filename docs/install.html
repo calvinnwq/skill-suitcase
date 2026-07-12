@@ -60,8 +60,8 @@ then
   pnpm() {
     npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
   }
-  test "$(pnpm --version)" = "10.34.4"
-  pnpm install --frozen-lockfile
+  test "$(pnpm --version)" = "10.34.4" &amp;&amp;
+  pnpm install --frozen-lockfile &amp;&amp;
   pnpm run build
 else
   printf 'Source checkout setup failed.\n' &gt;&amp;2
