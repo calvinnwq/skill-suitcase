@@ -88,7 +88,11 @@ test("architecture contract keeps argv and process output at the CLI boundary", 
     ["core argv parsing", "src/core/planning/index.ts", "export const args = process.argv;", "process.argv"],
     ["core stdout", "src/core/planning/index.ts", 'process.stdout.write("result");', "process.stdout"],
     ["command stderr", "src/commands/plan.ts", 'process.stderr.write("warning");', "process.stderr"],
-    ["renderer stdout", "src/renderers/json.ts", 'process.stdout.write("result");', "process.stdout"]
+    ["renderer stdout", "src/renderers/json.ts", 'process.stdout.write("result");', "process.stdout"],
+    ["destructured stdout", "src/core/planning/index.ts", "const { stdout } = process;", "process.stdout"],
+    ["global process stdout", "src/core/planning/index.ts", "globalThis.process.stdout.write('result');", "process.stdout"],
+    ["imported stderr", "src/core/planning/index.ts", "import { stderr } from 'node:process';", "process.stderr"],
+    ["aliased process argv", "src/core/planning/index.ts", "const runtime = process; export const args = runtime.argv;", "process.argv"]
   ];
 
   for (const [name, source, contents, processMember] of cases) {
@@ -100,6 +104,33 @@ test("architecture contract keeps argv and process output at the CLI boundary", 
       );
     });
   }
+});
+
+test("architecture contract ignores members on a locally shadowed process", async () => {
+  const root = await createFixture({
+    "src/core/planning/index.ts": [
+      "const process = { argv: [], stdout: { write() {} }, stderr: { write() {} } };",
+      "process.stdout.write('result');",
+      "const { stderr } = process;",
+      "export { process, stderr };"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract limits process shadowing to its lexical scope", async () => {
+  const root = await createFixture({
+    "src/core/planning/index.ts": [
+      "function write(process) { process.stdout.write('local'); }",
+      "process.stderr.write('global');",
+      "export { write };"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/core/planning/index.ts uses process.stderr outside the CLI boundary"
+  ]);
 });
 
 test("architecture contract rejects bloated command behavior modules", async () => {
@@ -119,6 +150,17 @@ test("architecture contract rejects a CLI that bypasses commands", async () => {
 
   assert.deepEqual(await checkArchitecture(root), [
     "src/cli.ts imports forbidden core boundary src/core/planning/index.ts"
+  ]);
+});
+
+test("architecture contract rejects a CLI that bypasses commands through a core facade", async () => {
+  const root = await createFixture({
+    "src/cli.ts": 'import { plan } from "./planner.js";\nvoid plan;',
+    "src/planner.ts": 'export * from "./core/planning/index.js";'
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/cli.ts imports forbidden core boundary src/planner.ts"
   ]);
 });
 
