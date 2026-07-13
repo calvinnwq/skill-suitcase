@@ -523,7 +523,8 @@ cli.ts -> commands -> core/domain -> adapters
 
 The executable architecture contract recognizes `cli.ts`, `commands/`,
 `core/`, `adapters/`, `renderers/`, `config/`, and `shared/` as source layers.
-Legacy top-level `src/*.ts` re-export shims are classified as core modules.
+All top-level `src/*.ts` files are classified as core modules, including the
+legacy re-export shims.
 Nested source directories outside the recognized layers are rejected.
 
 Allowed relative source imports are:
@@ -544,8 +545,13 @@ Additional enforced rules:
   `process.stderr` must stay in `src/cli.ts`.
 - Direct `console` output is forbidden in `src/`; structured stdout and
   diagnostics must flow through renderer helpers at the CLI boundary.
-- `src/cli.ts` stdout writes must call the JSON renderer directly, and stderr
-  writes must call a renderer helper directly.
+- `src/cli.ts` calls that emit a chunk through `write()` or `end()` must pass a
+  direct renderer call.
+  A no-argument `end()` call is allowed because it emits no output chunk.
+- Stdout must call `renderJson` from the local `src/renderers/json.ts` module.
+  Stderr may call any helper from a local module under `src/renderers/`.
+  Named and namespace imports are accepted, but external renderer lookalikes
+  and relative imports that traverse a parent directory are not.
 - `src/cli.ts` must stay at or below 60 non-empty lines and must not contain a
   switch statement.
 - Command behavior modules must stay at or below 80 non-empty lines.
@@ -559,14 +565,18 @@ It inspects static imports and exports, TypeScript import-equals declarations an
 It also detects direct process and console output access, direct process capability imports and destructuring, and renderer-mediated writes in `src/cli.ts` while ignoring comments, quoted examples, type-only process references, and non-literal dynamic dependencies.
 Direct global-looking identifiers are matched syntactically; project code should not shadow names such as `process`, `console`, or `require`.
 
-The checker is not a whole-program alias, constant-folding, or control-flow
-analyzer. Those concerns belong in a mature lint or dependency-analysis tool
-if the project later needs them; this contract stays small enough to remain
-reviewable and deterministic.
+The checker is not a whole-program alias, constant-folding, control-flow, or
+closure analyzer.
+Those concerns belong in a mature lint or dependency-analysis tool if the
+project later needs them; this contract stays small enough to remain reviewable
+and deterministic.
 Failures are sorted to keep diagnostics deterministic.
 The contract cases live in `scripts/architecture-contract.test.mjs`, while
 `tests/architecture-guardrails.test.ts` verifies the project entrypoint and
 current source tree.
+The package script checks this repository.
+Contract tests may check a disposable fixture with
+`node scripts/check-architecture.mjs --root /path/to/repository`.
 
 ## Migration Path
 
