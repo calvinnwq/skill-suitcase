@@ -55,12 +55,55 @@ function decodeHtml(value: string): string {
     .replaceAll("&#39;", "'");
 }
 
-function commandCodeBlocks(path: string, contents: string): string[] {
+function commandExamples(path: string, contents: string): string[] {
   const markdownBlocks = [...contents.matchAll(/```(?:bash|sh|shell)\n([\s\S]*?)\n```/g)]
     .map((match) => match[1] ?? "");
   const htmlBlocks = [...contents.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
     .map((match) => decodeHtml(match[1] ?? ""));
-  return path.endsWith(".html") ? htmlBlocks : markdownBlocks;
+  const htmlCommandLines = [...contents.matchAll(/<span\b([^>]*)>/g)]
+    .filter((match) => {
+      const classAttribute = (match[1] ?? "").match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/);
+      const classNames = classAttribute?.[1] ?? classAttribute?.[2] ?? "";
+      return classNames.split(/\s+/).includes("cmdline");
+    })
+    .map((match) => {
+      const contentStart = (match.index ?? 0) + match[0].length;
+      const contentEnd = contents.indexOf("</span>", contentStart);
+      return decodeHtml(contentEnd < 0 ? contents.slice(contentStart) : contents.slice(contentStart, contentEnd));
+    });
+  return path.endsWith(".html") ? [...htmlBlocks, ...htmlCommandLines] : markdownBlocks;
+}
+
+function validateCliExamples(path: string, contents: string): number {
+  let invocationCount = 0;
+
+  for (const block of commandExamples(path, contents)) {
+    const logicalLines = block.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/);
+    for (const line of logicalLines) {
+      for (const segment of line.split(/&&|\|\||[;|]/)) {
+        const match = segment.match(/^\s*skill-suitcase\s+([^\s;&|]+)(?:\s+([^\s;&|]+))?/);
+        if (!match) continue;
+
+        invocationCount += 1;
+        const command = match[1] ?? "";
+        const possibleSubcommand = match[2];
+        assert.ok(PUBLIC_COMMANDS.has(command), `${path} documents unknown command: ${command}`);
+        if (command === "upstream") {
+          assert.ok(
+            possibleSubcommand && UPSTREAM_SUBCOMMANDS.has(possibleSubcommand),
+            `${path} documents unknown upstream command: ${possibleSubcommand ?? "<missing>"}`
+          );
+        }
+        assert.match(
+          segment,
+          /(?:^|\s)--json(?:\s|$)/,
+          `${path} has a CLI example without --json: ${segment.trim()}`
+        );
+      }
+    }
+  }
+
+  return invocationCount;
 }
 
 test("public and reusable docs contain no contributor-specific machine paths", () => {
@@ -80,35 +123,47 @@ test("literal public CLI examples use shipped commands and deterministic JSON ou
 
   for (const path of publicDocumentPaths()) {
     const contents = readFileSync(path, "utf8");
-    for (const block of commandCodeBlocks(path, contents)) {
-      const logicalLines = block.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/);
-      for (const line of logicalLines) {
-        const matches = [...line.matchAll(
-          /(?:^|&&|\|\||;)\s*skill-suitcase\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?/g
-        )];
-        for (const [index, match] of matches.entries()) {
-          invocationCount += 1;
-          const command = match[1] ?? "";
-          const possibleSubcommand = match[2];
-          assert.ok(PUBLIC_COMMANDS.has(command), `${path} documents unknown command: ${command}`);
-          if (command === "upstream") {
-            assert.ok(
-              possibleSubcommand && UPSTREAM_SUBCOMMANDS.has(possibleSubcommand),
-              `${path} documents unknown upstream command: ${possibleSubcommand ?? "<missing>"}`
-            );
-          }
-          const invocationStart = match.index ?? 0;
-          const invocationEnd = matches[index + 1]?.index ?? line.length;
-          const invocation = line.slice(invocationStart, invocationEnd).replace(/(?:&&|\|\||;)\s*$/, "");
-          assert.match(
-            invocation,
-            /(?:^|\s)--json(?:\s|$)/,
-            `${path} has a CLI example without --json: ${invocation.trim()}`
-          );
-        }
-      }
-    }
+    invocationCount += validateCliExamples(path, contents);
   }
 
   assert.ok(invocationCount > 0, "public documentation must contain checked CLI examples");
+});
+
+test("CLI example parsing rejects invalid tokens and validates each pipe segment", () => {
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status2 --json\n```"),
+    /unknown command: status2/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase upstream check2 --json\n```"),
+    /unknown upstream command: check2/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nskill-suitcase status --json | skill-suitcase validate\n```"
+    ),
+    /CLI example without --json: skill-suitcase validate/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nskill-suitcase status --json | skill-suitcase bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status | jq --json\n```"),
+    /CLI example without --json: skill-suitcase status/
+  );
+});
+
+test("HTML command examples include visible cmdline elements", () => {
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.html",
+      '<span class="what"><span class="example cmdline">skill-suitcase bogus --json</span>Details.</span>'
+    ),
+    /unknown command: bogus/
+  );
 });
