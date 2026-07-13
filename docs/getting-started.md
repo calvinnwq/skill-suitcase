@@ -95,7 +95,8 @@ SRC="$HOME/.skill-suitcase/skills"
 ```
 
 Otherwise, create a minimal catalog with one starter skill.
-The `if` guard keeps this snippet from overwriting a catalog that already exists at the standard location:
+The `if` guard keeps this snippet from overwriting a catalog that already exists at the standard location.
+Git backing is the preferred operating model, and staging refuses selected skills with untracked, non-ignored files in a Git-backed catalog, so the fresh-catalog branch initializes Git and commits only the two files it creates:
 
 ```bash
 SRC="$HOME/.skill-suitcase/skills"
@@ -133,15 +134,15 @@ description: Use when trying Skill Suitcase for the first time.
 
 A starter skill used to exercise the Skill Suitcase install workflow.
 MARKDOWN
+
+  git -C "$SRC" init
+  git -C "$SRC" add -- \
+    skill-suitcase.yaml \
+    skills/hello-world/SKILL.md
+  git -C "$SRC" commit -m "feat: add hello-world starter skill" -- \
+    skill-suitcase.yaml \
+    skills/hello-world/SKILL.md
 fi
-```
-
-Git backing is the preferred operating model, and staging refuses selected skills with untracked, non-ignored files in a Git-backed catalog, so commit the initial content:
-
-```bash
-git -C "$SRC" init
-git -C "$SRC" add .
-git -C "$SRC" commit -m "feat: add hello-world starter skill"
 ```
 
 The manifest declares suitcases (named skill groups), assignments (which suitcases a target receives), and assignment paths (where each target installs).

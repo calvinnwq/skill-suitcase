@@ -567,6 +567,31 @@ test("getting-started guide covers the public onboarding flow with portable exam
     "getting-started must not delete the installed operator skill before staging its replacement"
   );
 
+  const catalogSection = guide.slice(
+    guide.indexOf("## 3. Set Up A Skills Catalog"),
+    guide.indexOf("## 4. Point Targets At Your Machine With Local Overrides")
+  );
+  const catalogGuard = catalogSection.indexOf('if test -e "$SRC/skill-suitcase.yaml"; then');
+  const catalogGuardEnd = catalogSection.indexOf("\nfi\n```", catalogGuard);
+  assert.notEqual(catalogGuard, -1, "getting-started should guard existing catalogs");
+  assert.notEqual(catalogGuardEnd, -1, "getting-started should close the catalog guard after setup");
+  for (const command of [
+    'git -C "$SRC" init',
+    'git -C "$SRC" add --',
+    'git -C "$SRC" commit -m "feat: add hello-world starter skill" --'
+  ]) {
+    const commandPosition = catalogSection.indexOf(command, catalogGuard);
+    assert.ok(
+      commandPosition > catalogGuard && commandPosition < catalogGuardEnd,
+      `getting-started should keep ${command} inside the fresh-catalog branch`
+    );
+  }
+  assert.doesNotMatch(
+    catalogSection,
+    /git -C "\$SRC" add \./,
+    "getting-started should not stage unrelated catalog files"
+  );
+
   const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files: string[] };
   assert.ok(
     packageJson.files.includes("docs/getting-started.md"),
