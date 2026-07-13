@@ -481,7 +481,11 @@ test("pages workflow deploys the docs directory with current action majors", () 
   const workflow = parse(read(".github/workflows/pages.yml")) as {
     on: { workflow_dispatch: unknown; push: { branches: string[]; paths: string[] } };
     permissions: Record<string, string>;
-    jobs: { deploy: { steps: Array<{ uses?: string; with?: { path?: string } }> } };
+    jobs: {
+      deploy: {
+        steps: Array<{ uses?: string; with?: { path?: string; "include-hidden-files"?: boolean } }>;
+      };
+    };
   };
 
   assert.ok(Object.hasOwn(workflow.on, "workflow_dispatch"));
@@ -491,11 +495,12 @@ test("pages workflow deploys the docs directory with current action majors", () 
 
   const uses = workflow.jobs.deploy.steps.map((step) => step.uses).filter(Boolean);
   assert.deepEqual(uses, [
-    "actions/checkout@v6",
+    "actions/checkout@v7",
     "actions/configure-pages@v6",
     "actions/upload-pages-artifact@v5",
     "actions/deploy-pages@v5"
   ]);
   const upload = workflow.jobs.deploy.steps.find((step) => step.uses === "actions/upload-pages-artifact@v5");
   assert.equal(upload?.with?.path, "docs");
+  assert.equal(upload?.with?.["include-hidden-files"], true);
 });
