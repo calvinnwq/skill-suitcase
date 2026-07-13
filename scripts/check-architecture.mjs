@@ -213,18 +213,24 @@ function collectImportedBindings(sourceFile, checker, processObjectNames, proces
         }
       }
 
-      if (isRendererSpecifier(specifier) && importClause.namedBindings !== undefined
-        && ts.isNamedImports(importClause.namedBindings)) {
-        for (const element of importClause.namedBindings.elements) {
-          if (element.isTypeOnly) {
-            continue;
-          }
-          const symbol = checker.getSymbolAtLocation(element.name);
+      if (isRendererSpecifier(specifier) && importClause.namedBindings !== undefined) {
+        if (ts.isNamespaceImport(importClause.namedBindings)) {
+          const symbol = checker.getSymbolAtLocation(importClause.namedBindings.name);
           if (symbol !== undefined) {
-            rendererBindings.set(symbol, {
-              importedName: element.propertyName?.text ?? element.name.text,
-              specifier
-            });
+            rendererBindings.set(symbol, { importedName: null, specifier });
+          }
+        } else {
+          for (const element of importClause.namedBindings.elements) {
+            if (element.isTypeOnly) {
+              continue;
+            }
+            const symbol = checker.getSymbolAtLocation(element.name);
+            if (symbol !== undefined) {
+              rendererBindings.set(symbol, {
+                importedName: element.propertyName?.text ?? element.name.text,
+                specifier
+              });
+            }
           }
         }
       }
@@ -304,9 +310,9 @@ function directProcessMember(node, processObjectNames) {
   if (ts.isElementAccessExpression(node)
     && isDirectProcessObject(node.expression, processObjectNames)
     && node.argumentExpression !== undefined
-    && ts.isStringLiteralLike(node.argumentExpression)
-    && GUARDED_PROCESS_MEMBERS.has(node.argumentExpression.text)) {
-    return node.argumentExpression.text;
+    && ts.isStringLiteralLike(unwrapExpression(node.argumentExpression))
+    && GUARDED_PROCESS_MEMBERS.has(unwrapExpression(node.argumentExpression).text)) {
+    return unwrapExpression(node.argumentExpression).text;
   }
   return null;
 }
@@ -339,13 +345,16 @@ function isDirectProcessObject(node, processObjectNames) {
     return expression.name.text === "process" && isGlobalObject(expression.expression);
   }
   if (ts.isElementAccessExpression(expression)
-    && expression.argumentExpression !== undefined
-    && ts.isStringLiteralLike(expression.argumentExpression)) {
-    if (expression.argumentExpression.text === "default"
+    && expression.argumentExpression !== undefined) {
+    const argument = unwrapExpression(expression.argumentExpression);
+    if (!ts.isStringLiteralLike(argument)) {
+      return false;
+    }
+    if (argument.text === "default"
       && isDirectProcessObject(expression.expression, processObjectNames)) {
       return true;
     }
-    return expression.argumentExpression.text === "process" && isGlobalObject(expression.expression);
+    return argument.text === "process" && isGlobalObject(expression.expression);
   }
   if (ts.isAwaitExpression(expression)) {
     return isDirectProcessObject(expression.expression, processObjectNames);
@@ -356,12 +365,13 @@ function isDirectProcessObject(node, processObjectNames) {
 function directProcessWriteStream(node, checker, processObjectNames, processStreamBindings) {
   const callee = unwrapExpression(node.expression);
   let streamExpression;
-  if (ts.isPropertyAccessExpression(callee) && callee.name.text === "write") {
+  if (ts.isPropertyAccessExpression(callee)
+    && isProcessOutputMethod(callee.name.text, node.arguments.length)) {
     streamExpression = callee.expression;
   } else if (ts.isElementAccessExpression(callee)
     && callee.argumentExpression !== undefined
     && ts.isStringLiteralLike(unwrapExpression(callee.argumentExpression))
-    && unwrapExpression(callee.argumentExpression).text === "write") {
+    && isProcessOutputMethod(unwrapExpression(callee.argumentExpression).text, node.arguments.length)) {
     streamExpression = callee.expression;
   } else {
     return null;
@@ -378,6 +388,10 @@ function directProcessWriteStream(node, checker, processObjectNames, processStre
   return symbol === undefined ? null : processStreamBindings.get(symbol) ?? null;
 }
 
+function isProcessOutputMethod(method, argumentCount) {
+  return method === "write" || (method === "end" && argumentCount > 0);
+}
+
 function directConsoleMethod(node) {
   const callee = unwrapExpression(node.expression);
   if (ts.isPropertyAccessExpression(callee)
@@ -387,8 +401,8 @@ function directConsoleMethod(node) {
   if (ts.isElementAccessExpression(callee)
     && isDirectConsoleObject(callee.expression)
     && callee.argumentExpression !== undefined
-    && ts.isStringLiteralLike(callee.argumentExpression)) {
-    return callee.argumentExpression.text;
+    && ts.isStringLiteralLike(unwrapExpression(callee.argumentExpression))) {
+    return unwrapExpression(callee.argumentExpression).text;
   }
   return null;
 }
@@ -401,10 +415,12 @@ function isDirectConsoleObject(node) {
   if (ts.isPropertyAccessExpression(expression)) {
     return expression.name.text === "console" && isGlobalObject(expression.expression);
   }
-  return ts.isElementAccessExpression(expression)
-    && expression.argumentExpression !== undefined
-    && ts.isStringLiteralLike(expression.argumentExpression)
-    && expression.argumentExpression.text === "console"
+  if (!ts.isElementAccessExpression(expression) || expression.argumentExpression === undefined) {
+    return false;
+  }
+  const argument = unwrapExpression(expression.argumentExpression);
+  return ts.isStringLiteralLike(argument)
+    && argument.text === "console"
     && isGlobalObject(expression.expression);
 }
 
@@ -413,16 +429,41 @@ function isApprovedRendererWrite(argument, stream, checker, rendererBindings) {
     return false;
   }
   const expression = unwrapExpression(argument);
-  if (!ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression)) {
+  if (!ts.isCallExpression(expression)) {
     return false;
   }
-  const symbol = checker.getSymbolAtLocation(expression.expression);
+  const callee = unwrapExpression(expression.expression);
+  let bindingNode;
+  let namespaceHelper = null;
+  if (ts.isIdentifier(callee)) {
+    bindingNode = callee;
+  } else if (ts.isPropertyAccessExpression(callee)) {
+    bindingNode = unwrapExpression(callee.expression);
+    namespaceHelper = callee.name.text;
+  } else if (ts.isElementAccessExpression(callee) && callee.argumentExpression !== undefined) {
+    const helper = unwrapExpression(callee.argumentExpression);
+    if (!ts.isStringLiteralLike(helper)) {
+      return false;
+    }
+    bindingNode = unwrapExpression(callee.expression);
+    namespaceHelper = helper.text;
+  } else {
+    return false;
+  }
+  if (!ts.isIdentifier(bindingNode)) {
+    return false;
+  }
+  const symbol = checker.getSymbolAtLocation(bindingNode);
   const binding = symbol === undefined ? undefined : rendererBindings.get(symbol);
   if (binding === undefined) {
     return false;
   }
+  const helper = namespaceHelper ?? binding.importedName;
+  if ((namespaceHelper === null) !== (binding.importedName !== null)) {
+    return false;
+  }
   return stream === "stdout"
-    ? binding.importedName === "renderJson" && binding.specifier.endsWith("/renderers/json.js")
+    ? helper === "renderJson" && binding.specifier.endsWith("/renderers/json.js")
     : binding.specifier.includes("/renderers/");
 }
 
@@ -483,13 +524,17 @@ function createTypeChecker(filePath, sourceFile) {
 }
 
 function isDirectProcessLoader(node) {
-  if (!ts.isCallExpression(node) || node.arguments.length < 1 || !ts.isStringLiteralLike(node.arguments[0])) {
+  if (!ts.isCallExpression(node) || node.arguments.length < 1) {
+    return false;
+  }
+  const argument = unwrapExpression(node.arguments[0]);
+  if (!ts.isStringLiteralLike(argument)) {
     return false;
   }
   const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
   const isRequire = ts.isIdentifier(node.expression)
     && node.expression.text === "require";
-  return (isDynamicImport || isRequire) && isNodeProcessSpecifier(node.arguments[0].text);
+  return (isDynamicImport || isRequire) && isNodeProcessSpecifier(argument.text);
 }
 
 function isGlobalObject(node) {

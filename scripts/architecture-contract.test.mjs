@@ -190,6 +190,21 @@ test("architecture contract rejects parenthesized direct output calls", async ()
   ]);
 });
 
+test("architecture contract normalizes parentheses in direct capability syntax", async () => {
+  const root = await createFixture({
+    "src/core/computed-console.ts": 'console[("log")]("raw");',
+    "src/core/global-console.ts": 'globalThis[("console")].log("raw");',
+    "src/core/imported-process.ts": '(await import(("node:process"))).stderr.write("raw");',
+    "src/cli.ts": 'process[("stdout")].write("raw");'
+  });
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/cli.ts writes process.stdout without a renderer helper",
+    "src/core/computed-console.ts uses console.log; output must use renderer helpers at the CLI boundary",
+    "src/core/global-console.ts uses console.log; output must use renderer helpers at the CLI boundary",
+    "src/core/imported-process.ts uses process.stderr outside the CLI boundary"
+  ]);
+});
+
 test("architecture contract rejects raw CLI writes through direct stream bindings", async (t) => {
   await t.test("named import", async () => {
     const root = await createFixture({
@@ -237,16 +252,51 @@ test("architecture contract rejects raw CLI writes through direct stream binding
   });
 });
 
-test("architecture contract rejects renderer-shaped external imports", async () => {
+test("architecture contract treats direct stream end chunks as writes", async () => {
   const root = await createFixture({
     "src/cli.ts": [
-      'import { renderJson } from "some-package/renderers/json.js";',
-      'process.stdout.write(renderJson({ ok: true }));'
-    ].join("\n")
+      'import { renderCliError } from "./renderers/errors.js";',
+      'process.stdout.end("raw");',
+      'process.stderr[("end")](renderCliError({ type: "fatal", message: "failure" }));'
+    ].join("\n"),
+    "src/renderers/errors.ts": "export const renderCliError = (value) => String(value);"
   });
   assert.deepEqual(await checkArchitecture(root), [
     "src/cli.ts writes process.stdout without a renderer helper"
   ]);
+});
+
+test("architecture contract allows direct stream end calls without output", async () => {
+  const root = await createFixture({
+    "src/cli.ts": "process.stdout.end();"
+  });
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract rejects renderer-shaped external imports", async (t) => {
+  await t.test("named import", async () => {
+    const root = await createFixture({
+      "src/cli.ts": [
+        'import { renderJson } from "some-package/renderers/json.js";',
+        'process.stdout.write(renderJson({ ok: true }));'
+      ].join("\n")
+    });
+    assert.deepEqual(await checkArchitecture(root), [
+      "src/cli.ts writes process.stdout without a renderer helper"
+    ]);
+  });
+
+  await t.test("namespace import", async () => {
+    const root = await createFixture({
+      "src/cli.ts": [
+        'import * as json from "some-package/renderers/json.js";',
+        'process.stdout.write(json.renderJson({ ok: true }));'
+      ].join("\n")
+    });
+    assert.deepEqual(await checkArchitecture(root), [
+      "src/cli.ts writes process.stdout without a renderer helper"
+    ]);
+  });
 });
 
 test("architecture contract accepts JSON and error renderer calls at the CLI write boundary", async () => {
@@ -256,6 +306,21 @@ test("architecture contract accepts JSON and error renderer calls at the CLI wri
       'import { renderJson } from "./renderers/json.js";',
       'process.stdout.write(renderJson({ ok: true }));',
       'process.stderr.write(renderCliError({ type: "fatal", message: "failure" }));'
+    ].join("\n"),
+    "src/renderers/errors.ts": "export const renderCliError = (value) => String(value);",
+    "src/renderers/json.ts": "export const renderJson = (value) => JSON.stringify(value);"
+  });
+
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract accepts local namespace renderer calls at the CLI write boundary", async () => {
+  const root = await createFixture({
+    "src/cli.ts": [
+      'import * as errors from "./renderers/errors.js";',
+      'import * as json from "./renderers/json.js";',
+      'process.stdout.write(json.renderJson({ ok: true }));',
+      'process.stderr.end(errors["renderCliError"]({ type: "fatal", message: "failure" }));'
     ].join("\n"),
     "src/renderers/errors.ts": "export const renderCliError = (value) => String(value);",
     "src/renderers/json.ts": "export const renderJson = (value) => JSON.stringify(value);"
@@ -292,13 +357,22 @@ test("architecture contract respects shadowed stream binding names", async () =>
   assert.deepEqual(await checkArchitecture(root), []);
 });
 
-test("architecture contract rejects bloated command behavior modules", async () => {
-  const root = await createFixture({
-    "src/commands/plan.ts": Array.from({ length: 81 }, (_, index) => `const value${index} = ${index};`).join("\n")
+test("architecture contract enforces the command behavior line boundary", async (t) => {
+  await t.test("accepts the exact limit", async () => {
+    const root = await createFixture({
+      "src/commands/plan.ts": Array.from({ length: 80 }, (_, index) => `const value${index} = ${index};`).join("\n")
+    });
+    assert.deepEqual(await checkArchitecture(root), []);
   });
-  assert.deepEqual(await checkArchitecture(root), [
-    "src/commands/plan.ts has 81 non-empty lines; command behavior modules must stay at or below 80"
-  ]);
+
+  await t.test("rejects one line over", async () => {
+    const root = await createFixture({
+      "src/commands/plan.ts": Array.from({ length: 81 }, (_, index) => `const value${index} = ${index};`).join("\n")
+    });
+    assert.deepEqual(await checkArchitecture(root), [
+      "src/commands/plan.ts has 81 non-empty lines; command behavior modules must stay at or below 80"
+    ]);
+  });
 });
 
 test("architecture contract preserves thin CLI ownership", async (t) => {
@@ -319,10 +393,15 @@ test("architecture contract preserves thin CLI ownership", async (t) => {
   });
 
   await t.test("line limit", async () => {
-    const root = await createFixture({
+    const exactRoot = await createFixture({
+      "src/cli.ts": Array.from({ length: 60 }, (_, index) => `const value${index} = ${index};`).join("\n")
+    });
+    assert.deepEqual(await checkArchitecture(exactRoot), []);
+
+    const overRoot = await createFixture({
       "src/cli.ts": Array.from({ length: 61 }, (_, index) => `const value${index} = ${index};`).join("\n")
     });
-    assert.deepEqual(await checkArchitecture(root), [
+    assert.deepEqual(await checkArchitecture(overRoot), [
       "src/cli.ts has 61 non-empty lines; keep it as a thin entrypoint"
     ]);
   });
