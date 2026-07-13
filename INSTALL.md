@@ -147,7 +147,7 @@ Restart the agent runtime after installing or replacing a skill.
 ## 3. Install Or Refresh The Skills Catalog
 
 Use the reviewed catalog repository the operator names.
-Replace `<your-catalog-remote>` with its remote URL, then clone it into Skill Suitcase's own catalog home:
+Replace `<your-catalog-remote>` with its HTTPS remote URL, then clone it into Skill Suitcase's own catalog home:
 
 ```bash
 if mkdir -p "$HOME/.skill-suitcase"; then
@@ -181,6 +181,8 @@ With a global CLI:
 
 ```bash
 skill-suitcase import --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --json
+# Reviewed-catalog release gate:
 skill-suitcase validate --source "$SRC" --strict --json
 skill-suitcase targets --source "$SRC" --json
 skill-suitcase status --source "$SRC" --json
@@ -190,10 +192,15 @@ With a source CLI:
 
 ```bash
 node "$CLI" import --source "$SRC" --json
+node "$CLI" validate --source "$SRC" --json
+# Reviewed-catalog release gate:
 node "$CLI" validate --source "$SRC" --strict --json
 node "$CLI" targets --source "$SRC" --json
 node "$CLI" status --source "$SRC" --json
 ```
+
+Use non-strict validation for the minimal starter catalog from the getting-started guide.
+Treat `validate --strict` as the release gate for a reviewed catalog; the starter skill intentionally fails the Skillify authoring contract until it gains the required production sections, scripts, and tests.
 
 Optional upstream source refresh audit:
 

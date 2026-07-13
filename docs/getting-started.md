@@ -85,7 +85,7 @@ Restart the agent runtime after installing or replacing a skill.
 A catalog is a directory with a `skill-suitcase.yaml` manifest and one directory per skill under `skills/`.
 The catalog, not any live agent home, is the source of truth.
 
-If your team already has a reviewed catalog repository, replace `<your-catalog-remote>` with its remote URL and clone it:
+If your team already has a reviewed catalog repository, replace `<your-catalog-remote>` with its HTTPS remote URL and clone it:
 
 ```bash
 CATALOG_REMOTE="<your-catalog-remote>"
