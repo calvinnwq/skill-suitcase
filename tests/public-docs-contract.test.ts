@@ -36,6 +36,7 @@ type ShellDialect = "posix" | "powershell";
 interface CommandExample {
   contents: string;
   dialect: ShellDialect;
+  interactive?: boolean;
 }
 
 interface ShellToken {
@@ -158,7 +159,11 @@ function markdownShellBlocks(contents: string): CommandExample[] {
         ? blockContents
         : markdownNonFencedLines(blockContents).join("\n");
       if (isShellBlock || containsCommandShapedInvocation(executableContents, true)) {
-        blocks.push({ contents: executableContents, dialect });
+        blocks.push({
+          contents: executableContents,
+          dialect,
+          interactive: language === "console" || language === "shell-session" || language === "terminal"
+        });
       }
       closed = true;
       break;
@@ -289,6 +294,7 @@ function reusableTextCommandExamples(contents: string): CommandExample[] {
 
   for (const line of contents.split(/\r?\n/)) {
     for (const match of line.matchAll(launcher)) {
+      if (!isReusableCommandPosition(line, match.index)) continue;
       const command = line
         .slice(match.index)
         .replace(/(?:\\[nrt]|[\s"'`,;.)}\]])+$/g, "");
@@ -299,6 +305,17 @@ function reusableTextCommandExamples(contents: string): CommandExample[] {
   }
 
   return examples;
+}
+
+function isReusableCommandPosition(line: string, start: number): boolean {
+  const prefix = line.slice(0, start);
+  if (/^\s*["'`]?\s*$/.test(prefix)) return true;
+
+  const assignment = prefix.match(
+    /(?:^|[,{;])\s*(?:(?:const|let|var)\s+)?["']?([-$A-Za-z_][-$A-Za-z0-9_]*)["']?\s*(?::|=)\s*["'`]?\s*$/
+  );
+  const name = assignment?.[1] ?? "";
+  return /(?:^|[-_])(?:cmd|command|example|invocation|script)(?:$|[-_])/i.test(name);
 }
 
 function shellSegments(line: string, dialect: ShellDialect): string[] {
@@ -778,7 +795,8 @@ function shellExecutionPrefixTokens(
         continue;
       }
       if (token === "--foreground" || token === "--preserve-status" || token === "--verbose"
-        || /^(?:--kill-after|--signal)=/.test(token)) {
+        || /^(?:--kill-after|--signal)=/.test(token)
+        || /^-[ks].+/.test(token)) {
         continue;
       }
       if (!token.startsWith("-")) {
@@ -1091,9 +1109,22 @@ function withoutPowershellPrompt<T extends { value: string }>(tokens: T[]): T[] 
   return promptEnd < 0 ? tokens : tokens.slice(promptEnd + 1);
 }
 
-function shellInvocationTokens(segment: string, dialect: ShellDialect): ShellToken[] {
+function withoutPosixPrompt<T extends { value: string }>(tokens: T[], interactive: boolean): T[] {
+  if (!interactive) return tokens;
+  return /^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s]*[$#%]$/.test(tokens[0]?.value ?? "")
+    ? tokens.slice(1)
+    : tokens;
+}
+
+function shellInvocationTokens(
+  segment: string,
+  dialect: ShellDialect,
+  interactive = false
+): ShellToken[] {
   const tokens = shellTokens(segment, dialect);
-  const promptlessTokens = dialect === "powershell" ? withoutPowershellPrompt(tokens) : tokens;
+  const promptlessTokens = dialect === "powershell"
+    ? withoutPowershellPrompt(tokens)
+    : withoutPosixPrompt(tokens, interactive);
   return withoutShellRedirections(promptlessTokens);
 }
 
@@ -1271,7 +1302,7 @@ function validateCliExamples(path: string, contents: string): number {
   for (const example of commandExamples(path, contents)) {
     for (const line of logicalShellLines(example)) {
       for (const segment of shellSegments(line, example.dialect)) {
-        const tokens = shellInvocationTokens(segment, example.dialect);
+        const tokens = shellInvocationTokens(segment, example.dialect, example.interactive);
         const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value), example.dialect);
         if (launcher === null) continue;
 
@@ -1445,8 +1476,10 @@ test("CLI example parsing covers common shell fence forms", () => {
   for (const fixture of [
     "~~~bash\nskill-suitcase bogus --json\n~~~",
     "```console\n$ skill-suitcase bogus --json\n```",
+    "```console\nalice@host:~$ skill-suitcase bogus --json\n```",
     '```bash title="demo"\nskill-suitcase bogus --json\n```',
     "```shell-session\n$ skill-suitcase bogus --json\n```",
+    "```shell-session\nalice@host:~/project$ skill-suitcase bogus --json\n```",
     "```zsh\nskill-suitcase bogus --json\n```",
     "```fish\nskill-suitcase bogus --json\n```",
     "```pwsh\nskill-suitcase bogus --json\n```",
@@ -1772,7 +1805,9 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
     "exec skill-suitcase bogus --json",
     "nohup skill-suitcase bogus --json",
     "nice -n 5 skill-suitcase bogus --json",
-    "timeout 30 skill-suitcase bogus --json"
+    "timeout 30 skill-suitcase bogus --json",
+    "timeout -sTERM 30 skill-suitcase bogus --json",
+    "timeout -k5s 30 skill-suitcase bogus --json"
   ]) {
     assert.throws(
       () => validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``),
@@ -1910,16 +1945,27 @@ test("CLI example parsing applies PowerShell continuation and escaping", () => {
 
 test("CLI example parsing covers command strings in reusable text formats", () => {
   for (const [path, contents] of [
-    ["fixture.yaml", "default_prompt: Run skill-suitcase bogus --json\n"],
+    ["fixture.yaml", "command: skill-suitcase bogus --json\n"],
     ["fixture.json", '{"command":"skill-suitcase bogus --json"}\n'],
     ["fixture.js", 'const command = "skill-suitcase bogus --json";\n'],
     ["fixture.css", ':root { --example: "skill-suitcase bogus --json"; }\n'],
-    ["fixture.txt", "Run skill-suitcase bogus --json\n"]
+    ["fixture.txt", "skill-suitcase bogus --json\n"]
   ] as const) {
     assert.throws(
       () => validateCliExamples(path, contents),
       /unknown command: bogus/
     );
+  }
+
+  for (const [path, contents] of [
+    ["fixture.yaml", "description: skill-suitcase status reports target state.\n"],
+    ["fixture.yaml", "default_prompt: Run skill-suitcase bogus --json\n"],
+    ["fixture.json", '{"description":"Run skill-suitcase bogus --json"}\n'],
+    ["fixture.js", 'const description = "Run skill-suitcase bogus --json";\n'],
+    ["fixture.css", ':root { --description: "Run skill-suitcase bogus --json"; }\n'],
+    ["fixture.txt", "Run skill-suitcase bogus --json\n"]
+  ] as const) {
+    assert.equal(validateCliExamples(path, contents), 0);
   }
 });
 
