@@ -557,11 +557,25 @@ test("getting-started guide covers the public onboarding flow with portable exam
     guide.includes('mkdir -p "$HOME/.skill-suitcase"'),
     "getting-started should create the catalog parent before cloning"
   );
+  assert.ok(
+    guide.includes('INSTALL_TMP="$(mktemp -d "$AGENT_SKILLS_DIR/.skill-suitcase.install.XXXXXX")"'),
+    "getting-started should stage the operator skill before replacing an existing install"
+  );
+  assert.doesNotMatch(
+    guide,
+    /rm -rf "\$AGENT_SKILLS_DIR\/skill-suitcase"/,
+    "getting-started must not delete the installed operator skill before staging its replacement"
+  );
 
   const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files: string[] };
   assert.ok(
     packageJson.files.includes("docs/getting-started.md"),
     "getting-started guide must ship in the npm package"
+  );
+  const releaseReadiness = await readFile("docs/release-readiness.md", "utf8");
+  assert.ok(
+    releaseReadiness.includes("`docs/getting-started.md`"),
+    "release-readiness payload inventory should include the getting-started guide"
   );
 
   const readme = await readFile("README.md", "utf8");
@@ -596,6 +610,11 @@ test("public install runbook uses portable paths and generic repo names", async 
   assert.ok(
     install.includes("<your-catalog-remote>"),
     "INSTALL catalog setup should use a generic catalog remote placeholder"
+  );
+  assert.equal(
+    install.match(/test -e "\$HOME\/(?:repos\/skill-suitcase|\.skill-suitcase\/skills)\/\.git"/g)?.length,
+    2,
+    "INSTALL should recognize directory- and file-backed Git metadata for both checkout routes"
   );
 });
 

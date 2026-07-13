@@ -33,12 +33,49 @@ SKILL_SRC="$(npm root -g)/skill-suitcase/skills/skill-suitcase"
 # Pick the skills root for your agent runtime, for example:
 AGENT_SKILLS_DIR="$HOME/.claude/skills"
 
-mkdir -p "$AGENT_SKILLS_DIR"
-rm -rf "$AGENT_SKILLS_DIR/skill-suitcase"
-cp -R "$SKILL_SRC" "$AGENT_SKILLS_DIR/"
+install_operator_skill() (
+  if ! test -d "$SKILL_SRC"; then
+    printf 'Skill source not found: %s\n' "$SKILL_SRC" >&2
+    return 1
+  fi
+
+  mkdir -p "$AGENT_SKILLS_DIR" || return 1
+  INSTALL_TMP="$(mktemp -d "$AGENT_SKILLS_DIR/.skill-suitcase.install.XXXXXX")" || return 1
+  mkdir "$INSTALL_TMP/replacement" || {
+    rm -rf "$INSTALL_TMP"
+    return 1
+  }
+  if ! cp -R "$SKILL_SRC/." "$INSTALL_TMP/replacement/"; then
+    rm -rf "$INSTALL_TMP"
+    return 1
+  fi
+
+  TARGET="$AGENT_SKILLS_DIR/skill-suitcase"
+  HAD_TARGET=false
+  if test -e "$TARGET" || test -L "$TARGET"; then
+    mv "$TARGET" "$INSTALL_TMP/previous" || {
+      rm -rf "$INSTALL_TMP"
+      return 1
+    }
+    HAD_TARGET=true
+  fi
+
+  if mv "$INSTALL_TMP/replacement" "$TARGET"; then
+    rm -rf "$INSTALL_TMP"
+  else
+    if "$HAD_TARGET" && ! mv "$INSTALL_TMP/previous" "$TARGET"; then
+      printf 'Replacement failed; previous skill preserved at: %s\n' "$INSTALL_TMP/previous" >&2
+      return 1
+    fi
+    rm -rf "$INSTALL_TMP"
+    return 1
+  fi
+)
+
+install_operator_skill
 ```
 
-Copy the whole directory and remove any previous install first, so a replacement never leaves stale files behind.
+Copy the whole directory through the staged replacement so a copy failure leaves the previous install unchanged and a successful replacement never leaves stale files behind.
 
 Restart the agent runtime after installing or replacing a skill.
 [`INSTALL.md`](../INSTALL.md) lists the common skills roots for other runtimes.

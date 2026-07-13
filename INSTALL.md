@@ -38,7 +38,7 @@ package-manager shims:
 ```bash
 if mkdir -p "$HOME/repos" &&
   {
-    if test -d "$HOME/repos/skill-suitcase/.git"; then
+    if test -e "$HOME/repos/skill-suitcase/.git"; then
       git -C "$HOME/repos/skill-suitcase" pull --ff-only
     else
       git clone https://github.com/calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase"
@@ -152,7 +152,7 @@ Replace `<your-catalog-remote>` with its remote URL, then clone it into Skill Su
 ```bash
 if mkdir -p "$HOME/.skill-suitcase"; then
   CATALOG_REMOTE="<your-catalog-remote>"
-  if test -d "$HOME/.skill-suitcase/skills/.git"; then
+  if test -e "$HOME/.skill-suitcase/skills/.git"; then
     git -C "$HOME/.skill-suitcase/skills" pull --ff-only
   else
     git clone "$CATALOG_REMOTE" "$HOME/.skill-suitcase/skills"
