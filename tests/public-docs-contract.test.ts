@@ -24,6 +24,8 @@ const EXECUTION_WRAPPERS = new Set([
   "env",
   "exec",
   "nice",
+  "nocorrect",
+  "noglob",
   "nohup",
   "not",
   "or",
@@ -51,6 +53,8 @@ interface CommandExample {
   contents: string;
   language?: string;
 }
+
+type ShellDialect = "fish" | "posix" | "powershell";
 
 interface MarkdownNode {
   children?: MarkdownNode[];
@@ -105,19 +109,27 @@ function htmlCommandExamples(contents: string, fragment = false): CommandExample
   const root = (fragment ? parseFragment(contents) : parseHtml(contents)) as unknown as HtmlNode;
   const examples: CommandExample[] = [];
 
-  function visit(node: HtmlNode, insidePre: boolean): void {
+  function visit(node: HtmlNode, insidePre: boolean, inheritedLanguage?: string): void {
     const tagName = node.tagName?.toLowerCase();
     const classes = node.attrs?.find((attribute) => attribute.name === "class")?.value.split(/\s+/) ?? [];
     const cmdline = classes.includes("cmdline");
     const code = tagName === "code";
+    const languageClass = classes.find((className) => className.startsWith("language-"));
+    const language = languageClass?.slice("language-".length).toLowerCase() ?? inheritedLanguage;
 
     if (cmdline || code) {
       const text = htmlText(node);
-      if (hasCliReference(text)) examples.push({ block: cmdline || insidePre, contents: text });
+      if (hasCliReference(text)) {
+        examples.push({
+          block: cmdline || insidePre,
+          contents: text,
+          ...(language === undefined ? {} : { language })
+        });
+      }
       if (cmdline) return;
     }
 
-    for (const child of node.childNodes ?? []) visit(child, insidePre || tagName === "pre");
+    for (const child of node.childNodes ?? []) visit(child, insidePre || tagName === "pre", language);
   }
 
   visit(root, false);
@@ -246,12 +258,120 @@ function normalizeInteractiveSource(contents: string): string {
     .join("\n");
 }
 
-function sanitizeShellSource(example: CommandExample): string {
-  if (example.language === "powershell" || example.language === "ps1" || example.language === "pwsh") {
-    assert.fail("PowerShell CLI examples are unsupported; use a POSIX shell example");
+function shellDialect(language?: string): ShellDialect {
+  if (language === "powershell" || language === "ps1" || language === "pwsh") return "powershell";
+  return language === "fish" ? "fish" : "posix";
+}
+
+function powershellLineState(
+  line: string,
+  initialQuote: "\"" | "'" | null
+): { continuation: boolean; quote: "\"" | "'" | null } {
+  let quote = initialQuote;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? "";
+    if (quote === "'") {
+      if (character !== "'") continue;
+      if (line[index + 1] === "'") index += 1;
+      else quote = null;
+      continue;
+    }
+    if (character === "`") {
+      if (index === line.length - 1) return { continuation: true, quote };
+      index += 1;
+      continue;
+    }
+    if (quote === "\"") {
+      if (character === "\"") quote = null;
+      continue;
+    }
+    if (character === "#" && (index === 0 || /\s/.test(line[index - 1] ?? ""))) break;
+    if (character === "\"" || character === "'") quote = character;
+  }
+  return { continuation: false, quote };
+}
+
+function normalizePowershellHereStrings(contents: string): string {
+  const lines = contents.split(/\r?\n/);
+  const normalized: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const opening = line.match(/@(["'])\s*$/);
+    if (opening === null || opening.index === undefined) {
+      normalized.push(line);
+      continue;
+    }
+
+    const quote = opening[1] ?? "";
+    const body: string[] = [];
+    let closingIndex = index + 1;
+    for (; closingIndex < lines.length; closingIndex += 1) {
+      const bodyLine = lines[closingIndex] ?? "";
+      if (bodyLine.trim() === `${quote}@`) break;
+      body.push(bodyLine);
+    }
+    assert.ok(closingIndex < lines.length, `PowerShell here-string requires delimiter: ${quote}@`);
+    const value = quote === "\"" ? JSON.stringify(body.join("\n")) : "''";
+    normalized.push(`${line.slice(0, opening.index)}${value}`);
+    index = closingIndex;
   }
 
-  return normalizeInteractiveSource(example.contents)
+  return normalized.join("\n");
+}
+
+function normalizePowershellSource(contents: string): string {
+  const logicalLines: string[] = [];
+  let current = "";
+  let quote: "\"" | "'" | null = null;
+  const normalizedContents = normalizePowershellHereStrings(
+    normalizeInteractiveSource(contents).replaceAll("\\", "/")
+  );
+
+  for (const sourceLine of normalizedContents.split(/\r?\n/)) {
+    const state = powershellLineState(sourceLine, quote);
+    current += state.continuation ? `${sourceLine.slice(0, -1)} ` : sourceLine;
+    quote = state.quote;
+    if (state.continuation || quote !== null) {
+      if (!state.continuation) current += "\n";
+      continue;
+    }
+    logicalLines.push(current);
+    current = "";
+  }
+  if (current.length > 0) logicalLines.push(current);
+
+  return logicalLines
+    .map((line) => {
+      const assignment = line.match(/^(\s*)\$[A-Za-z_][A-Za-z0-9_:]*\s*=\s*(.+)$/s);
+      const command = assignment !== null && hasCliReference(assignment[2] ?? "")
+        ? `${assignment[1] ?? ""}${assignment[2] ?? ""}`
+        : line;
+      return command.replace(/^(\s*)&\s+(?=(?:[A-Za-z]:[\\/]|\.?[\\/]|\$\{?CLI\}?|skill-suitcase))/i, "$1");
+    })
+    .join("\n")
+    .replace(/`(.)/gs, "\\$1");
+}
+
+function normalizeFishSource(contents: string): string {
+  return normalizeInteractiveSource(contents)
+    .split(/\r?\n/)
+    .map((line) => line
+      .replace(/^(\s*)(?:begin|else|end)(?=\s*(?:;|$))/, "$1true")
+      .replace(/^(\s*)(?:if|while)\s+/, "$1")
+      .replace(/^(\s*)for\s+[^;]+(?:;|$)/, "$1true;"))
+    .join("\n")
+    .replace(/;\s*end(?=\s*(?:;|$))/g, "; true");
+}
+
+function sanitizeShellSource(example: CommandExample): string {
+  const dialect = shellDialect(example.language);
+  const source = dialect === "powershell"
+    ? normalizePowershellSource(example.contents)
+    : dialect === "fish"
+      ? normalizeFishSource(example.contents)
+      : normalizeInteractiveSource(example.contents);
+  return source
     .replace(/[\u00a0\u2000-\u200b\u2028\u2029\u202f\u205f\u3000]/g, " ")
     .replace(/<([A-Za-z][^>\s]*)>/g, (placeholder) =>
       OPTIONAL_INVOCATION_PLACEHOLDERS.has(placeholder) ? " ".repeat(placeholder.length) : "x".repeat(placeholder.length)
@@ -265,24 +385,31 @@ function executableName(value: string): string {
 
 function isCliExecutable(value: string): boolean {
   const executable = executableName(value).replace(/\.(?:cmd|exe|ps1)$/i, "");
-  return executable === "skill-suitcase" || value === "$CLI" || value === "${CLI}";
+  const normalized = value.toLowerCase();
+  return executable === "skill-suitcase" || normalized === "$cli" || normalized === "${cli}";
 }
 
 function isSourceEntrypoint(value: string): boolean {
   const normalized = value.replaceAll("\\", "/");
-  return value === "$CLI" || value === "${CLI}" || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
+  const lower = value.toLowerCase();
+  return lower === "$cli" || lower === "${cli}" || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
 }
 
 function nodeEntrypointIndex(words: Word[]): number | null {
   for (let index = 1; index < words.length; index += 1) {
     const token = words[index]?.value ?? "";
     if (token === "--") return index + 1 < words.length ? index + 1 : null;
-    if (token.startsWith("--") && token.includes("=")) continue;
+    if (token.startsWith("--") && token.includes("=")) {
+      const option = token.slice(0, token.indexOf("="));
+      if (!NODE_VALUE_OPTIONS.has(option)) return null;
+      continue;
+    }
     if (NODE_VALUE_OPTIONS.has(token)) {
+      if (index + 1 >= words.length) return null;
       index += 1;
       continue;
     }
-    if (token.startsWith("-")) continue;
+    if (token.startsWith("-")) return null;
     return index;
   }
   return null;
@@ -447,6 +574,9 @@ function validateCommandExample(path: string, example: CommandExample): number {
       !npmExec || !values.some(isCliExecutable),
       `${path} npm exec CLI examples must use -- before skill-suitcase`
     );
+    const unsupportedNodeLaunch = (executable === "node" || executable === "node.exe")
+      && words.some((word) => hasCliReference(word.value));
+    assert.ok(!unsupportedNodeLaunch, `${path} has an unsupported Node CLI launch form`);
   }
 
   return invocationCount;
@@ -623,6 +753,17 @@ test("launcher normalization covers wrappers, runners, paths, and command string
   }
 
   assert.equal(validateCliExamples("fixture.md", markdownFixture("node \"$CLI\" status --source . --json")), 1);
+  for (const source of [
+    "node --check dist/src/cli.js status --source . --json",
+    "node -e dist/src/cli.js status --source . --json",
+    "node --eval=dist/src/cli.js status --source . --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", markdownFixture(source)),
+      /unsupported Node CLI launch form/,
+      source
+    );
+  }
   assert.equal(validateCliExamples("fixture.md", markdownFixture("npm exec -- skill-suitcase status --source . --json")), 1);
   assert.equal(validateCliExamples("fixture.md", markdownFixture("npx cowsay -- skill-suitcase bogus --json")), 0);
   assert.equal(validateCliExamples("fixture.md", markdownFixture("command -v skill-suitcase || true")), 0);
@@ -647,8 +788,74 @@ test("CLI validation rejects nondeterministic and unaccepted invocations", () =>
   }
 
   assert.equal(validateCliExamples("fixture.md", markdownFixture("$CLI status --source . --target <target-id> <local-overrides> --json")), 1);
+});
+
+test("dialect normalization validates PowerShell and Fish examples", () => {
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("skill-suitcase status `\n  --source \"C:\\catalog` name\" `\n  --json", "pwsh")
+    ),
+    1
+  );
+  for (const source of [
+    "PS> skill-suitcase bogus --json",
+    "$result=skill-suitcase bogus --json",
+    String.raw`& C:\tools\Skill-Suitcase.cmd bogus --json`
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", markdownFixture(source, "powershell")),
+      /unknown command: bogus/,
+      source
+    );
+  }
+  for (const source of [
+    "not skill-suitcase bogus --json",
+    "if not skill-suitcase bogus --json",
+    "if test -e catalog; skill-suitcase bogus --json; end"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", markdownFixture(source, "fish")),
+      /unknown command: bogus/,
+      source
+    );
+  }
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("$value = @'\nskill-suitcase bogus --json\n'@", "pwsh")
+    ),
+    0
+  );
   assert.throws(
-    () => validateCliExamples("fixture.md", markdownFixture("skill-suitcase status --source . --json", "pwsh")),
-    /PowerShell CLI examples are unsupported/
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("$value = @\"\n$(skill-suitcase bogus --json)\n\"@", "pwsh")
+    ),
+    /unknown command: bogus/
+  );
+  for (const source of [
+    "noglob skill-suitcase bogus --json",
+    "nocorrect skill-suitcase bogus --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", markdownFixture(source, "zsh")),
+      /unknown command: bogus/,
+      source
+    );
+  }
+  assert.equal(
+    validateCliExamples(
+      "fixture.html",
+      '<pre><code class="language-powershell">skill-suitcase status --source . `\n  --json</code></pre>'
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.html",
+      '<pre class="language-powershell"><code>skill-suitcase status --source . `\n  --json</code></pre>'
+    ),
+    1
   );
 });
