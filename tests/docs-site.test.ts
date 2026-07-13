@@ -36,6 +36,11 @@ test("docs site pages share the expected chrome", () => {
     assert.match(html, /class="brand" href="index\.html"/, page);
     assert.match(html, /data-theme-toggle/, page);
     assert.match(html, /data-search-open/, page);
+    assert.match(
+      html,
+      /data-search-open aria-label="Search documentation" aria-haspopup="dialog"><span>Search docs<\/span><kbd aria-hidden="true">\/<\/kbd>/,
+      page
+    );
     assert.match(html, /href="site\.css"/, page);
     assert.match(html, /src="site\.js" defer/, page);
     assert.match(html, /try\{stored=localStorage\.getItem\("skill-suitcase-docs-theme"\);/, page);
@@ -170,6 +175,19 @@ test("docs search closes when a result is activated", () => {
   const js = read("docs/site.js");
 
   assert.match(js, /paletteResults\.addEventListener\("click", function \(e\) \{\s*if \(e\.target\.closest\("a"\)\) closePalette\(\);/);
+});
+
+test("docs search behaves as an accessible modal", () => {
+  const js = read("docs/site.js");
+
+  assert.match(js, /palette\.setAttribute\("aria-modal", "true"\)/);
+  assert.match(js, /paletteInput\.setAttribute\("aria-label", "Search documentation"\)/);
+  assert.match(js, /function setBackgroundInert\(inert\)[\s\S]*?element\.inert = true;[\s\S]*?element\.setAttribute\("aria-hidden", "true"\)/);
+  assert.match(js, /palette\.addEventListener\("keydown", trapPaletteFocus\)/);
+  assert.match(js, /if \(e\.shiftKey && document\.activeElement === first\)[\s\S]*?last\.focus\(\)/);
+  assert.match(js, /else if \(!e\.shiftKey && document\.activeElement === last\)[\s\S]*?first\.focus\(\)/);
+  assert.match(js, /paletteOpener = opener \|\| document\.activeElement/);
+  assert.match(js, /setBackgroundInert\(false\)[\s\S]*?opener\.focus\(\)/);
 });
 
 test("docs site collapses to a mobile drawer", () => {

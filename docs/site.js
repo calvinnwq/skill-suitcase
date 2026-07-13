@@ -307,12 +307,37 @@
     return INDEX_PROMISE;
   }
 
-  var palette, paletteInput, paletteResults, backdrop, selIdx = 0;
+  var palette, paletteInput, paletteResults, backdrop, paletteOpener, backgroundState, selIdx = 0;
 
-  function openPalette() {
+  function setBackgroundInert(inert) {
+    if (inert) {
+      backgroundState = [];
+      Array.prototype.forEach.call(document.body.children, function (element) {
+        if (element === backdrop || element === palette) return;
+        backgroundState.push({
+          element: element,
+          inert: element.inert,
+          ariaHidden: element.getAttribute("aria-hidden")
+        });
+        element.inert = true;
+        element.setAttribute("aria-hidden", "true");
+      });
+      return;
+    }
+    (backgroundState || []).forEach(function (state) {
+      state.element.inert = state.inert;
+      if (state.ariaHidden === null) state.element.removeAttribute("aria-hidden");
+      else state.element.setAttribute("aria-hidden", state.ariaHidden);
+    });
+    backgroundState = null;
+  }
+
+  function openPalette(opener) {
     if (!palette) buildPalette();
+    paletteOpener = opener || document.activeElement;
     backdrop.hidden = false;
     palette.hidden = false;
+    setBackgroundInert(true);
     paletteInput.value = "";
     renderResults("");
     paletteInput.focus();
@@ -320,9 +345,34 @@
   }
 
   function closePalette() {
-    if (!palette) return;
+    if (!palette || palette.hidden) return;
     backdrop.hidden = true;
     palette.hidden = true;
+    setBackgroundInert(false);
+    var opener = paletteOpener;
+    paletteOpener = null;
+    if (opener && document.contains(opener) && typeof opener.focus === "function") opener.focus();
+  }
+
+  function trapPaletteFocus(e) {
+    if (e.key !== "Tab") return;
+    var focusable = Array.prototype.slice.call(
+      palette.querySelectorAll('input, a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')
+    );
+    if (!focusable.length) {
+      e.preventDefault();
+      paletteInput.focus();
+      return;
+    }
+    var first = focusable[0];
+    var last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 
   function buildPalette() {
@@ -335,11 +385,14 @@
     palette.className = "palette";
     palette.hidden = true;
     palette.setAttribute("role", "dialog");
+    palette.setAttribute("aria-modal", "true");
     palette.setAttribute("aria-label", "Search documentation");
+    palette.addEventListener("keydown", trapPaletteFocus);
 
     paletteInput = document.createElement("input");
     paletteInput.type = "search";
     paletteInput.placeholder = "Search pages, sections, commands…";
+    paletteInput.setAttribute("aria-label", "Search documentation");
     paletteInput.addEventListener("input", function () { renderResults(paletteInput.value); });
     paletteInput.addEventListener("keydown", function (e) {
       var items = paletteResults.querySelectorAll("a");
@@ -399,14 +452,16 @@
   }
 
   document.addEventListener("click", function (e) {
-    if (e.target.closest("[data-search-open]")) openPalette();
+    var trigger = e.target.closest("[data-search-open]");
+    if (trigger) openPalette(trigger);
   });
 
   document.addEventListener("keydown", function (e) {
     if (e.key === "/" && !e.target.closest("input, textarea") && (!palette || palette.hidden)) {
       e.preventDefault();
-      openPalette();
+      openPalette(document.activeElement);
     } else if (e.key === "Escape") {
+      if (palette && !palette.hidden) e.preventDefault();
       closePalette();
       closeDrawer();
     }
