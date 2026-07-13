@@ -123,7 +123,7 @@ node dist/src/cli.js diff --source /path/to/skills-catalog --target grok --grok-
 ```
 
 `--codex-home`, `--codex-skills`, `--claude-skills`, `--hermes-skills`, `--agents-skills`, and `--grok-skills` are local overrides for global target paths.
-They are intended for `targets`, `status`, `diff`, `pack`, `apply`, `track`, `reconcile`, `repair`, and `import-target`; `status --target` accepts either an assignment path id or an assignment name.
+They are intended for `targets`, `status`, `diff`, `pack`, `apply`, `track`, `reconcile`, `repair`, `prune`, and `import-target`; `status --target` accepts either an assignment path id or an assignment name.
 Exact assignment path ids win, so `--target codex` selects the global Codex target when that id exists.
 
 For Codex or Claude paths that have source variants, `plan`, `diff`, `pack`,

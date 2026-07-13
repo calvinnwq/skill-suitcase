@@ -65,9 +65,10 @@ Target resolution uses this precedence:
 4. the vendored `skills.sh` compatibility snapshot.
 
 The currently modeled target IDs are `openclaw`, `codex`, `openclaw-codex`,
-`agents`, `claude`, `hermes`, `opencode`, `pi`, and `grok`. Supported path overrides are
+`agents`, `claude`, `hermes`, `opencode`, `pi`, and `grok`.
+Supported path overrides are
 `--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`,
-`--hermes-skills` and `--grok-skills`.
+`--hermes-skills`, and `--grok-skills`.
 The writable `hermes-skills-root` adapter uses the same direct install-root pattern as `openclaw-skills-root`.
 The default profile normally targets `$HOME/.hermes/skills`, while a named profile targets `$HOME/.hermes/profiles/<name>/skills`.
 
