@@ -59,6 +59,57 @@ const NODE_VALUE_OPTIONS = new Set([
   "--require",
   "--trace-event-categories"
 ]);
+const NO_WRAPPER_VALUE_OPTIONS = new Set<string>();
+const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+  env: new Set(["-a", "-C", "-u", "--argv0", "--chdir", "--unset"]),
+  exec: new Set(["-a"]),
+  nice: new Set(["-n", "--adjustment"]),
+  sudo: new Set([
+    "-C",
+    "-D",
+    "-g",
+    "-h",
+    "-p",
+    "-R",
+    "-r",
+    "-T",
+    "-t",
+    "-u",
+    "--chdir",
+    "--chroot",
+    "--command-timeout",
+    "--group",
+    "--host",
+    "--prompt",
+    "--role",
+    "--type",
+    "--user"
+  ]),
+  timeout: new Set(["-k", "-s", "--kill-after", "--signal"]),
+  time: new Set(["-f", "-o", "--format", "--output"]),
+  xargs: new Set([
+    "-E",
+    "-I",
+    "-J",
+    "-L",
+    "-n",
+    "-P",
+    "-R",
+    "-S",
+    "-a",
+    "-d",
+    "-s",
+    "--arg-file",
+    "--delimiter",
+    "--eof",
+    "--max-args",
+    "--max-chars",
+    "--max-lines",
+    "--max-procs",
+    "--process-slot-var",
+    "--replace"
+  ])
+};
 
 interface CommandExample {
   block: boolean;
@@ -186,7 +237,14 @@ function structuredCommandExamples(value: unknown, ownerKey?: string, seen = new
     return value.flatMap((item) => structuredCommandExamples(item, ownerKey, seen));
   }
 
-  return Object.entries(value).flatMap(([key, item]) => structuredCommandExamples(item, key, seen));
+  const inheritedOwner = ownerKey !== undefined && COMMAND_VALUE_KEYS.has(ownerKey.toLowerCase())
+    ? ownerKey
+    : undefined;
+  return Object.entries(value).flatMap(([key, item]) => structuredCommandExamples(
+    item,
+    inheritedOwner !== undefined && (typeof item === "string" || Array.isArray(item)) ? inheritedOwner : key,
+    seen
+  ));
 }
 
 function textCommandExamples(contents: string): CommandExample[] {
@@ -521,18 +579,53 @@ function packageRunnerInvocation(words: Word[]): string[] | null {
   return null;
 }
 
+function wrapperOptionValueMode(token: string, valueOptions: ReadonlySet<string>): "attached" | "separate" | null {
+  const equalsIndex = token.indexOf("=");
+  const option = equalsIndex < 0 ? token : token.slice(0, equalsIndex);
+  if (valueOptions.has(option)) return equalsIndex < 0 ? "separate" : "attached";
+  for (const shortOption of valueOptions) {
+    if (shortOption.length === 2 && token.startsWith(shortOption) && token.length > shortOption.length) {
+      return "attached";
+    }
+  }
+  return null;
+}
+
+function wrapperCommandIndex(executable: string, words: Word[]): number | null {
+  const valueOptions = WRAPPER_VALUE_OPTIONS[executable] ?? NO_WRAPPER_VALUE_OPTIONS;
+  let index = 1;
+
+  while (index < words.length) {
+    const token = words[index]?.value ?? "";
+    if (token === "--") {
+      index += 1;
+      break;
+    }
+    if (!token.startsWith("-") || token === "-") break;
+    const valueMode = wrapperOptionValueMode(token, valueOptions);
+    index += valueMode === "separate" ? 2 : 1;
+  }
+
+  if (executable === "env") {
+    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]?.value ?? "")) index += 1;
+  }
+  if (executable === "timeout") index += 1;
+  return index < words.length ? index : null;
+}
+
 function invocationFromWords(
   words: Word[],
   dialect: ShellDialect,
-  powershellVariableCall = false
+  powershellCallOperator = false
 ): string[] | null {
   const first = words[0]?.value;
   if (first === undefined) return null;
   if (isCliExecutable(first)) {
     const variableLauncher = /^\$\{?CLI\}?$/i.test(first);
-    if (dialect === "powershell" && variableLauncher && !powershellVariableCall) {
+    const quotedLauncher = /^(?:"[\s\S]*"|'[\s\S]*')$/.test(words[0]?.text ?? "");
+    if (dialect === "powershell" && (variableLauncher || quotedLauncher) && !powershellCallOperator) {
       if (words[1]?.value === "=" || words.length === 1) return null;
-      assert.fail("PowerShell variable CLI launchers require the call operator: & $CLI");
+      assert.fail("PowerShell variable and quoted CLI launchers require the call operator: & $CLI");
     }
     return words.slice(1).map((word) => word.value);
   }
@@ -555,11 +648,10 @@ function invocationFromWords(
   if (executable === "command" && words.some((word) => word.value === "-v" || word.value === "-V")) return null;
   if (executable === "sudo" && words.some((word) => word.value === "-e" || word.value === "--edit")) return null;
 
-  for (let index = 1; index < words.length; index += 1) {
-    const invocation = invocationFromWords(words.slice(index), dialect, dialect === "powershell");
-    if (invocation !== null) return invocation;
-  }
-  return null;
+  const commandIndex = wrapperCommandIndex(executable, words);
+  return commandIndex === null
+    ? null
+    : invocationFromWords(words.slice(commandIndex), dialect, dialect === "powershell");
 }
 
 function nestedCommandExample(command: Command, inheritedLanguage?: string): CommandExample | null {
@@ -777,7 +869,9 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     ["fixture.html", "<span class=\"cmdline\">skill-suitcase bogus --json</span>"],
     ["fixture.yaml", "command: skill-suitcase bogus --json"],
     ["fixture.yaml", "commands:\n  - skill-suitcase bogus --json"],
+    ["fixture.yaml", "commands: { smoke: skill-suitcase bogus --json }"],
     ["fixture.json", "{\"commands\":[\"skill-suitcase bogus --json\"]}"],
+    ["fixture.json", "{\"commands\":{\"smoke\":\"skill-suitcase bogus --json\"}}"],
     ["fixture.js", "const commands = ['echo ok', 'skill-suitcase bogus --json'];"],
     ["fixture.css", ":root { --example: 'skill-suitcase bogus --json'; }"],
     ["fixture.txt", "skill-suitcase bogus --json"]
@@ -788,6 +882,10 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
 
   assert.equal(validateCliExamples("fixture.md", "The `skill-suitcase` binary reads `skill-suitcase.yaml`."), 0);
   assert.equal(validateCliExamples("fixture.yaml", "description: Run skill-suitcase bogus --json"), 0);
+  assert.equal(
+    validateCliExamples("fixture.yaml", "commands:\n  smoke:\n    description: Run skill-suitcase bogus --json"),
+    0
+  );
   assert.equal(validateCliExamples("fixture.json", "{\"description\":\"Run skill-suitcase bogus --json\"}"), 0);
   assert.equal(validateCliExamples("fixture.js", "const description = 'Run skill-suitcase bogus --json';"), 0);
   assert.equal(validateCliExamples("fixture.css", ":root { --description: 'Run skill-suitcase bogus --json'; }"), 0);
@@ -865,6 +963,7 @@ test("launcher normalization covers wrappers, runners, paths, and command string
   }
   assert.equal(validateCliExamples("fixture.md", markdownFixture("npm exec -- skill-suitcase status --source . --json")), 1);
   assert.equal(validateCliExamples("fixture.md", markdownFixture("npx cowsay -- skill-suitcase bogus --json")), 0);
+  assert.equal(validateCliExamples("fixture.md", markdownFixture("xargs -n1 echo skill-suitcase bogus --json")), 0);
   assert.equal(validateCliExamples("fixture.md", markdownFixture("command -v skill-suitcase || true")), 0);
   assert.equal(validateCliExamples("fixture.md", markdownFixture("printf '%s\\n' 'skill-suitcase bogus --json'")), 0);
   assert.throws(
@@ -936,14 +1035,21 @@ test("dialect normalization validates PowerShell and Fish examples", () => {
       "fixture.md",
       markdownFixture("$CLI status --source . --json", "powershell")
     ),
-    /PowerShell variable CLI launchers require the call operator/
+    /PowerShell variable and quoted CLI launchers require the call operator/
   );
   assert.throws(
     () => validateCliExamples(
       "fixture.md",
       markdownFixture("Write-Host ready; $CLI status --source . --json", "powershell")
     ),
-    /PowerShell variable CLI launchers require the call operator/
+    /PowerShell variable and quoted CLI launchers require the call operator/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture('"skill-suitcase" status --source . --json', "powershell")
+    ),
+    /PowerShell variable and quoted CLI launchers require the call operator/
   );
   assert.equal(
     validateCliExamples(
