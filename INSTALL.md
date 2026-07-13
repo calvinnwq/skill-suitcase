@@ -74,26 +74,13 @@ From a source checkout:
 SKILL_SRC="$HOME/repos/skill-suitcase/skills/skill-suitcase"
 ```
 
-Choose the skill root for the agent runtime you are configuring. Examples:
+Choose the skill root for the agent runtime you are configuring. Edit the one
+active assignment below when you are not installing for Codex:
 
 ```bash
-# Codex
+# Choose one runtime root: Codex $HOME/.codex/skills, Claude $HOME/.claude/skills, shared agents root $HOME/.agents/skills, or Grok Build $HOME/.grok/skills
+# Hermes roots: default profile $HOME/.hermes/skills or named profile $HOME/.hermes/profiles/<name>/skills
 AGENT_SKILLS_DIR="$HOME/.codex/skills"
-
-# Claude
-AGENT_SKILLS_DIR="$HOME/.claude/skills"
-
-# Hermes default profile
-AGENT_SKILLS_DIR="$HOME/.hermes/skills"
-
-# Hermes named profile
-AGENT_SKILLS_DIR="$HOME/.hermes/profiles/<name>/skills"
-
-# Shared agents root
-AGENT_SKILLS_DIR="$HOME/.agents/skills"
-
-# Grok Build
-AGENT_SKILLS_DIR="$HOME/.grok/skills"
 ```
 
 Install into the selected root:

@@ -47,8 +47,16 @@ test("agent install guide tells agents how to install and verify the skill", asy
 
   assert.match(install, /These instructions are for any coding agent/);
   assert.doesNotMatch(install, /These instructions are for Codex, Claude/);
+  assert.match(
+    install,
+    /# Choose one runtime root: Codex \$HOME\/\.codex\/skills, Claude \$HOME\/\.claude\/skills, shared agents root \$HOME\/\.agents\/skills, or Grok Build \$HOME\/\.grok\/skills/
+  );
   assert.match(install, /AGENT_SKILLS_DIR="\$HOME\/\.codex\/skills"/);
-  assert.match(install, /AGENT_SKILLS_DIR="\$HOME\/\.claude\/skills"/);
+  assert.equal(
+    install.match(/^AGENT_SKILLS_DIR=/gm)?.length,
+    1,
+    "the copyable runtime-root block must leave only one active assignment"
+  );
   assert.match(install, /cp -R "\$SKILL_SRC\/\." "\$INSTALL_TMP\/replacement\/"/);
   assert.match(install, /mv "\$TARGET" "\$INSTALL_TMP\/previous"/);
   assert.match(install, /mv "\$INSTALL_TMP\/replacement" "\$TARGET"/);
