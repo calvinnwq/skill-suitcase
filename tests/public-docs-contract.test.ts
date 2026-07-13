@@ -169,6 +169,14 @@ function htmlText(node: HtmlNode): string {
   return (node.childNodes ?? []).map(htmlText).join("");
 }
 
+function hasNestedHtmlCommandElement(node: HtmlNode): boolean {
+  return (node.childNodes ?? []).some((child) => {
+    const tagName = child.tagName?.toLowerCase();
+    const classes = child.attrs?.find((attribute) => attribute.name === "class")?.value.split(/\s+/) ?? [];
+    return tagName === "code" || classes.includes("cmdline") || hasNestedHtmlCommandElement(child);
+  });
+}
+
 function htmlCommandExamples(contents: string, fragment = false): CommandExample[] {
   const root = (fragment ? parseFragment(contents) : parseHtml(contents)) as unknown as HtmlNode;
   const examples: CommandExample[] = [];
@@ -178,14 +186,15 @@ function htmlCommandExamples(contents: string, fragment = false): CommandExample
     const classes = node.attrs?.find((attribute) => attribute.name === "class")?.value.split(/\s+/) ?? [];
     const cmdline = classes.includes("cmdline");
     const code = tagName === "code";
+    const plainPre = tagName === "pre" && !hasNestedHtmlCommandElement(node);
     const languageClass = classes.find((className) => className.startsWith("language-"));
     const language = languageClass?.slice("language-".length).toLowerCase() ?? inheritedLanguage;
 
-    if (cmdline || code) {
+    if (cmdline || code || plainPre) {
       const text = htmlText(node);
       if (hasCliReference(text)) {
         examples.push({
-          block: cmdline || insidePre,
+          block: cmdline || plainPre || insidePre,
           contents: text,
           ...(language === undefined ? {} : { language })
         });
@@ -514,9 +523,8 @@ function isCliExecutable(value: string): boolean {
 }
 
 function isSourceEntrypoint(value: string): boolean {
-  const normalized = value.replaceAll("\\", "/");
-  const lower = value.toLowerCase();
-  return lower === "$cli" || lower === "${cli}" || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
+  const normalized = value.replaceAll("\\", "/").toLowerCase();
+  return normalized === "$cli" || normalized === "${cli}" || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
 }
 
 function nodeEntrypointIndex(words: Word[]): number | null {
@@ -583,10 +591,10 @@ function wrapperOptionValueMode(token: string, valueOptions: ReadonlySet<string>
   const equalsIndex = token.indexOf("=");
   const option = equalsIndex < 0 ? token : token.slice(0, equalsIndex);
   if (valueOptions.has(option)) return equalsIndex < 0 ? "separate" : "attached";
-  for (const shortOption of valueOptions) {
-    if (shortOption.length === 2 && token.startsWith(shortOption) && token.length > shortOption.length) {
-      return "attached";
-    }
+  if (!/^-[^-]/.test(token)) return null;
+  for (let index = 1; index < token.length; index += 1) {
+    if (!valueOptions.has(`-${token[index] ?? ""}`)) continue;
+    return index === token.length - 1 ? "separate" : "attached";
   }
   return null;
 }
@@ -620,7 +628,7 @@ function invocationFromWords(
 ): string[] | null {
   const first = words[0]?.value;
   if (first === undefined) return null;
-  if (isCliExecutable(first)) {
+  if (isCliExecutable(first) || isSourceEntrypoint(first)) {
     const variableLauncher = /^\$\{?CLI\}?$/i.test(first);
     const quotedLauncher = /^(?:"[\s\S]*"|'[\s\S]*')$/.test(words[0]?.text ?? "");
     if (dialect === "powershell" && (variableLauncher || quotedLauncher) && !powershellCallOperator) {
@@ -865,6 +873,7 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     ["fixture.md", "Run `skill-suitcase bogus --json` now."],
     ["fixture.md", "    skill-suitcase bogus --json"],
     ["fixture.md", "<code>skill-suitcase&#32;bogus --json</code>"],
+    ["fixture.html", "<pre>skill-suitcase bogus --json</pre>"],
     ["fixture.html", "<pre><code>skill-suitcase&nbsp;bogus --json</code></pre>"],
     ["fixture.html", "<span class=\"cmdline\">skill-suitcase bogus --json</span>"],
     ["fixture.yaml", "command: skill-suitcase bogus --json"],
@@ -925,7 +934,9 @@ test("Bash AST traversal validates controls, substitutions, pipelines, and redir
 
 test("launcher normalization covers wrappers, runners, paths, and command strings", () => {
   const invalidLaunchers = [
+    "./dist/src/cli.js bogus --json",
     "env -i skill-suitcase bogus --json",
+    "sudo -Eu root skill-suitcase bogus --json",
     "sudo -E command -- skill-suitcase bogus --json",
     "nohup skill-suitcase bogus --json",
     "nice -n 5 skill-suitcase bogus --json",
