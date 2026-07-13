@@ -39,7 +39,9 @@ function htmlPagePaths(directory: string): string[] {
       if (entry.isDirectory()) {
         visit(path);
       } else if (entry.isFile() && entry.name.endsWith(".html")) {
-        pages.push(relative(directory, path).split(sep).join("/"));
+        const page = relative(directory, path).split(sep).join("/");
+        assert.ok(!page.includes("/"), `docs site only supports root-level HTML pages: ${page}`);
+        pages.push(page);
       }
     }
   }
@@ -248,16 +250,16 @@ test("navigation extraction includes unnumbered internal entries", () => {
   ]);
 });
 
-test("HTML page inventory includes nested docs routes", (t) => {
+test("HTML page inventory rejects unsupported nested docs routes", (t) => {
   const fixture = mkdtempSync(join(tmpdir(), "skill-suitcase-docs-site-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   mkdirSync(join(fixture, "guides"));
   writeFileSync(join(fixture, "index.html"), "");
   writeFileSync(join(fixture, "guides", "setup.html"), "");
 
-  assert.deepEqual(
-    htmlPagePaths(fixture),
-    ["guides/setup.html", "index.html"]
+  assert.throws(
+    () => htmlPagePaths(fixture),
+    /docs site only supports root-level HTML pages: guides\/setup\.html/
   );
 });
 

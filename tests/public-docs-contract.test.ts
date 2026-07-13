@@ -239,7 +239,12 @@ function renderArgv(items: string[]): string {
   return items.map((item) => `'${item.replaceAll("'", "'\\''")}'`).join(" ");
 }
 
-function structuredCommandExamples(value: unknown, ownerKey?: string, seen = new Set<object>()): CommandExample[] {
+function structuredCommandExamples(
+  value: unknown,
+  ownerKey?: string,
+  seen = new Set<object>(),
+  argvVector = false
+): CommandExample[] {
   if (typeof value === "string") {
     return ownerKey !== undefined && COMMAND_VALUE_KEYS.has(ownerKey.toLowerCase()) && hasCliReference(value)
       ? [{ block: true, contents: value }]
@@ -250,15 +255,19 @@ function structuredCommandExamples(value: unknown, ownerKey?: string, seen = new
 
   if (Array.isArray(value)) {
     if (
-      ownerKey !== undefined
-      && ARGV_VALUE_KEYS.has(ownerKey.toLowerCase())
+      (argvVector || (ownerKey !== undefined && ARGV_VALUE_KEYS.has(ownerKey.toLowerCase())))
       && value.length > 0
       && value.every((item) => typeof item === "string")
     ) {
       const contents = renderArgv(value);
       return hasCliReference(contents) ? [{ block: true, contents }] : [];
     }
-    return value.flatMap((item) => structuredCommandExamples(item, ownerKey, seen));
+    return value.flatMap((item) => structuredCommandExamples(
+      item,
+      ownerKey,
+      seen,
+      Array.isArray(item) && ownerKey !== undefined && COMMAND_CONTAINER_KEYS.has(ownerKey.toLowerCase())
+    ));
   }
 
   const inheritedOwner = ownerKey !== undefined && COMMAND_VALUE_KEYS.has(ownerKey.toLowerCase())
@@ -267,7 +276,8 @@ function structuredCommandExamples(value: unknown, ownerKey?: string, seen = new
   return Object.entries(value).flatMap(([key, item]) => structuredCommandExamples(
     item,
     inheritedOwner !== undefined && (typeof item === "string" || Array.isArray(item)) ? inheritedOwner : key,
-    seen
+    seen,
+    Array.isArray(item) && inheritedOwner !== undefined && COMMAND_CONTAINER_KEYS.has(inheritedOwner.toLowerCase())
   ));
 }
 
@@ -294,7 +304,12 @@ function javascriptCommandExamples(path: string, contents: string): CommandExamp
         if (hasCliReference(example)) examples.add(example);
         return;
       }
-      for (const element of node.elements) collectStrings(element, ownerKey);
+      for (const element of node.elements) {
+        collectStrings(
+          element,
+          COMMAND_CONTAINER_KEYS.has(ownerKey) && ts.isArrayLiteralExpression(element) ? "command" : ownerKey
+        );
+      }
     } else if (ts.isObjectLiteralExpression(node)) {
       for (const property of node.properties) {
         if (!ts.isPropertyAssignment(property)) continue;
@@ -307,7 +322,10 @@ function javascriptCommandExamples(path: string, contents: string): CommandExamp
             || ts.isNoSubstitutionTemplateLiteral(property.initializer)
             || ts.isArrayLiteralExpression(property.initializer))
         ) {
-          collectStrings(property.initializer, ownerKey);
+          collectStrings(
+            property.initializer,
+            ts.isArrayLiteralExpression(property.initializer) ? "command" : ownerKey
+          );
         }
       }
     }
@@ -378,8 +396,15 @@ function normalizeInteractiveSource(contents: string): string {
 }
 
 function shellDialect(language?: string): ShellDialect {
-  if (language === "powershell" || language === "ps1" || language === "pwsh") return "powershell";
-  return language === "fish" ? "fish" : "posix";
+  const languages = (language ?? "")
+    .toLowerCase()
+    .replace(/[{}]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.replace(/^\./, ""));
+  if (languages.some((value) => value === "powershell" || value === "ps1" || value === "pwsh")) {
+    return "powershell";
+  }
+  return languages.includes("fish") ? "fish" : "posix";
 }
 
 function powershellLineState(
@@ -900,7 +925,7 @@ function assertNoPrivateMachinePaths(path: string, contents: string): void {
   assert.doesNotMatch(localPathContents, /\/home\/[^/\\\s`"']+/, `${path} contains a Linux user path`);
   assert.doesNotMatch(
     localPathContents,
-    /(?:^|[^A-Za-z0-9._~/-])\/root(?=[^A-Za-z0-9_-]|$)/m,
+    /(?:^|[^A-Za-z0-9._~/-]|file:\/{2,}|\/)\/root(?=[^A-Za-z0-9_-]|$)/m,
     `${path} contains a Linux root user path`
   );
   assert.doesNotMatch(
@@ -936,6 +961,8 @@ test("private machine path checks cover portable and private forms", () => {
     "`/Users/alice`",
     "`/home/alice`",
     "Use /root.",
+    "file:///root/project",
+    "//root/project",
     "C:/Users/alice/project",
     "C:\\Users\\alice",
     "/mnt/c/Users/alice/project",
@@ -975,11 +1002,14 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     ["fixture.yaml", "command: [skill-suitcase, bogus, --json]"],
     ["fixture.yaml", "commands:\n  - skill-suitcase bogus --json"],
     ["fixture.yaml", "commands: { smoke: skill-suitcase bogus --json }"],
+    ["fixture.yaml", "commands: { smoke: [skill-suitcase, bogus, --json] }"],
     ["fixture.json", "{\"commands\":[\"skill-suitcase bogus --json\"]}"],
     ["fixture.json", "{\"command\":[\"skill-suitcase\",\"bogus\",\"--json\"]}"],
     ["fixture.json", "{\"commands\":{\"smoke\":\"skill-suitcase bogus --json\"}}"],
+    ["fixture.json", "{\"commands\":{\"smoke\":[\"skill-suitcase\",\"bogus\",\"--json\"]}}"],
     ["fixture.js", "const commands = ['echo ok', 'skill-suitcase bogus --json'];"],
     ["fixture.js", "const commands = { smoke: 'skill-suitcase bogus --json' };"],
+    ["fixture.js", "const commands = { smoke: ['skill-suitcase', 'bogus', '--json'] };"],
     ["fixture.js", "const command = ['skill-suitcase', 'bogus', '--json'];"],
     ["fixture.css", ":root { --example: 'skill-suitcase bogus --json'; }"],
     ["fixture.txt", "skill-suitcase bogus --json"]
@@ -1016,6 +1046,18 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
   assert.equal(validateCliExamples(
     "fixture.js",
     "const command = ['skill-suitcase', 'status', '--source', '.', '--json'];"
+  ), 1);
+  assert.equal(validateCliExamples(
+    "fixture.yaml",
+    "commands: { smoke: [skill-suitcase, status, --source, ., --json] }"
+  ), 1);
+  assert.equal(validateCliExamples(
+    "fixture.json",
+    "{\"commands\":{\"smoke\":[\"skill-suitcase\",\"status\",\"--source\",\".\",\"--json\"]}}"
+  ), 1);
+  assert.equal(validateCliExamples(
+    "fixture.js",
+    "const commands = { smoke: ['skill-suitcase', 'status', '--source', '.', '--json'] };"
   ), 1);
 });
 
@@ -1152,6 +1194,13 @@ test("dialect normalization validates PowerShell and Fish examples", () => {
       source
     );
   }
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("PS C:\\repo> skill-suitcase bogus --json", "{.powershell}")
+    ),
+    /unknown command: bogus/
+  );
   for (const source of [
     "not skill-suitcase bogus --json",
     "if not skill-suitcase bogus --json",
