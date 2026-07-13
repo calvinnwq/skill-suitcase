@@ -348,13 +348,16 @@ git diff --check
 
 `build` removes `dist`, compiles the TypeScript sources, and marks `dist/src/cli.js` executable so stale generated output cannot survive a package build.
 `test` rebuilds first, verifies that the recursively discovered compiled test inventory exactly matches `tests/**/*.test.ts`, then runs every compiled test and every `scripts/**/*.test.mjs` test with Node's built-in test runner.
+The test inventory validates public and reusable documentation for shipped command names, `--json` on every literal CLI invocation, and portable paths without contributor-specific home directories.
 `package:smoke` runs the supported local pack verification: npm invokes `prepack` to create a clean build and record build-input, source, and output hashes in the ignored `dist/.package-build.json`, then the smoke script parses `npm pack --json`, validates the pinned public metadata and exact allowed payload, installs the tarball into an empty temporary project, and runs the read-only `targets` command through the installed executable.
+Package validation pins the curated Markdown files under `docs/` and excludes the GitHub Pages-only HTML, CSS, and JavaScript from the tarball.
 `architecture:check` runs `scripts/check-architecture.mjs` to enforce the
 recognized source layers, allowed imports, thin CLI and command limits,
 process-IO ownership, and renderer-mediated output described in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 `docs:serve` previews the static docs site from `docs/` at `http://127.0.0.1:8080/`.
-The same pages are validated by `tests/docs-site.test.ts` inside `pnpm test` and deploy to GitHub Pages through `.github/workflows/pages.yml`.
+`tests/docs-site.test.ts` checks that every HTML page appears exactly once in the navigation manifest and that the rendered pager follows its contiguous numbered reading order.
+The pages deploy to GitHub Pages through `.github/workflows/pages.yml`.
 
 CI uses the package's pinned pnpm `10.34.4` toolchain.
 The `verify` job runs the tests, lint/typecheck, architecture check, and

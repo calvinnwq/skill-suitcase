@@ -9,9 +9,10 @@ import { parse } from "yaml";
 /**
  * The static docs site under docs/ is plain HTML plus one stylesheet and one
  * client script, deployed as-is to GitHub Pages. These tests are the site's
- * deterministic build check: shared chrome, navigation coverage, link
- * integrity, storage-hardened client behavior, and the content contracts the
- * site must keep aligned with the shipped CLI.
+ * deterministic build check: shared chrome, exact page and navigation
+ * coverage, pager reading order, link integrity, storage-hardened client
+ * behavior, and the content contracts the site must keep aligned with the
+ * shipped CLI.
  */
 
 const DOC_PAGES = [

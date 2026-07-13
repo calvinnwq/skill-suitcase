@@ -78,12 +78,21 @@ match those sources exactly.
 It then runs every compiled test and every `scripts/**/*.test.mjs` test with
 Node's built-in test runner, including deterministic checks for the community
 files, issue forms, local documentation links, and packaging validation.
+`tests/public-docs-contract.test.ts` inventories root Markdown and reusable text
+documentation under `docs/`, `skills/`, and `examples/`.
+It rejects contributor-specific macOS, Linux, and Windows home paths and checks
+each literal `skill-suitcase` shell invocation independently for a shipped
+command, a valid upstream subcommand when applicable, and `--json`.
 `package:smoke` clean-builds through npm's `prepack` hook, validates the public
 metadata and exact tarball payload, installs that tarball in an empty temporary
-project, and runs its read-only `targets` command. `package:prepare` is the
-lower-level clean-build and hash-recording step used by `prepack`, while
-`package:validate` rechecks the recorded build without rebuilding it. `lint`
-currently aliases the TypeScript typecheck. `format:check` runs
+project, and runs its read-only `targets` command.
+The package validation tests pin the exact curated Markdown files under `docs/`
+and keep the GitHub Pages-only HTML, CSS, and JavaScript outside the tarball.
+`package:prepare` is the lower-level clean-build and hash-recording step used by
+`prepack`, while `package:validate` rechecks the recorded build without
+rebuilding it.
+`lint` currently aliases the TypeScript typecheck.
+`format:check` runs
 `git diff --check`, and `architecture:check` enforces the dependency,
 process-IO, recognized-layer, thin-CLI, and command-module contracts documented
 in `ARCHITECTURE.md`. The checker is intentionally syntactic rather than a
@@ -113,9 +122,16 @@ data rather than depending on a contributor's home directory.
 Examples should use placeholders such as `/path/to/skills-catalog`, `$HOME`, or
 temporary directories. Do not commit credentials, private prompts, real agent
 home contents, or contributor-specific absolute paths.
+Every literal public `skill-suitcase` shell invocation must name a shipped
+command and include `--json`, including each invocation in a pipeline, command
+substitution, or subshell.
 
 The static docs site lives in `docs/` as plain HTML with one shared local
 stylesheet and client script; there is no build step.
 Preview it locally with `pnpm run docs:serve` at `http://127.0.0.1:8080/`.
 `tests/docs-site.test.ts` is the site's deterministic check and runs inside
-`pnpm test`; deployment goes through `.github/workflows/pages.yml`.
+`pnpm test`.
+It requires every HTML page to appear exactly once in the navigation manifest,
+keeps the numbered reading order contiguous, and verifies that rendered pager
+links follow that order.
+Deployment goes through `.github/workflows/pages.yml`.

@@ -34,6 +34,11 @@ results, including findings, warnings, and `ok: false` errors, belong on stdout.
 Parser/usage failures, uncaught fatal diagnostics, and non-JSON notices belong
 on stderr. Command modules should own parsing and validation, while durable
 behavior belongs in core modules.
+Literal `skill-suitcase` examples in public and reusable documentation must use
+shipped commands and include `--json` on every invocation, including chained
+commands.
+Use portable placeholders instead of macOS, Linux, or Windows contributor home
+paths.
 
 ## Commit and release conventions
 

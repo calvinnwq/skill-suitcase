@@ -17,8 +17,11 @@ New product work should extend the command/core/adapter/renderer pattern instead
 of adding behavior directly to `src/cli.ts`.
 
 Preserve existing user changes and avoid generated `dist/`, dependency, local
-agent-state, or review-artifact files. Use portable paths such as `$HOME`, a
-temporary directory, or `/path/to/catalog` in documentation and tests.
+agent-state, or review-artifact files.
+Use portable paths such as `$HOME`, a temporary directory, or `/path/to/catalog`
+in documentation and tests.
+Literal public CLI examples must use shipped commands and include `--json` for
+each `skill-suitcase` invocation.
 
 ## Safety
 

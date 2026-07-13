@@ -17,8 +17,11 @@ Before adding or changing a command:
 
 Extend the command/core/adapter/renderer pattern for new product work.
 Preserve existing user changes and avoid generated `dist/`, dependency, local
-agent-state, or review-artifact files. Use portable paths such as `$HOME`, a
-temporary directory, or `/path/to/catalog` in documentation and tests.
+agent-state, or review-artifact files.
+Use portable paths such as `$HOME`, a temporary directory, or `/path/to/catalog`
+in documentation and tests.
+Literal public CLI examples must use shipped commands and include `--json` for
+each `skill-suitcase` invocation.
 
 ## Safety
 

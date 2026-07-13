@@ -87,6 +87,9 @@ Tests, source TypeScript, local review artifacts, agent state, and workspace fil
 `prepack` remains routed through `package:prepare` so every supported npm pack or publish removes stale `dist` output, rebuilds the CLI, verifies its shebang and executable mode, and records hashes for `package.json`, `pnpm-lock.yaml`, `tsconfig.json`, source files, and compiled output in the ignored `dist/.package-build.json` manifest.
 `package:validate` is the non-rebuilding recheck of that manifest, so changed compiler configuration or dependency inputs and missing, additional, stale, changed, or non-executable compiled CLI output fail validation.
 `pnpm run package:smoke` parses `npm pack --json`, rejects missing or unintended payload entries, requires the installed CLI binary to remain executable, installs the generated tarball into an empty temporary project, and runs the read-only `targets` command.
+The package validation tests also compare the dry-run payload's `docs/` entries
+to the six curated Markdown paths exactly, which keeps the GitHub Pages-only
+HTML, CSS, and JavaScript outside the tarball.
 Both the package smoke and the Release Please workflow's pre-publish dry-run prevent local workflow artifacts from silently entering the package tarball.
 
 Before publication, the release workflow runs
@@ -170,8 +173,13 @@ aliases.
 compiled test inventory to match `tests/**/*.test.ts` exactly, and then runs
 every compiled test and every `scripts/**/*.test.mjs` test.
 That inventory includes `tests/docs-site.test.ts`, which validates the static
-site's shared chrome, complete command coverage, local links, portable content,
+site's shared chrome, exact HTML page inventory, unique navigation coverage,
+contiguous numbered reading order, rendered pager order, local links,
 client-side storage fallbacks, and Pages deployment contract.
+It also includes `tests/public-docs-contract.test.ts`, which scans root Markdown
+and reusable text documentation under `docs/`, `skills/`, and `examples/` for
+contributor-specific home paths and validates every literal CLI invocation for
+a shipped command and `--json`.
 
 Review the npm dry-run output for the expected executable, compiled runtime,
 operator skill, license, and public docs. Refuse the release if it contains
@@ -225,7 +233,9 @@ Before publishing, verify:
 - The README and package homepage route readers to
   `https://calvinnwq.github.io/skill-suitcase/`.
 - The plain HTML site under `docs/` previews with `pnpm run docs:serve`, passes
-  `tests/docs-site.test.ts`, and remains outside the npm package payload.
+  `tests/docs-site.test.ts`, lists every HTML page exactly once in contiguous
+  numbered navigation and pager order, and remains outside the npm package
+  payload.
 - `.github/workflows/pages.yml` deploys `docs/` after relevant changes land on
   `main`, with `.nojekyll` preserved at the site root.
 - Repository Settings > Pages uses GitHub Actions as the publishing source so
@@ -233,6 +243,8 @@ Before publishing, verify:
 - `SPEC.md` describes the normative current-state contract and remains distinct from product direction, architecture, and detailed command usage.
 - Public examples use `$HOME`, `/path/to/...`, or explicit target overrides;
   they do not require a maintainer-specific absolute path.
+- Every literal public `skill-suitcase` example uses a shipped command and
+  includes `--json` on each invocation, including chained commands.
 - Long-form command behavior lives in `docs/command-reference.md`, not in a
   README roadmap or milestone narrative.
 - `INSTALL.md` covers packaged CLI and operator-skill setup.
