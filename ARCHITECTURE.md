@@ -521,11 +521,9 @@ cli.ts -> commands -> core/domain -> adapters
    +-> config +-> renderers +----------+-> config/shared
 ```
 
-The executable architecture contract recognizes `cli.ts`, `commands/`,
-`core/`, `adapters/`, `renderers/`, `config/`, and `shared/` as source layers.
-All top-level `src/*.ts` files are classified as core modules, including the
-legacy re-export shims.
-Nested source directories outside the recognized layers are rejected.
+The executable architecture contract recognizes `cli.ts`, `commands/`, `core/`, `adapters/`, `renderers/`, `config/`, and `shared/` as source layers.
+Except for `src/cli.ts`, every top-level `src/*.ts` file is classified as a core module, including the legacy re-export shims.
+TypeScript files in nested source directories outside the recognized layers are rejected.
 
 Allowed relative source imports are:
 
@@ -533,7 +531,7 @@ Allowed relative source imports are:
 | --- | --- |
 | `cli.ts` | `commands/`, `config/`, `renderers/`, `shared/` |
 | `commands/` | `commands/`, `core/`, `config/`, `renderers/`, `shared/` |
-| `core/` and top-level shims | `core/`, `adapters/`, `config/`, `shared/` |
+| `core/` and other top-level modules | `core/`, `adapters/`, `config/`, `shared/` |
 | `adapters/` | `adapters/`, `config/`, `shared/` |
 | `renderers/` | `renderers/`, `config/`, `shared/` |
 | `config/` | `config/`, `shared/` |
@@ -562,7 +560,8 @@ Additional enforced rules:
 
 `pnpm run architecture:check` enforces these rules with a deliberately syntactic TypeScript AST pass.
 It inspects static imports and exports, TypeScript import-equals declarations and import-type queries, direct `require()` calls, and dynamic imports with literal relative specifiers.
-It also detects direct process and console output access, direct process capability imports and destructuring, and renderer-mediated writes in `src/cli.ts` while ignoring comments, quoted examples, type-only process references, and non-literal dynamic dependencies.
+It also detects direct process and console output access, imports, exports, and destructuring that expose guarded process capabilities, calls through named and object imports from Node console modules, and renderer-mediated writes in `src/cli.ts` while ignoring comments, quoted examples, type-only process references, and non-literal dynamic dependencies.
+Imported capability, stream, console, and renderer aliases are tracked by symbol, so unrelated shadowed local bindings are ignored.
 Direct global-looking identifiers are matched syntactically; project code should not shadow names such as `process`, `console`, or `require`.
 
 The checker is not a whole-program alias, constant-folding, control-flow, or
@@ -570,7 +569,8 @@ closure analyzer.
 Those concerns belong in a mature lint or dependency-analysis tool if the
 project later needs them; this contract stays small enough to remain reviewable
 and deterministic.
-Failures are sorted to keep diagnostics deterministic.
+On success, the checker writes its notice to stdout and exits with status `0`.
+When contract violations are found, it writes sorted diagnostics to stderr and exits with status `1`.
 The contract cases live in `scripts/architecture-contract.test.mjs`, while
 `tests/architecture-guardrails.test.ts` verifies the project entrypoint and
 current source tree.
