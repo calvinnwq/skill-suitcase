@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { test } from "node:test";
 
@@ -55,14 +55,30 @@ test("docs site pages share the expected chrome", () => {
 
 test("navigation manifest covers every page in numbered reading order", () => {
   const js = read("docs/site.js");
+  const navigationEntries = [...js.matchAll(
+    /\{ n: "(\d{2})", t: "([^"]+)", h: "([^"]+\.html)" \}/g
+  )].map((match) => ({ number: match[1], title: match[2], href: match[3] }));
+  const sitePages = readdirSync("docs")
+    .filter((path) => path.endsWith(".html"))
+    .map((path) => `docs/${path}`)
+    .sort();
 
-  for (const page of DOC_PAGES) {
-    const name = page.replace("docs/", "");
-    assert.match(js, new RegExp(`h: "${name.replace(".", "\\.")}"`), name);
-  }
-  for (const n of ["01", "02", "03", "04", "05", "06", "07", "08"]) {
-    assert.match(js, new RegExp(`n: "${n}"`), n);
-  }
+  assert.deepEqual(
+    navigationEntries.map((entry) => entry.href),
+    DOC_PAGES.map((page) => page.replace("docs/", "")),
+    "the navigation manifest must list every page exactly once in reading order"
+  );
+  assert.deepEqual(
+    navigationEntries.map((entry) => entry.number),
+    ["01", "02", "03", "04", "05", "06", "07", "08"],
+    "numbered navigation must stay contiguous"
+  );
+  assert.equal(
+    new Set(navigationEntries.map((entry) => entry.title)).size,
+    navigationEntries.length,
+    "navigation labels must stay unique"
+  );
+  assert.deepEqual(sitePages, [...DOC_PAGES].sort(), "every HTML page must be reachable from navigation");
   assert.match(js, /setAttribute\("aria-current", "page"\)/);
   assert.match(js, /THEME_KEY = "skill-suitcase-docs-theme"/);
   assert.match(js, /skill-suitcase-docs-index-v2/);
