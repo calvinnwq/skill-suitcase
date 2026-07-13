@@ -553,6 +553,10 @@ test("getting-started guide covers the public onboarding flow with portable exam
 
   assert.doesNotMatch(guide, /\/Users\//, "getting-started examples must not contain maintainer-local paths");
   assert.doesNotMatch(guide, /calvinnwq\/skills\b/, "getting-started must not reference a private catalog repository");
+  assert.ok(
+    guide.includes('mkdir -p "$HOME/.skill-suitcase"'),
+    "getting-started should create the catalog parent before cloning"
+  );
 
   const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files: string[] };
   assert.ok(
@@ -575,6 +579,11 @@ test("getting-started guide covers the public onboarding flow with portable exam
 
 test("public install runbook uses portable paths and generic repo names", async () => {
   const install = await readFile("INSTALL.md", "utf8");
+
+  assert.ok(
+    install.includes('mkdir -p "$HOME/.skill-suitcase"'),
+    "install runbook should create the catalog parent before cloning"
+  );
 
   assert.doesNotMatch(install, /\/Users\//, "INSTALL examples must not contain maintainer-local paths");
   assert.doesNotMatch(install, /calvinnwq\/skills\b/, "INSTALL must not reference a private catalog repository");

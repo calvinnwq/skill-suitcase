@@ -52,6 +52,7 @@ If your team already has a reviewed catalog repository, replace `<your-catalog-r
 
 ```bash
 CATALOG_REMOTE="<your-catalog-remote>"
+mkdir -p "$HOME/.skill-suitcase"
 git clone "$CATALOG_REMOTE" "$HOME/.skill-suitcase/skills"
 SRC="$HOME/.skill-suitcase/skills"
 ```
