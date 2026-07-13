@@ -9,6 +9,7 @@ import { createCommandRegistry, parseCommandArgs } from "../src/commands/index.j
 
 const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
 const TEXT_DOCUMENT_EXTENSIONS = [".css", ".html", ".js", ".json", ".md", ".yaml", ".yml"];
+const REUSABLE_TEXT_COMMAND_EXTENSIONS = [".css", ".js", ".json", ".yaml", ".yml"];
 const COMMAND_REGISTRY = createCommandRegistry();
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
 const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "do", "elif", "else", "if", "then", "until", "while", "{"]);
@@ -276,7 +277,28 @@ function commandExamples(path: string, contents: string): CommandExample[] {
         dialect: "posix" as const
       };
     });
-  return [...markdownBlocks, ...htmlCodeBlocks, ...htmlCommandLines];
+  const reusableTextCommands = REUSABLE_TEXT_COMMAND_EXTENSIONS.some((extension) => path.endsWith(extension))
+    ? reusableTextCommandExamples(contents)
+    : [];
+  return [...markdownBlocks, ...htmlCodeBlocks, ...htmlCommandLines, ...reusableTextCommands];
+}
+
+function reusableTextCommandExamples(contents: string): CommandExample[] {
+  const examples: CommandExample[] = [];
+  const launcher = /(?<![$A-Za-z0-9_-])(?:skill-suitcase(?:\.(?:cmd|ps1))?|\$\{CLI\}|\$CLI|dist[\\/]src[\\/]cli\.js)(?=\s)/gi;
+
+  for (const line of contents.split(/\r?\n/)) {
+    for (const match of line.matchAll(launcher)) {
+      const command = line
+        .slice(match.index)
+        .replace(/(?:\\[nrt]|[\s"'`,;.)}\]])+$/g, "");
+      if (containsCommandShapedInvocation(command)) {
+        examples.push({ contents: command, dialect: "posix" });
+      }
+    }
+  }
+
+  return examples;
 }
 
 function shellSegments(line: string, dialect: ShellDialect): string[] {
@@ -707,8 +729,10 @@ function shellCommandTokens(tokens: string[]): string[] | null {
     commandTokens = commandTokens.slice(index);
     const wrapper = executableName(commandTokens[0] ?? "");
     if (wrapper !== "command" && wrapper !== "env" && wrapper !== "sudo"
-      && wrapper !== "exec" && wrapper !== "time") return commandTokens;
-    const wrappedCommand = wrapper === "exec" || wrapper === "time"
+      && wrapper !== "exec" && wrapper !== "nice" && wrapper !== "nohup" && wrapper !== "time") {
+      return commandTokens;
+    }
+    const wrappedCommand = wrapper === "exec" || wrapper === "nice" || wrapper === "nohup" || wrapper === "time"
       ? shellExecutionPrefixTokens(commandTokens, wrapper)
       : shellWrapperCommandTokens(commandTokens, wrapper);
     if (wrappedCommand === null) return null;
@@ -717,7 +741,7 @@ function shellCommandTokens(tokens: string[]): string[] | null {
   return null;
 }
 
-function shellExecutionPrefixTokens(tokens: string[], wrapper: "exec" | "time"): string[] | null {
+function shellExecutionPrefixTokens(tokens: string[], wrapper: "exec" | "nice" | "nohup" | "time"): string[] | null {
   for (let index = 1; index < tokens.length; index += 1) {
     const token = tokens[index] ?? "";
     if (token === "--") return tokens.slice(index + 1);
@@ -727,6 +751,15 @@ function shellExecutionPrefixTokens(tokens: string[], wrapper: "exec" | "time"):
         continue;
       }
       if (/^-[cl]+$/.test(token)) continue;
+    } else if (wrapper === "nice") {
+      if (token === "-n" || token === "--adjustment") {
+        index += 1;
+        continue;
+      }
+      if (/^(?:--adjustment=|-)[+-]?\d+$/.test(token)) continue;
+      if (token === "--help" || token === "--version") return null;
+    } else if (wrapper === "nohup") {
+      if (token === "--help" || token === "--version") return null;
     } else if (token === "-p") {
       continue;
     }
@@ -742,7 +775,7 @@ function executableName(token: string): string {
 }
 
 function isSkillSuitcaseExecutable(token: string, allowPackageVersion = false): boolean {
-  const name = executableName(token);
+  const name = executableName(token).replace(/\.(?:cmd|ps1)$/i, "");
   return name === "skill-suitcase"
     || (allowPackageVersion && /^skill-suitcase@[^/]+$/.test(name));
 }
@@ -1014,7 +1047,19 @@ function shellInvocationTokens(segment: string, dialect: ShellDialect): ShellTok
 
 function logicalShellLines(example: CommandExample): string[] {
   if (example.dialect === "powershell") {
-    return example.contents.replace(/`\r?\n[ \t]*/g, " ").split(/\r?\n/);
+    const lines = example.contents.split(/\r?\n/);
+    const commandLines: string[] = [];
+
+    for (let index = 0; index < lines.length; index += 1) {
+      let line = lines[index] ?? "";
+      while (hasPowershellLineContinuation(line) && index + 1 < lines.length) {
+        index += 1;
+        line = `${line.slice(0, -1)} ${(lines[index] ?? "").replace(/^\s*/, "")}`;
+      }
+      commandLines.push(line);
+    }
+
+    return commandLines;
   }
 
   const lines = example.contents.split(/\r?\n/);
@@ -1044,6 +1089,37 @@ function logicalShellLines(example: CommandExample): string[] {
   }
 
   return commandLines;
+}
+
+function hasPowershellLineContinuation(line: string): boolean {
+  const trailingBackticks = line.match(/`+$/)?.[0] ?? "";
+  if (trailingBackticks.length % 2 === 0) return false;
+
+  let quote: "\"" | "'" | null = null;
+  const continuationIndex = line.length - trailingBackticks.length;
+  for (let index = 0; index < continuationIndex; index += 1) {
+    const character = line[index] ?? "";
+    if (quote === "'") {
+      if (character !== "'") continue;
+      if (line[index + 1] === "'") {
+        index += 1;
+      } else {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === "`") {
+      index += 1;
+      continue;
+    }
+    if (quote === "\"") {
+      if (character === "\"") quote = null;
+      continue;
+    }
+    if (character === "\"" || character === "'") quote = character;
+  }
+
+  return quote !== "'";
 }
 
 function hasPosixLineContinuation(line: string): boolean {
@@ -1197,6 +1273,16 @@ function assertNoPrivateMachinePaths(path: string, contents: string): void {
     `${path} contains a Windows user path`
   );
   assert.doesNotMatch(localPathContents, /[A-Z]:[\\/]Users[\\/][^\\/\s`"']+/i, `${path} contains a Windows user path`);
+  assert.doesNotMatch(
+    localPathContents,
+    /(?:^|[^A-Za-z0-9._~/-])~[A-Za-z_][A-Za-z0-9_-]*(?=[\\/\s`"'.,;:)}\]]|$)/m,
+    `${path} contains a named Unix user path`
+  );
+  assert.doesNotMatch(
+    localPathContents,
+    /(?:^|[^A-Za-z0-9._~/-])[\\/][^\\/\s`"']+[\\/]Users[\\/][^\\/\s`"']+/i,
+    `${path} contains a Windows UNC user path`
+  );
 }
 
 test("public and reusable docs contain no contributor-specific machine paths", () => {
@@ -1221,6 +1307,8 @@ test("private machine path checks cover roots and Windows separators", () => {
     "C:\\Users\\alice",
     "/mnt/c/Users/alice/project",
     "/c/Users/alice/project",
+    "~alice/project",
+    String.raw`\\server\Users\alice\project`,
     String.raw`{"path":"C:\\Users\\alice\\project"}`
   ]) {
     assert.throws(() => assertNoPrivateMachinePaths("fixture.md", privatePath), /contains a .* user path/);
@@ -1228,7 +1316,7 @@ test("private machine path checks cover roots and Windows separators", () => {
 
   assert.doesNotThrow(() => assertNoPrivateMachinePaths(
     "fixture.md",
-    "See /target/root/project, https://docs.example.com/home/alice/setup, and https://docs.example.com/root/project."
+    "See ~/project, $HOME/project, /target/root/project, https://docs.example.com/home/alice/setup, and https://docs.example.com/root/project."
   ));
 });
 
@@ -1629,7 +1717,9 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
   );
   for (const command of [
     "time skill-suitcase bogus --json",
-    "exec skill-suitcase bogus --json"
+    "exec skill-suitcase bogus --json",
+    "nohup skill-suitcase bogus --json",
+    "nice -n 5 skill-suitcase bogus --json"
   ]) {
     assert.throws(
       () => validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``),
@@ -1743,10 +1833,33 @@ test("CLI example parsing applies PowerShell continuation and escaping", () => {
   );
   for (const command of [
     "PS> skill-suitcase bogus --json",
-    "$result = skill-suitcase bogus --json"
+    "$result = skill-suitcase bogus --json",
+    String.raw`.\skill-suitcase.cmd bogus --json`,
+    String.raw`C:\tools\skill-suitcase.ps1 bogus --json`
   ]) {
     assert.throws(
       () => validateCliExamples("fixture.md", `\`\`\`pwsh\n${command}\n\`\`\``),
+      /unknown command: bogus/
+    );
+  }
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```pwsh\nWrite-Output ok``\nskill-suitcase bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+});
+
+test("CLI example parsing covers command strings in reusable text formats", () => {
+  for (const [path, contents] of [
+    ["fixture.yaml", "default_prompt: Run skill-suitcase bogus --json\n"],
+    ["fixture.json", '{"command":"skill-suitcase bogus --json"}\n'],
+    ["fixture.js", 'const command = "skill-suitcase bogus --json";\n'],
+    ["fixture.css", ':root { --example: "skill-suitcase bogus --json"; }\n']
+  ] as const) {
+    assert.throws(
+      () => validateCliExamples(path, contents),
       /unknown command: bogus/
     );
   }
