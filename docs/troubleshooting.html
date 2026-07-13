@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Troubleshooting · Skill Suitcase docs</title>
+    <meta name="description" content="What each status state asks you to do, the common machine-readable refusal codes, and the situations that trip people up.">
+    <script>(function(){var stored=null;try{stored=localStorage.getItem("skill-suitcase-docs-theme");}catch(e){}var dark=false;try{dark=matchMedia("(prefers-color-scheme: dark)").matches;}catch(e){}document.documentElement.dataset.theme=stored||(dark?"dark":"light");})();</script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%B3%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,450..680;1,9..144,450..680&family=Newsreader:ital,opsz,wght@0,6..72,400..650;1,6..72,400..650&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="site.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body data-page="troubleshooting.html">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <button class="menu-btn" type="button" data-menu aria-label="Toggle navigation" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 3.5h14M1 8h14M1 12.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <a class="brand" href="index.html">Skill Suitcase<span class="brand-tag">docs</span></a>
+        <button class="search-btn" type="button" data-search-open aria-label="Search documentation" aria-haspopup="dialog"><span>Search docs</span><kbd aria-hidden="true">/</kbd></button>
+        <div class="masthead-tools">
+          <a class="gh" href="https://github.com/calvinnwq/skill-suitcase">GitHub</a>
+          <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+            <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
+            <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="frame">
+      <nav id="sidebar" class="sidebar" aria-label="Documentation"></nav>
+
+      <main id="content" class="article-col">
+        <article>
+          <p class="kicker"><span class="n">07</span>Operate · Troubleshooting</p>
+          <h1>Read the refusal, choose the workflow.</h1>
+          <p class="lede">
+            Skill Suitcase fails closed. A refusal is a request to inspect state
+            and choose the correct workflow, not a reason to bypass the receipt or
+            approval boundary.
+          </p>
+
+          <section>
+            <h2>What each status asks of you</h2>
+            <div class="def-rows">
+              <div><span class="k">current</span><span class="v">nothing to do</span></div>
+              <div><span class="k">missing</span><span class="v">stage with pack, review, then apply with a lock or artifact</span></div>
+              <div><span class="k">version</span><span class="v">the receipt version differs from current SKILL.md frontmatter; review the change, then stage and apply the catalog update</span></div>
+              <div><span class="k">behind</span><span class="v">the target is unchanged but the catalog moved; stage and apply the update</span></div>
+              <div><span class="k">dirty</span><span class="v">stop and inspect; repair --dry-run to discard the drift, import-target --dry-run to keep it, either apply only after explicit approval</span></div>
+              <div><span class="k">blocked</span><span class="v">read the blocked reason; fix the manifest, compatibility, or policy problem in the catalog</span></div>
+              <div><span class="k">unknown</span><span class="v">status could not be proven; only the receiptless mismatched-directory case routes to reconcile, everything else needs manual inspection</span></div>
+            </div>
+            <p>
+              Provider fallback inventory without a catalog assignment appears with
+              <code>statusCount: 0</code> and no status entries; a custom provider
+              path tied to a catalog assignment may produce ordinary status entries
+              while staying read-only for mutation.
+            </p>
+          </section>
+
+          <section>
+            <h2>Common refusal codes</h2>
+            <table class="opts">
+              <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td>read_only_target</td><td>a target-aware materialization or mutation flow cannot adopt or write a provider-managed target; expected for OpenCode and Pi</td></tr>
+                <tr><td>source_denied_path</td><td>source policy blocked a path before a target write; also appears as <code>diff_source_denied_path</code> from diff</td></tr>
+                <tr><td>symlink_source_policy_exclude</td><td>symlink apply cannot enforce a non-empty <code>sourcePolicy.exclude</code>, even one with no current matches; use copy mode or clear the policy</td></tr>
+                <tr><td>source_untracked_files</td><td>selected Git-backed source contains untracked, non-ignored files; track or remove them before packing or applying (reported by pack and apply, not diff)</td></tr>
+                <tr><td>unsafe_target_state</td><td>apply found unmanaged or unapproved live state; choose a recovery workflow instead of forcing the install</td></tr>
+                <tr><td>plan_lock_&lt;reason&gt;</td><td>current facts no longer match the lock proof, for example <code>plan_lock_current_plan_unavailable</code>, <code>plan_lock_target_mismatch</code>, or <code>plan_lock_source_mismatch</code>; rebuild the lock from current state</td></tr>
+                <tr><td>symlink_source_escape</td><td>the requested link would leave the approved catalog root</td></tr>
+                <tr><td>symlink_target_conflict</td><td>the live target shape cannot be replaced implicitly</td></tr>
+                <tr><td>receipt_lock_failed</td><td>a mutating workflow could not acquire or use the serialized receipt transaction lock; retry after the concurrent workflow finishes</td></tr>
+              </tbody>
+            </table>
+            <p>
+              Recovery commands also emit state-specific refusals when the selected
+              skill does not meet that workflow's ownership and drift contract, for
+              example <code>repair</code> refusing unknown, missing, behind,
+              symlink-mode, read-only, and unselected states.
+            </p>
+          </section>
+
+          <section>
+            <h2>Situations that trip people up</h2>
+            <h3>Prune refuses a legacy receipt</h3>
+            <p>
+              <code>prune</code> requires the modern
+              <code>.skill-suitcase-receipt.json</code> and safely refuses a legacy
+              <code>.skills-sync.json</code> receipt instead of migrating it inside
+              a safety-sensitive workflow.
+            </p>
+            <h3>A quarantine root already exists</h3>
+            <p>
+              <code>prune --apply</code> refuses and preserves a pre-existing
+              plan quarantine root instead of reusing or cleaning it. Retain the
+              reported quarantine root, transaction journal, and receipt backup for
+              reviewed cleanup; never replace prune with manual deletion or broad
+              rollback.
+            </p>
+            <h3>An apply-mode refusal still says dryRun: false</h3>
+            <p>
+              A refused apply keeps <code>dryRun: false</code> to represent the
+              requested mode, sets <code>readOnly: true</code>, and performs no
+              mutation. A missing install root is refused rather than recreated.
+            </p>
+            <h3>Rollback refuses drifted state</h3>
+            <p>
+              <code>rollback</code> verifies that current target bytes still match
+              the applied receipt before reversing anything; drift is a refusal,
+              not something it overwrites. It also does not restore promotions:
+              a promotion receipt is a safe no-op whose preserved backup needs a
+              separate manual recovery decision.
+            </p>
+            <h3>Pack output landed somewhere unsafe</h3>
+            <p>
+              Pack refuses output beneath an absolute manifest-declared install
+              root, but that guard does not account for CLI target overrides and
+              does not expand <code>~</code>. Always stage into a temporary
+              directory outside both the catalog and every resolved target root.
+            </p>
+            <h3>Where did my JSON go?</h3>
+            <p>
+              Structured results, including <code>ok: false</code> refusals, go to
+              stdout. Parser and usage failures, uncaught fatal diagnostics, and
+              non-JSON notices go to stderr. If stdout is empty, check stderr and
+              the exit code.
+            </p>
+          </section>
+
+          <section>
+            <h2>Still stuck?</h2>
+            <p>
+              Check the <a href="reference.html">CLI reference</a> for per-command
+              preconditions, or open a support request through
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/SUPPORT.md">SUPPORT.md</a>.
+              Report suspected vulnerabilities privately per
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/SECURITY.md">SECURITY.md</a>.
+            </p>
+          </section>
+        </article>
+        <footer class="pager" id="pager"></footer>
+      </main>
+
+      <aside class="toc-col"><p class="toc-title">On this page</p><nav id="toc" aria-label="On this page"></nav></aside>
+    </div>
+
+    <footer class="colophon"><div class="colophon-inner"><span>Skill Suitcase docs</span><span>MIT</span><a href="https://github.com/calvinnwq/skill-suitcase">GitHub</a></div></footer>
+  </body>
+</html>

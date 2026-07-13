@@ -227,10 +227,10 @@ skill-suitcase apply \
   --json
 ```
 
-Requires exactly one approved input: a staged artifact or plan lock. Apply
-performs writes transactionally and emits a receipt per installed skill. Copy is
-the default mode. Symlink mode links selected source paths inside the catalog
-source root.
+Requires exactly one approved input: a staged artifact or plan lock.
+Apply performs writes transactionally and updates the target receipt with a record for every installed skill.
+Copy is the default mode.
+Symlink mode links selected source paths inside the catalog source root.
 
 The two approval inputs do not currently provide identical guarantees.
 Lock mode reassesses the current plan and file hashes against the lock.

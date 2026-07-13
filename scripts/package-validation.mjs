@@ -58,7 +58,7 @@ const EXPECTED_METADATA = {
     type: "git",
     url: "git+https://github.com/calvinnwq/skill-suitcase.git"
   },
-  homepage: "https://github.com/calvinnwq/skill-suitcase#readme",
+  homepage: "https://calvinnwq.github.io/skill-suitcase/",
   bugs: {
     url: "https://github.com/calvinnwq/skill-suitcase/issues"
   },

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Install · Skill Suitcase docs</title>
+    <meta name="description" content="Install the Skill Suitcase CLI from npm or source, install the packaged operator skill, and set up a skills catalog.">
+    <script>(function(){var stored=null;try{stored=localStorage.getItem("skill-suitcase-docs-theme");}catch(e){}var dark=false;try{dark=matchMedia("(prefers-color-scheme: dark)").matches;}catch(e){}document.documentElement.dataset.theme=stored||(dark?"dark":"light");})();</script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%B3%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,450..680;1,9..144,450..680&family=Newsreader:ital,opsz,wght@0,6..72,400..650;1,6..72,400..650&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="site.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body data-page="install.html">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <button class="menu-btn" type="button" data-menu aria-label="Toggle navigation" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 3.5h14M1 8h14M1 12.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <a class="brand" href="index.html">Skill Suitcase<span class="brand-tag">docs</span></a>
+        <button class="search-btn" type="button" data-search-open aria-label="Search documentation" aria-haspopup="dialog"><span>Search docs</span><kbd aria-hidden="true">/</kbd></button>
+        <div class="masthead-tools">
+          <a class="gh" href="https://github.com/calvinnwq/skill-suitcase">GitHub</a>
+          <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+            <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
+            <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="frame">
+      <nav id="sidebar" class="sidebar" aria-label="Documentation"></nav>
+
+      <main id="content" class="article-col">
+        <article>
+          <p class="kicker"><span class="n">02</span>Start · Install</p>
+          <h1>Install the CLI, the skill, and a catalog.</h1>
+          <p class="lede">
+            A working setup has three pieces: the <code>skill-suitcase</code> CLI,
+            the packaged operator skill for your agent runtime, and a skills
+            catalog checked out somewhere the CLI can read.
+          </p>
+
+          <section>
+            <h2>Install the CLI</h2>
+            <p>Skill Suitcase requires Node.js 20 or newer.</p>
+            <pre><code>npm install --global skill-suitcase</code></pre>
+            <p>
+              To run from source instead, use npm's ephemeral executor so the
+              pinned pnpm version runs without changing Corepack or global
+              package-manager shims:
+            </p>
+            <pre><code>if mkdir -p "$HOME/repos" &amp;&amp;
+  (test -d "$HOME/repos/skill-suitcase" || git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase") &amp;&amp;
+  git -C "$HOME/repos/skill-suitcase" pull --ff-only &amp;&amp;
+  cd "$HOME/repos/skill-suitcase"
+then
+  pnpm() {
+    npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
+  }
+  test "$(pnpm --version)" = "10.34.4" &amp;&amp;
+  pnpm install --frozen-lockfile &amp;&amp;
+  pnpm run build
+else
+  printf 'Source checkout setup failed.\n' &gt;&amp;2
+  false
+fi</code></pre>
+            <p>Then invoke the source build directly:</p>
+            <pre><code>export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
+node "$CLI" targets --source "/path/to/skills-catalog" --json</code></pre>
+          </section>
+
+          <section>
+            <h2>Install the operator skill</h2>
+            <p>
+              The package ships an operator skill that teaches an agent the
+              read-only-first workflow. Copy the whole
+              <code>skills/skill-suitcase</code> directory, not just
+              <code>SKILL.md</code>.
+            </p>
+            <pre><code><span class="c"># use the source checkout when present, otherwise the global npm install</span>
+if test -d "$HOME/repos/skill-suitcase/skills/skill-suitcase"; then
+  SKILL_SRC="$HOME/repos/skill-suitcase/skills/skill-suitcase"
+else
+  SKILL_SRC="$(npm root -g)/skill-suitcase/skills/skill-suitcase"
+fi
+
+<span class="c"># choose one runtime root: Codex $HOME/.codex/skills, Claude $HOME/.claude/skills, shared agents root $HOME/.agents/skills, or Grok Build $HOME/.grok/skills</span>
+AGENT_SKILLS_DIR="$HOME/.codex/skills"
+
+<span class="c"># install into the selected root</span>
+install_operator_skill() (
+  if ! test -d "$SKILL_SRC"; then
+    printf 'Skill source not found: %s\n' "$SKILL_SRC" >&amp;2
+    return 1
+  fi
+
+  mkdir -p "$AGENT_SKILLS_DIR" || return 1
+  INSTALL_TMP="$(mktemp -d "$AGENT_SKILLS_DIR/.skill-suitcase.install.XXXXXX")" || return 1
+  mkdir "$INSTALL_TMP/replacement" || {
+    rm -rf "$INSTALL_TMP"
+    return 1
+  }
+  if ! cp -R "$SKILL_SRC/." "$INSTALL_TMP/replacement/"; then
+    rm -rf "$INSTALL_TMP"
+    return 1
+  fi
+
+  TARGET="$AGENT_SKILLS_DIR/skill-suitcase"
+  HAD_TARGET=false
+  if test -e "$TARGET" || test -L "$TARGET"; then
+    mv "$TARGET" "$INSTALL_TMP/previous" || {
+      rm -rf "$INSTALL_TMP"
+      return 1
+    }
+    HAD_TARGET=true
+  fi
+
+  if mv "$INSTALL_TMP/replacement" "$TARGET"; then
+    rm -rf "$INSTALL_TMP"
+  else
+    if "$HAD_TARGET" &amp;&amp; ! mv "$INSTALL_TMP/previous" "$TARGET"; then
+      printf 'Replacement failed; previous skill preserved at: %s\n' "$INSTALL_TMP/previous" >&amp;2
+      return 1
+    fi
+    rm -rf "$INSTALL_TMP"
+    return 1
+  fi
+)
+
+install_operator_skill</code></pre>
+            <p>Restart the agent runtime after installing or replacing a skill.</p>
+          </section>
+
+          <section>
+            <h2>Install or refresh the catalog</h2>
+            <p>
+              A catalog is any directory with <code>skill-suitcase.yaml</code> and
+              <code>skills/&lt;name&gt;/SKILL.md</code>. Git backing is the
+              preferred operating model.
+            </p>
+            <pre><code>mkdir -p "$HOME/repos" &amp;&amp;
+(test -d "$HOME/repos/skills" || git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills") &amp;&amp;
+git -C "$HOME/repos/skills" pull --ff-only &amp;&amp;
+export SRC="$HOME/repos/skills"</code></pre>
+            <div class="callout" data-kind="note">
+              <p class="callout-label">Note</p>
+              <p>
+                New-machine setup installs from the catalog through Skill Suitcase,
+                not directly from <code>skills.sh</code> or <code>npx skills</code>.
+                If an upstream-managed skill needs fresh source, use the
+                <a href="upstream-refresh.html">catalog-only refresh lane</a> first,
+                review the repository diff, then resume the normal audit and sync
+                flow.
+              </p>
+            </div>
+          </section>
+
+          <section>
+            <h2>Verify with a read-only audit</h2>
+            <pre><code>skill-suitcase import --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --strict --json
+skill-suitcase targets --source "$SRC" --json
+skill-suitcase status --source "$SRC" --json</code></pre>
+            <div class="callout" data-kind="readonly">
+              <p class="callout-label">Read-only</p>
+              <p>
+                These commands never create install roots, runtime homes, receipts,
+                symlinks, or catalog files. Nothing mutates until you follow the
+                <a href="safety-model.html">safety model</a> through an explicit
+                approval boundary.
+              </p>
+            </div>
+            <p>
+              The full agent setup runbook, including per-runtime pack and apply
+              examples, lives in
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md">INSTALL.md</a>.
+              Continue with <a href="agent-workflows.html">agent workflows</a> for
+              the audit and recovery loop.
+            </p>
+          </section>
+        </article>
+        <footer class="pager" id="pager"></footer>
+      </main>
+
+      <aside class="toc-col"><p class="toc-title">On this page</p><nav id="toc" aria-label="On this page"></nav></aside>
+    </div>
+
+    <footer class="colophon"><div class="colophon-inner"><span>Skill Suitcase docs</span><span>MIT</span><a href="https://github.com/calvinnwq/skill-suitcase">GitHub</a></div></footer>
+  </body>
+</html>

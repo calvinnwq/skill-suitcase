@@ -2,12 +2,13 @@
 
 ## Getting help
 
-Start with the [`README.md`](README.md), [`INSTALL.md`](INSTALL.md), and the CLI
-usage output. Search existing GitHub issues before opening a new one. Use the
-support request form in the GitHub issue picker for installation or usage
-questions that are not reproducible defects. If the problem is reproducible and
-appears to be a defect, use the bug report form and include the smallest safe
-reproduction you can provide.
+Start with the [documentation site](https://calvinnwq.github.io/skill-suitcase/),
+[`README.md`](README.md), [`INSTALL.md`](INSTALL.md), and the CLI usage output.
+Search existing GitHub issues before opening a new one.
+Use the support request form in the GitHub issue picker for installation or
+usage questions that are not reproducible defects.
+If the problem is reproducible and appears to be a defect, use the bug report
+form and include the smallest safe reproduction you can provide.
 
 For feature ideas, use the feature request form and describe the user problem,
 desired outcome, and safety constraints. Security vulnerabilities must follow

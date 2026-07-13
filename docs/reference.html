@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CLI reference · Skill Suitcase docs</title>
+    <meta name="description" content="Every skill-suitcase command on one page: read-only inspection, staging, and the explicit mutation commands with their approval boundaries.">
+    <script>(function(){var stored=null;try{stored=localStorage.getItem("skill-suitcase-docs-theme");}catch(e){}var dark=false;try{dark=matchMedia("(prefers-color-scheme: dark)").matches;}catch(e){}document.documentElement.dataset.theme=stored||(dark?"dark":"light");})();</script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%B3%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,450..680;1,9..144,450..680&family=Newsreader:ital,opsz,wght@0,6..72,400..650;1,6..72,400..650&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="site.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body data-page="reference.html">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <button class="menu-btn" type="button" data-menu aria-label="Toggle navigation" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 3.5h14M1 8h14M1 12.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <a class="brand" href="index.html">Skill Suitcase<span class="brand-tag">docs</span></a>
+        <button class="search-btn" type="button" data-search-open aria-label="Search documentation" aria-haspopup="dialog"><span>Search docs</span><kbd aria-hidden="true">/</kbd></button>
+        <div class="masthead-tools">
+          <a class="gh" href="https://github.com/calvinnwq/skill-suitcase">GitHub</a>
+          <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+            <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
+            <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="frame">
+      <nav id="sidebar" class="sidebar" aria-label="Documentation"></nav>
+
+      <main id="content" class="article-col">
+        <article>
+          <p class="kicker"><span class="n">08</span>Reference · CLI</p>
+          <h1>Every command on one page.</h1>
+          <p class="lede">
+            The current <code>skill-suitcase</code> surface: eight read-only
+            inspection modes, one staging command, and nine explicit mutation
+            commands, each behind its own approval boundary.
+          </p>
+
+          <section>
+            <h2>Conventions</h2>
+            <p>
+              All CLI command forms require <code>--json</code>. One deterministic
+              structured result plus a trailing newline goes to stdout, including
+              structured <code>ok: false</code> results with machine-readable
+              errors. Parser and usage failures and uncaught fatal diagnostics go
+              to stderr. Known failures use stable exit codes.
+            </p>
+            <pre><code>SRC="/path/to/skills-catalog"</code></pre>
+            <p>
+              Target IDs are <code>openclaw</code>, <code>codex</code>,
+              <code>openclaw-codex</code>, <code>agents</code>, <code>claude</code>,
+              <code>opencode</code>, <code>pi</code>, and <code>grok</code>.
+              OpenCode and Pi are provider-backed and read-only. Commands that
+              resolve target paths accept these overrides, which outrank manifest
+              <code>assignmentPaths</code>:
+            </p>
+            <table class="opts">
+              <thead><tr><th>Override</th><th>Path</th></tr></thead>
+              <tbody>
+                <tr><td>--agents-skills &lt;dir&gt;</td><td>shared agents skill root</td></tr>
+                <tr><td>--codex-home &lt;dir&gt;</td><td>Codex home directory</td></tr>
+                <tr><td>--codex-skills &lt;dir&gt;</td><td>Codex skills root</td></tr>
+                <tr><td>--claude-skills &lt;dir&gt;</td><td>Claude skills root</td></tr>
+                <tr><td>--grok-skills &lt;dir&gt;</td><td>Grok skills root</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section>
+            <h2>Read-only commands</h2>
+
+            <div class="cmd" id="import">
+              <div class="cmd-head"><h3>import</h3><span class="cmd-flag readonly">read-only</span></div>
+              <pre><code>skill-suitcase import --source "$SRC" --json</code></pre>
+              <p>
+                Inspects and summarizes a catalog without resolving live install
+                paths. Checks <code>skill-suitcase.yaml</code>, the
+                <code>skills/&lt;name&gt;/SKILL.md</code> layout, portability
+                metadata, variants, assignments, compatibility, and manifest
+                logical groups. Findings have <code>warning</code> or
+                <code>error</code> levels; warnings preserve <code>ok: true</code>.
+              </p>
+            </div>
+
+            <div class="cmd" id="validate">
+              <div class="cmd-head"><h3>validate</h3><span class="cmd-flag readonly">read-only</span></div>
+              <pre><code>skill-suitcase validate --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --strict --json</code></pre>
+              <p>
+                Validates manifest structure and referenced catalog content.
+                <code>--strict</code> also applies the Skillify authoring contract,
+                honoring only valid reviewed
+                <code>validationPolicy.skillify.skip</code> entries, and validates
+                the upstream lock when the catalog has one.
+              </p>
+            </div>
+
+            <div class="cmd" id="targets">
+              <div class="cmd-head"><h3>targets</h3><span class="cmd-flag readonly">read-only</span></div>
+              <pre><code>skill-suitcase targets --source "$SRC" --json</code></pre>
+              <p>
+                Reports target IDs, assignments, adapter metadata, resolved paths,
+                per-path existence, and safety classification without creating
+                paths. Local overrides have higher priority than manifest
+                assignments.
+              </p>
+            </div>
+
+            <div class="cmd" id="plan">
+              <div class="cmd-head"><h3>plan</h3><span class="cmd-flag readonly">read-only</span></div>
+              <pre><code>skill-suitcase plan --source "$SRC" --target codex --json</code></pre>
+              <p>
+                Resolves the selected assignment and emits each skill's action,
+                variant, source path, evidence, and any blocked reason. It does not
+                resolve target install paths, choose install modes, hash content,
+                or read or write live targets.
+              </p>
+            </div>
+
+            <div class="cmd" id="diff">
+              <div class="cmd-head"><h3>diff</h3><span class="cmd-flag readonly">read-only</span></div>
+              <pre><code>skill-suitcase diff \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --json</code></pre>
+              <p>
+                Compares catalog source with the live modeled target. File actions
+                are <code>create</code>, <code>update</code>,
+                <code>unchanged</code>, <code>extra</code>, <code>missing</code>,
+                or <code>blocked</code>. Source-policy failures, blocked variants,
+                and read-only targets are reported. <code>diff</code> does not run
+                the Git source-hygiene check; <code>pack</code>, plan-lock
+                creation, and <code>apply</code> enforce the untracked-source gate.
+              </p>
+            </div>
+
+            <div class="cmd" id="status">
+              <div class="cmd-head"><h3>status</h3><span class="cmd-flag readonly">read-only</span></div>
+              <pre><code>skill-suitcase status --source "$SRC" --json
+skill-suitcase status \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --json</code></pre>
+              <p>
+                Classifies planned installs using catalog content, live content,
+                receipts, and install mode into <code>current</code>,
+                <code>missing</code>, <code>version</code>, <code>behind</code>,
+                <code>dirty</code>, <code>blocked</code>, or <code>unknown</code>.
+                Those seven values are the complete status enum; see the
+                <a href="safety-model.html">safety model</a> for their meanings and
+                <a href="troubleshooting.html">troubleshooting</a> for responses.
+                For upstream-managed skills, status may add lineage metadata.
+              </p>
+            </div>
+
+            <div class="cmd" id="upstream-check">
+              <div class="cmd-head"><h3>upstream check</h3><span class="cmd-flag readonly">read-only</span></div>
+              <pre><code>skill-suitcase upstream check --source "$SRC" --json</code></pre>
+              <p>
+                Reports validated <code>.skill-suitcase/upstream-lock.json</code>
+                declarations and imported lineage without fetching or writing
+                anything.
+              </p>
+            </div>
+
+            <div class="cmd" id="upstream-fetch">
+              <div class="cmd-head"><h3>upstream fetch</h3><span class="cmd-flag readonly">read-only</span></div>
+              <pre><code>skill-suitcase upstream fetch \
+  --source "$SRC" \
+  --skill existing-skill \
+  --dry-run \
+  --json</code></pre>
+              <p>
+                Fetches the declared upstream through its pinned provider into an
+                isolated temporary workspace and home, then reports its diff from
+                the catalog. It never writes the catalog or live agent homes. Git
+                declarations pin a source tag or commit; skills.sh declarations pin
+                the installer package version but not the referenced repository
+                content revision.
+              </p>
+            </div>
+          </section>
+
+          <section>
+            <h2>Staging</h2>
+
+            <div class="cmd" id="pack">
+              <div class="cmd-head"><h3>pack</h3><span class="cmd-flag plan">staging</span></div>
+              <pre><code>skill-suitcase pack --source "$SRC" --target codex --dry-run --json
+
+OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
+skill-suitcase pack \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --output "$OUT" \
+  --json</code></pre>
+              <p>
+                Dry-run reports the bundle plan. With <code>--output</code>, pack
+                writes an immutable bundle below the explicit directory and returns
+                its artifact manifest recording source provenance, selected skills,
+                file hashes, planned target entries, and blocked entries. It does
+                not touch the live target.
+              </p>
+              <p>
+                Pack refuses output beneath an absolute manifest-declared install
+                root, selected untracked non-ignored source files,
+                <code>sourcePolicy.deny</code> matches, and provider-managed
+                read-only targets. Always stage into a temporary directory outside
+                both the catalog and every resolved target root; old artifact
+                directories are not pruned automatically.
+              </p>
+            </div>
+
+            <div class="cmd" id="plan-lock">
+              <div class="cmd-head"><h3>plan lock (library API)</h3><span class="cmd-flag plan">staging</span></div>
+              <p>
+                There is no CLI command that creates a plan lock. Library callers
+                use <code>buildPlanLock</code> from the compiled
+                <code>dist/src/plan-lock.js</code> module to create the
+                deterministic <code>calvinnwq.skills.plan-lock.v0</code> lock,
+                write the JSON to an approved path, and pass it to
+                <code>apply --lock</code>. <code>assessPlanLock</code> rebuilds
+                current facts and returns drift reasons such as
+                <code>source_commit_changed</code> or
+                <code>file_hashes_changed</code>. See the
+                <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/command-reference.md#plan-lock-creation-library-api">command reference</a>
+                for the worked example.
+              </p>
+            </div>
+          </section>
+
+          <section>
+            <h2>Explicit mutation commands</h2>
+
+            <div class="cmd" id="apply">
+              <div class="cmd-head"><h3>apply</h3><span class="cmd-flag approval">approval</span></div>
+              <p>Apply with a staged artifact:</p>
+              <pre><code>skill-suitcase apply \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --artifact "/path/to/staged/skill-suitcase-bundle.json" \
+  --json</code></pre>
+              <p>Or apply with a plan lock and an explicitly approved symlink mode:</p>
+              <pre><code>skill-suitcase apply \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --lock "/path/to/plan-lock.json" \
+  --mode symlink \
+  --json</code></pre>
+              <p>
+                Requires exactly one approved input, a staged artifact or a plan
+                lock, writes transactionally, and updates the target receipt with
+                a record for every installed skill. Copy is the default mode;
+                symlink mode links selected source paths inside the catalog source
+                root. Lock mode reassesses the
+                current plan and hashes against the lock; artifact mode rebuilds
+                ordinary missing or behind writes from current catalog source and
+                enforces artifact file hashes only for the dirty-behind exception.
+                Neither input binds path overrides, the resolved install root, or
+                <code>--mode</code>.
+              </p>
+              <p>
+                Important refusals include stale or malformed approval input,
+                blocked variants, unmanaged existing targets, unapproved dirty
+                content, source-policy failures, read-only targets, and symlink
+                source escapes and conflicts.
+              </p>
+            </div>
+
+            <div class="cmd" id="track">
+              <div class="cmd-head"><h3>track</h3><span class="cmd-flag approval">approval</span></div>
+              <pre><code>skill-suitcase track \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --json</code></pre>
+              <p>
+                Adopts an already-correct copy or symlink install by writing a
+                receipt; it never rewrites skill files. Repeat <code>--skill</code>
+                for targeted adoption or omit it for the all-planned-skills mode.
+                Track has no dry-run flag; preview candidates with
+                <code>diff</code> first.
+              </p>
+            </div>
+
+            <div class="cmd" id="reconcile">
+              <div class="cmd-head"><h3>reconcile</h3><span class="cmd-flag approval">approval</span></div>
+              <pre><code>skill-suitcase reconcile \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --dry-run \
+  --json</code></pre>
+              <p>After approval:</p>
+              <pre><code>skill-suitcase reconcile \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --apply \
+  --json</code></pre>
+              <p>
+                Replaces explicitly named receiptless mismatches from catalog
+                source. Targets selected <code>unknown</code> catalog-planned
+                skills; at least one repeatable <code>--skill</code> is required.
+                Dry-run reports target and catalog differences plus the backup
+                path. Apply preserves the prior target as rollback state, installs
+                catalog source, writes a receipt, and verifies status.
+              </p>
+            </div>
+
+            <div class="cmd" id="repair">
+              <div class="cmd-head"><h3>repair</h3><span class="cmd-flag approval">approval</span></div>
+              <pre><code>skill-suitcase repair \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --dry-run \
+  --json</code></pre>
+              <p>After approval:</p>
+              <pre><code>skill-suitcase repair \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --apply \
+  --json</code></pre>
+              <p>
+                Restores explicitly named <code>dirty</code>, receipt-owned copy
+                installs when catalog source should win. Dry-run reports the
+                receipt, catalog, and live hashes, changed files, and the backup
+                plan. Apply backs up live content, installs catalog source,
+                refreshes the receipt, and verifies <code>current</code> status.
+                Repair refuses unknown, missing, behind, symlink-mode, read-only,
+                and unselected states rather than guessing intent.
+              </p>
+            </div>
+
+            <div class="cmd" id="prune">
+              <div class="cmd-head"><h3>prune</h3><span class="cmd-flag approval">approval</span></div>
+              <pre><code>skill-suitcase prune \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill obsolete-skill \
+  --dry-run \
+  --json</code></pre>
+              <p>After approval naming the target, skills, and plan ID:</p>
+              <pre><code>skill-suitcase prune \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill obsolete-skill \
+  --plan-id &lt;reviewed-plan-id&gt; \
+  --apply \
+  --json</code></pre>
+              <p>
+                Removes explicit receipt-owned installs no longer assigned to the
+                selected writable target. Dry-run returns a stable plan ID; apply
+                requires the same skill list and exact plan ID, recomputes all
+                state, quarantines physical directories into a plan-scoped root,
+                removes exact verified symlinks, writes a transaction journal and
+                receipt backup, and replaces the receipt atomically. Assigned,
+                unreceipted, drifted, read-only, and path-escaping candidates are
+                refused, as is a legacy <code>.skills-sync.json</code> receipt.
+              </p>
+            </div>
+
+            <div class="cmd" id="rollback">
+              <div class="cmd-head"><h3>rollback</h3><span class="cmd-flag approval">approval</span></div>
+              <pre><code>skill-suitcase rollback \
+  --receipt "/path/to/target/.skill-suitcase-receipt.json" \
+  --json</code></pre>
+              <p>
+                Reverses recorded apply, reconcile, or repair state after verifying
+                that current target bytes still match the applied receipt; drift is
+                a refusal. It removes a Suitcase-created symlink only when the link
+                still matches its recorded source, and it does not restore
+                promotions or arbitrary catalog edits.
+              </p>
+            </div>
+
+            <div class="cmd" id="promote">
+              <div class="cmd-head"><h3>promote</h3><span class="cmd-flag approval">approval</span></div>
+              <pre><code>skill-suitcase promote \
+  --source "$SRC" \
+  --target-skill "$HOME/.codex/skills/new-skill" \
+  --dry-run \
+  --json</code></pre>
+              <p>After approval:</p>
+              <pre><code>skill-suitcase promote \
+  --source "$SRC" \
+  --target-skill "$HOME/.codex/skills/new-skill" \
+  --apply \
+  --json</code></pre>
+              <p>
+                Moves a new target-created skill into catalog ownership. Apply
+                copies the content, verifies hashes, replaces the original
+                directory with a symlink to the catalog, and records the preserved
+                backup path in its receipt. The promotion receipt is not executable
+                by the current <code>rollback</code> command, which treats the
+                symlink install as a safe no-op.
+              </p>
+            </div>
+
+            <div class="cmd" id="import-target">
+              <div class="cmd-head"><h3>import-target</h3><span class="cmd-flag approval">approval</span></div>
+              <pre><code>skill-suitcase import-target \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --dry-run \
+  --json</code></pre>
+              <p>After approval:</p>
+              <pre><code>skill-suitcase import-target \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --apply \
+  --json</code></pre>
+              <p>
+                Imports intentional edits to selected dirty, receipt-owned catalog
+                skills back into the catalog. At least one repeatable
+                <code>--skill</code> is required. Dry-run reports receipt, catalog,
+                and target hashes plus planned repository writes. Apply copies
+                target content into the catalog atomically, refreshes the receipt,
+                and leaves normal Git changes for review.
+              </p>
+            </div>
+
+            <div class="cmd" id="upstream-import">
+              <div class="cmd-head"><h3>upstream import</h3><span class="cmd-flag approval">approval</span></div>
+              <pre><code>skill-suitcase upstream import \
+  --source "$SRC" \
+  --skill existing-skill \
+  --apply \
+  --json</code></pre>
+              <p>
+                Repeats the pinned isolated fetch, refuses dirty selected catalog
+                source, and writes only <code>skills/&lt;name&gt;</code> plus
+                <code>.skill-suitcase/upstream-lock.json</code>. It never installs
+                into a live target and never commits the resulting Git diff.
+              </p>
+            </div>
+          </section>
+
+          <section>
+            <h2>Going deeper</h2>
+            <p>
+              Machine-readable refusal codes are collected on the
+              <a href="troubleshooting.html">troubleshooting</a> page. The
+              long-form operational reference, including the receipt library API,
+              is
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/command-reference.md">docs/command-reference.md</a>,
+              and the normative contract is
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/SPEC.md">SPEC.md</a>.
+            </p>
+          </section>
+        </article>
+        <footer class="pager" id="pager"></footer>
+      </main>
+
+      <aside class="toc-col"><p class="toc-title">On this page</p><nav id="toc" aria-label="On this page"></nav></aside>
+    </div>
+
+    <footer class="colophon"><div class="colophon-inner"><span>Skill Suitcase docs</span><span>MIT</span><a href="https://github.com/calvinnwq/skill-suitcase">GitHub</a></div></footer>
+  </body>
+</html>

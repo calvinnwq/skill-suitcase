@@ -76,6 +76,7 @@ decision; it is not inferred from routine Release Please output.
 - Node engine: `>=20`
 - License: MIT
 - Repository: `calvinnwq/skill-suitcase`
+- Homepage: `https://calvinnwq.github.io/skill-suitcase/`
 
 `package.json` uses an explicit `files` whitelist.
 The public payload is approved through exact curated paths: npm's required `package.json`; `dist/src/**/*.js`; `skills/skill-suitcase/SKILL.md`; `skills/skill-suitcase/agents/openai.yaml`; `LICENSE`, `VISION.md`, `SPEC.md`, `README.md`, `INSTALL.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `DEVELOPING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, and `CLAUDE.md`; `docs/command-reference.md`, `docs/install-smoke.md`, `docs/portability-matrix.md`, `docs/release-readiness.md`, and `docs/skills-sh-delegation.md`; and the five files under `examples/sample-catalog` listed explicitly in `package.json`.
@@ -168,6 +169,9 @@ aliases.
 `pnpm test` performs a clean build, requires the recursively discovered
 compiled test inventory to match `tests/**/*.test.ts` exactly, and then runs
 every compiled test and every `scripts/**/*.test.mjs` test.
+That inventory includes `tests/docs-site.test.ts`, which validates the static
+site's shared chrome, complete command coverage, local links, portable content,
+client-side storage fallbacks, and Pages deployment contract.
 
 Review the npm dry-run output for the expected executable, compiled runtime,
 operator skill, license, and public docs. Refuse the release if it contains
@@ -218,6 +222,14 @@ catalog as an implicit release fixture.
 Before publishing, verify:
 
 - The README first screen describes the agent-first product that ships now.
+- The README and package homepage route readers to
+  `https://calvinnwq.github.io/skill-suitcase/`.
+- The plain HTML site under `docs/` previews with `pnpm run docs:serve`, passes
+  `tests/docs-site.test.ts`, and remains outside the npm package payload.
+- `.github/workflows/pages.yml` deploys `docs/` after relevant changes land on
+  `main`, with `.nojekyll` preserved at the site root.
+- Repository Settings > Pages uses GitHub Actions as the publishing source so
+  the deployment workflow is authorized to publish the site.
 - `SPEC.md` describes the normative current-state contract and remains distinct from product direction, architecture, and detailed command usage.
 - Public examples use `$HOME`, `/path/to/...`, or explicit target overrides;
   they do not require a maintainer-specific absolute path.

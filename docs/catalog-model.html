@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Catalog model · Skill Suitcase docs</title>
+    <meta name="description" content="A Skill Suitcase catalog is a reviewable directory with skill-suitcase.yaml and skills/. The manifest owns skills, variants, assignments, groups, and source policy.">
+    <script>(function(){var stored=null;try{stored=localStorage.getItem("skill-suitcase-docs-theme");}catch(e){}var dark=false;try{dark=matchMedia("(prefers-color-scheme: dark)").matches;}catch(e){}document.documentElement.dataset.theme=stored||(dark?"dark":"light");})();</script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%B3%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,450..680;1,9..144,450..680&family=Newsreader:ital,opsz,wght@0,6..72,400..650;1,6..72,400..650&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="site.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body data-page="catalog-model.html">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <button class="menu-btn" type="button" data-menu aria-label="Toggle navigation" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 3.5h14M1 8h14M1 12.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <a class="brand" href="index.html">Skill Suitcase<span class="brand-tag">docs</span></a>
+        <button class="search-btn" type="button" data-search-open aria-label="Search documentation" aria-haspopup="dialog"><span>Search docs</span><kbd aria-hidden="true">/</kbd></button>
+        <div class="masthead-tools">
+          <a class="gh" href="https://github.com/calvinnwq/skill-suitcase">GitHub</a>
+          <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+            <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
+            <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="frame">
+      <nav id="sidebar" class="sidebar" aria-label="Documentation"></nav>
+
+      <main id="content" class="article-col">
+        <article>
+          <p class="kicker"><span class="n">04</span>Model · Catalog</p>
+          <h1>The catalog is canonical.</h1>
+          <p class="lede">
+            A catalog is a directory with <code>skill-suitcase.yaml</code> and
+            skill directories under <code>skills/</code>. Runtime and agent homes
+            are targets; a live target never becomes source merely because it
+            contains a skill or a newer local edit.
+          </p>
+
+          <section>
+            <h2>Layout</h2>
+            <pre><code>/path/to/skills-catalog
+├── skill-suitcase.yaml          <span class="c"># the manifest</span>
+├── skills/
+│   ├── office-hours/
+│   │   └── SKILL.md
+│   └── gnhf-postflight/
+│       └── SKILL.md
+├── variants/                    <span class="c"># declared alternate source directories</span>
+│   ├── claude/office-hours/
+│   └── codex/office-hours/
+└── .skill-suitcase/
+    └── upstream-lock.json       <span class="c"># pinned upstream declarations, if any</span></code></pre>
+            <p>
+              Git backing is the preferred operating model because it provides
+              reviewable provenance and recovery, and workflows with stronger
+              source-control requirements, such as upstream import, refuse a
+              catalog outside a Git worktree. Ordinary planning and target
+              materialization also accept a non-Git catalog directory. Support
+              directories marked with <code>.support-directory</code> are not
+              treated as installable skills.
+            </p>
+          </section>
+
+          <section>
+            <h2>What the manifest owns</h2>
+            <div class="def-rows">
+              <div><span class="k">suitcases</span><span class="v">named collections of skill names</span></div>
+              <div><span class="k">assignments</span><span class="v">target-facing selections of suitcases; assignments determine the skills selected for a target</span></div>
+              <div><span class="k">assignmentPaths</span><span class="v">target adapter kinds, assignment names, and install paths</span></div>
+              <div><span class="k">groups</span><span class="v">reporting metadata that references existing skills, suitcases, or assignments</span></div>
+              <div><span class="k">compatibility</span><span class="v">supported or blocked agents, evidence, variants, and reasons</span></div>
+              <div><span class="k">variants</span><span class="v">alternate source directories selected for declared agents</span></div>
+              <div><span class="k">sourcePolicy</span><span class="v">reviewed exclusion and denial patterns for materialization</span></div>
+              <div><span class="k">validationPolicy.skillify.skip</span><span class="v">reviewed strict-validation exceptions with provenance</span></div>
+            </div>
+            <p>
+              Names and references must validate deterministically. Target
+              resolution precedence is: CLI path overrides, then manifest
+              <code>assignmentPaths</code>, then native adapter behavior, then the
+              vendored <code>skills.sh</code> compatibility snapshot.
+            </p>
+          </section>
+
+          <section>
+            <h2>Logical groups</h2>
+            <div class="callout" data-kind="note">
+              <p class="callout-label">Reporting only</p>
+              <p>
+                Groups organize skills, suitcases, and assignments for operator
+                reporting. They are catalog metadata only: they validate references
+                deterministically but do not change planning, packing,
+                installation, receipt, or target assignment semantics. Broken group
+                references are catalog metadata problems, not implicit install
+                targets.
+              </p>
+            </div>
+          </section>
+
+          <section>
+            <h2>Source policy</h2>
+            <p>
+              <code>sourcePolicy.exclude</code> omits approved generated or cache
+              paths from pack, plan-lock, diff, and copy-mode apply
+              materialization. <code>sourcePolicy.deny</code>, including built-in
+              secret-like path denials, blocks unsafe source paths before any
+              target write and reports path-level evidence.
+            </p>
+            <ul class="boundary-list">
+              <li>
+                <span class="stamp refused">Refused</span>
+                <span>Symlink apply cannot omit descendants, so it refuses every non-empty exclude policy with <code>symlink_source_policy_exclude</code>, even when no path currently matches.</span>
+              </li>
+              <li>
+                <span class="stamp refused">Refused</span>
+                <span>Denied paths surface as <code>source_denied_path</code> or <code>diff_source_denied_path</code>, identifying the skill and relative path.</span>
+              </li>
+              <li>
+                <span class="stamp refused">Refused</span>
+                <span>For Git-backed catalogs, pack, plan-lock creation, and apply refuse selected skills containing untracked, non-ignored files (<code>source_untracked_files</code>). Git-ignored regular files may still be materialized unless source policy excludes or denies them.</span>
+              </li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Variants and portability</h2>
+            <p>
+              The catalog is the authority for canonical bundles.
+              <code>compatibility.&lt;skill&gt;.variant</code> and
+              <code>variants.&lt;skill&gt;.&lt;variant&gt;</code> declare portable
+              source variants per agent, so one skill can ship agent-specific
+              source directories while planning stays deterministic. The
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/portability-matrix.md">portability matrix</a>
+              documents the variant and compatibility model in detail.
+            </p>
+          </section>
+
+          <section>
+            <h2>Strict validation</h2>
+            <p>
+              <code>validate --strict --json</code> applies the Skillify authoring
+              contract. Reviewed <code>validationPolicy.skillify.skip</code>
+              entries can exempt referenced external, legacy, or upstream-managed
+              skills from strict scoring when their provenance is valid:
+              <code>external-managed</code> entries need <code>source</code>,
+              <code>owner</code>, and <code>reason</code>;
+              <code>legacy-local</code> entries additionally require a
+              <code>reviewAfter</code> date and emit
+              <code>legacy_skillify_skip</code> so migration debt stays visible.
+            </p>
+            <div class="callout" data-kind="boundary">
+              <p class="callout-label">Boundary</p>
+              <p>
+                A validation skip changes validation only. It does not change
+                planning, installation, receipt, ownership, or target-drift
+                semantics, and malformed skip policy is release-blocking rather
+                than silently ignored.
+              </p>
+            </div>
+            <p>
+              The normative catalog contract lives in
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/SPEC.md">SPEC.md</a>,
+              with a working example in the
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/tests/fixtures/skills-catalog/skill-suitcase.yaml">catalog fixture</a>.
+            </p>
+          </section>
+        </article>
+        <footer class="pager" id="pager"></footer>
+      </main>
+
+      <aside class="toc-col"><p class="toc-title">On this page</p><nav id="toc" aria-label="On this page"></nav></aside>
+    </div>
+
+    <footer class="colophon"><div class="colophon-inner"><span>Skill Suitcase docs</span><span>MIT</span><a href="https://github.com/calvinnwq/skill-suitcase">GitHub</a></div></footer>
+  </body>
+</html>

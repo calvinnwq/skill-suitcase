@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Safety model · Skill Suitcase docs</title>
+    <meta name="description" content="Skill Suitcase separates inspect, stage, and mutate. Every live mutation runs through an explicit command-specific approval boundary and writes receipts.">
+    <script>(function(){var stored=null;try{stored=localStorage.getItem("skill-suitcase-docs-theme");}catch(e){}var dark=false;try{dark=matchMedia("(prefers-color-scheme: dark)").matches;}catch(e){}document.documentElement.dataset.theme=stored||(dark?"dark":"light");})();</script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%B3%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,450..680;1,9..144,450..680&family=Newsreader:ital,opsz,wght@0,6..72,400..650;1,6..72,400..650&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="site.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body data-page="safety-model.html">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <button class="menu-btn" type="button" data-menu aria-label="Toggle navigation" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 3.5h14M1 8h14M1 12.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <a class="brand" href="index.html">Skill Suitcase<span class="brand-tag">docs</span></a>
+        <button class="search-btn" type="button" data-search-open aria-label="Search documentation" aria-haspopup="dialog"><span>Search docs</span><kbd aria-hidden="true">/</kbd></button>
+        <div class="masthead-tools">
+          <a class="gh" href="https://github.com/calvinnwq/skill-suitcase">GitHub</a>
+          <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+            <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
+            <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="frame">
+      <nav id="sidebar" class="sidebar" aria-label="Documentation"></nav>
+
+      <main id="content" class="article-col">
+        <article>
+          <p class="kicker"><span class="n">03</span>Model · Safety</p>
+          <h1>Inspect, stage, then mutate.</h1>
+          <p class="lede">
+            Skill Suitcase separates three decisions. Inspect state without
+            mutation. Stage or record planned work for review. Mutate only through
+            the approval boundary the selected command enforces.
+          </p>
+
+          <section>
+            <h2>The three phases</h2>
+            <div class="ledger">
+              <div class="ledger-row">
+                <span class="n">1</span>
+                <span class="stage">Inspect</span>
+                <span class="what"><span class="cmdline">import · validate · targets · plan · status · diff · --dry-run modes · upstream check · upstream fetch --dry-run</span>Read-only commands explain current state. They never create install roots, runtime homes, receipts, symlinks, or catalog files.</span>
+              </div>
+              <div class="ledger-row">
+                <span class="n">2</span>
+                <span class="stage">Stage</span>
+                <span class="what"><span class="cmdline">pack --output "$OUT" · buildPlanLock (library API)</span>Stage an immutable bundle beneath an explicit output directory, or build a deterministic plan lock, then review the ordinary filesystem and Git changes.</span>
+              </div>
+              <div class="ledger-row">
+                <span class="n">3</span>
+                <span class="stage">Mutate</span>
+                <span class="what"><span class="cmdline">apply · targeted --apply commands · receipt-backed rollback</span>Live mutation requires the explicit, command-specific boundary below. Transactional workflows restore pre-operation state when an operation fails.</span>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Approval inputs</h2>
+            <p>
+              <code>apply</code> requires exactly one of <code>--lock</code> or
+              <code>--artifact</code>, and the two inputs make different promises.
+              Lock mode reassesses the current plan and file hashes against the
+              deterministic lock. Artifact mode validates the bundle manifest, but
+              ordinary missing or behind writes are rebuilt from current catalog
+              source; artifact file hashes gate only the dirty-behind exception.
+            </p>
+            <div class="callout" data-kind="boundary">
+              <p class="callout-label">Boundary</p>
+              <p>
+                An older staged artifact is not byte-for-byte authorization for
+                every later write. Re-run <code>pack</code> immediately before an
+                artifact apply and inspect the current <code>diff</code>. Neither
+                approval input binds the resolved install root, CLI path overrides,
+                or copy-versus-symlink mode; approve those at apply time.
+              </p>
+            </div>
+            <p>
+              <code>apply</code> is transactional, refuses unmanaged targets,
+              preserves executable file modes, and updates the target receipt with
+              a record for every managed skill. <code>--mode symlink</code> links
+              selected current catalog source into the target and records that
+              mode explicitly.
+            </p>
+          </section>
+
+          <section>
+            <h2>Mutation boundaries</h2>
+            <p>The CLI enforces exactly these boundaries, one per command:</p>
+            <table class="opts">
+              <thead><tr><th>Command</th><th>Enforced boundary</th><th>Mutation scope</th></tr></thead>
+              <tbody>
+                <tr><td>apply</td><td>exactly one plan lock or staged artifact</td><td>selected writable target and receipt</td></tr>
+                <tr><td>track</td><td>explicit invocation; target must exactly match catalog source</td><td>receipt only</td></tr>
+                <tr><td>reconcile --apply</td><td><code>--apply</code> plus explicitly named skills</td><td>receiptless mismatched target replaced from catalog</td></tr>
+                <tr><td>repair --apply</td><td><code>--apply</code> plus explicitly named skills</td><td>dirty receipt-owned copy restored from catalog</td></tr>
+                <tr><td>prune --apply</td><td>explicit skills plus exact plan ID from dry-run</td><td>obsolete receipt-owned installs</td></tr>
+                <tr><td>rollback</td><td>explicit receipt path</td><td>receipt-backed state eligible for rollback</td></tr>
+                <tr><td>promote --apply</td><td><code>--apply</code> plus an explicit target skill path</td><td>new target skill copied to catalog and linked back</td></tr>
+                <tr><td>import-target --apply</td><td><code>--apply</code> plus explicitly named skills</td><td>intentional receipt-owned target edit copied to catalog</td></tr>
+                <tr><td>upstream import --apply</td><td><code>--apply</code> plus exactly one named skill</td><td>selected catalog source and upstream lock only</td></tr>
+              </tbody>
+            </table>
+            <p>
+              Commands validate containment, ownership, current filesystem state,
+              and relevant hashes before destructive work. They do not auto-commit
+              catalog changes, and drift is never inferred approval.
+            </p>
+          </section>
+
+          <section>
+            <h2>Receipts</h2>
+            <p>
+              The receipt at <code>.skill-suitcase-receipt.json</code> is the
+              target-side ownership record, schema
+              <code>calvinnwq.skills.receipt.v0</code>. A managed install record
+              captures the skill, target path, source path and provenance, install
+              mode, version and content hashes, installed-file hashes, and rollback
+              metadata when available.
+            </p>
+            <p>
+              Receipt updates use atomic replacement and a receipt-local
+              transaction lock, so concurrent workflows cannot silently discard one
+              another's records. A receipt proves what Skill Suitcase recorded;
+              commands still compare it with the current catalog and filesystem
+              before mutation. Safety-sensitive workflows may refuse a legacy
+              <code>.skills-sync.json</code> receipt rather than migrating
+              ownership implicitly.
+            </p>
+          </section>
+
+          <section>
+            <h2>The status enum</h2>
+            <p>
+              <code>status</code> classifies each catalog-planned target entry.
+              These seven values are the complete enum; read-only is target
+              metadata, not a status value.
+            </p>
+            <div class="def-rows">
+              <div><span class="k">current</span><span class="v">for copy installs, receipt-owned files match the receipt and its version and hash match catalog source; preserved extras outside <code>installedFiles</code> do not make the skill dirty. Symlink installs point at the selected catalog source and <code>sourcePolicy.exclude</code> is empty; the stored receipt version and hash are not revalidated on that path</span></div>
+              <div><span class="k">missing</span><span class="v">the planned target is absent</span></div>
+              <div><span class="k">version</span><span class="v">the installed receipt version differs from current SKILL.md frontmatter</span></div>
+              <div><span class="k">behind</span><span class="v">receipt-owned target is unchanged but the catalog moved ahead</span></div>
+              <div><span class="k">dirty</span><span class="v">live receipt-owned target drifted; stop and inspect before any mutation</span></div>
+              <div><span class="k">blocked</span><span class="v">manifest or target policy prevents the install</span></div>
+              <div><span class="k">unknown</span><span class="v">status could not be proven; only the receiptless mismatched-directory case routes to reconcile</span></div>
+            </div>
+            <p>
+              Provider fallback inventory without a catalog assignment appears with
+              <code>statusCount: 0</code> and no status entries. What to do for
+              each state is on the
+              <a href="troubleshooting.html">troubleshooting</a> page.
+            </p>
+          </section>
+
+          <section>
+            <h2>Never without approval</h2>
+            <div class="callout" data-kind="boundary">
+              <p class="callout-label">Approval required</p>
+              <p>
+                Never run live <code>apply</code>, <code>track</code>,
+                <code>reconcile --apply</code>, <code>repair --apply</code>,
+                <code>prune --apply</code>, <code>rollback</code>,
+                <code>promote --apply</code>, <code>import-target --apply</code>,
+                or <code>upstream import --apply</code> against a real catalog or
+                runtime home without explicit approval for the source, target, and
+                mode.
+              </p>
+            </div>
+            <p>
+              The normative contract behind this page is
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/SPEC.md">SPEC.md</a>;
+              per-command preconditions live in the
+              <a href="reference.html">CLI reference</a>.
+            </p>
+          </section>
+        </article>
+        <footer class="pager" id="pager"></footer>
+      </main>
+
+      <aside class="toc-col"><p class="toc-title">On this page</p><nav id="toc" aria-label="On this page"></nav></aside>
+    </div>
+
+    <footer class="colophon"><div class="colophon-inner"><span>Skill Suitcase docs</span><span>MIT</span><a href="https://github.com/calvinnwq/skill-suitcase">GitHub</a></div></footer>
+  </body>
+</html>

@@ -34,16 +34,21 @@ executor so the pinned pnpm version runs without changing Corepack or global
 package-manager shims:
 
 ```bash
-mkdir -p "$HOME/repos"
-git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase" 2>/dev/null || true
-cd "$HOME/repos/skill-suitcase"
-git pull --ff-only
-pnpm() {
-  npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
-}
-test "$(pnpm --version)" = "10.34.4"
-pnpm install --frozen-lockfile
-pnpm run build
+if mkdir -p "$HOME/repos" &&
+  (test -d "$HOME/repos/skill-suitcase" || git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase") &&
+  git -C "$HOME/repos/skill-suitcase" pull --ff-only &&
+  cd "$HOME/repos/skill-suitcase"
+then
+  pnpm() {
+    npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
+  }
+  test "$(pnpm --version)" = "10.34.4" &&
+  pnpm install --frozen-lockfile &&
+  pnpm run build
+else
+  printf 'Source checkout setup failed.\n' >&2
+  false
+fi
 ```
 
 Use the source CLI as:
@@ -88,9 +93,46 @@ AGENT_SKILLS_DIR="$HOME/.grok/skills"
 Install into the selected root:
 
 ```bash
-mkdir -p "$AGENT_SKILLS_DIR"
-rm -rf "$AGENT_SKILLS_DIR/skill-suitcase"
-cp -R "$SKILL_SRC" "$AGENT_SKILLS_DIR/"
+install_operator_skill() (
+  if ! test -d "$SKILL_SRC"; then
+    printf 'Skill source not found: %s\n' "$SKILL_SRC" >&2
+    return 1
+  fi
+
+  mkdir -p "$AGENT_SKILLS_DIR" || return 1
+  INSTALL_TMP="$(mktemp -d "$AGENT_SKILLS_DIR/.skill-suitcase.install.XXXXXX")" || return 1
+  mkdir "$INSTALL_TMP/replacement" || {
+    rm -rf "$INSTALL_TMP"
+    return 1
+  }
+  if ! cp -R "$SKILL_SRC/." "$INSTALL_TMP/replacement/"; then
+    rm -rf "$INSTALL_TMP"
+    return 1
+  fi
+
+  TARGET="$AGENT_SKILLS_DIR/skill-suitcase"
+  HAD_TARGET=false
+  if test -e "$TARGET" || test -L "$TARGET"; then
+    mv "$TARGET" "$INSTALL_TMP/previous" || {
+      rm -rf "$INSTALL_TMP"
+      return 1
+    }
+    HAD_TARGET=true
+  fi
+
+  if mv "$INSTALL_TMP/replacement" "$TARGET"; then
+    rm -rf "$INSTALL_TMP"
+  else
+    if "$HAD_TARGET" && ! mv "$INSTALL_TMP/previous" "$TARGET"; then
+      printf 'Replacement failed; previous skill preserved at: %s\n' "$INSTALL_TMP/previous" >&2
+      return 1
+    fi
+    rm -rf "$INSTALL_TMP"
+    return 1
+  fi
+)
+
+install_operator_skill
 ```
 
 Restart the agent runtime after installing or replacing a skill.
@@ -98,14 +140,9 @@ Restart the agent runtime after installing or replacing a skill.
 ## 3. Install Or Refresh The Skills Catalog
 
 ```bash
-mkdir -p "$HOME/repos"
-git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills" 2>/dev/null || true
-git -C "$HOME/repos/skills" pull --ff-only
-```
-
-Use the catalog as the source of truth:
-
-```bash
+mkdir -p "$HOME/repos" &&
+(test -d "$HOME/repos/skills" || git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills") &&
+git -C "$HOME/repos/skills" pull --ff-only &&
 export SRC="$HOME/repos/skills"
 ```
 

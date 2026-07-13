@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Skill Suitcase docs · agent-first skill package manager</title>
+    <meta name="description" content="Skill Suitcase turns a Git-backed skill catalog into deterministic plans, diffs, staged artifacts, receipts, and recoverable installs across agent runtimes.">
+    <script>(function(){var stored=null;try{stored=localStorage.getItem("skill-suitcase-docs-theme");}catch(e){}var dark=false;try{dark=matchMedia("(prefers-color-scheme: dark)").matches;}catch(e){}document.documentElement.dataset.theme=stored||(dark?"dark":"light");})();</script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%B3%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,450..680;1,9..144,450..680&family=Newsreader:ital,opsz,wght@0,6..72,400..650;1,6..72,400..650&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="site.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body data-page="index.html">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <button class="menu-btn" type="button" data-menu aria-label="Toggle navigation" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 3.5h14M1 8h14M1 12.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <a class="brand" href="index.html">Skill Suitcase<span class="brand-tag">docs</span></a>
+        <button class="search-btn" type="button" data-search-open aria-label="Search documentation" aria-haspopup="dialog"><span>Search docs</span><kbd aria-hidden="true">/</kbd></button>
+        <div class="masthead-tools">
+          <a class="gh" href="https://github.com/calvinnwq/skill-suitcase">GitHub</a>
+          <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+            <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
+            <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="frame">
+      <nav id="sidebar" class="sidebar" aria-label="Documentation"></nav>
+
+      <main id="content" class="article-col">
+        <article>
+          <p class="kicker"><span class="n">01</span>Start · Overview</p>
+          <h1>A suitcase for agent skills.</h1>
+          <p class="lede">
+            Skill Suitcase is an agent-first skill package manager backed by a Git
+            catalog. One JSON-first CLI inspects, installs, updates, and recovers
+            skills across agent runtimes without ever treating live agent homes as
+            the source of truth.
+          </p>
+
+          <section>
+            <h2>First command</h2>
+            <pre><code><span class="c"># install the CLI (Node.js 20 or newer)</span>
+npm install --global skill-suitcase
+
+<span class="c"># point at a catalog: skill-suitcase.yaml + skills/&lt;name&gt;/</span>
+SRC="/path/to/skills-catalog"
+
+<span class="c"># audit it read-only (writes nothing)</span>
+skill-suitcase import --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --strict --json
+skill-suitcase status --source "$SRC" --json</code></pre>
+            <p>
+              That is the safe starting path. Read-only commands never create
+              install roots, runtime homes, receipts, symlinks, or catalog files.
+              Inspect their JSON before staging or mutating anything.
+            </p>
+          </section>
+
+          <section>
+            <h2>The workflow</h2>
+            <p>
+              The catalog is canonical; runtimes are targets. Every install follows
+              the same rhythm: <strong>inspect</strong> current state,
+              <strong>stage</strong> reviewed content, <strong>apply</strong> through
+              an explicit approval boundary, and <strong>recover</strong> with
+              receipts when state drifts.
+            </p>
+            <div class="ledger">
+              <a class="ledger-row" href="safety-model.html">
+                <span class="n">1</span>
+                <span class="stage">Inspect</span>
+                <span class="what"><span class="cmdline">skill-suitcase status --source "$SRC" --target codex --json</span>Read-only commands classify catalog-planned installs as current, missing, version, behind, dirty, blocked, or unknown without touching the target.</span>
+              </a>
+              <a class="ledger-row" href="reference.html#pack">
+                <span class="n">2</span>
+                <span class="stage">Stage</span>
+                <span class="what"><span class="cmdline">skill-suitcase pack --source "$SRC" --target codex --output "$OUT" --json</span>Pack an immutable bundle into an explicit output directory, or build a deterministic plan lock, and review it like any other change.</span>
+              </a>
+              <a class="ledger-row" href="reference.html#apply">
+                <span class="n">3</span>
+                <span class="stage">Apply</span>
+                <span class="what"><span class="cmdline">skill-suitcase apply --source "$SRC" --target codex --artifact "$ARTIFACT" --json</span>Transactional install from exactly one plan lock or staged artifact. The target receipt gets a record for every managed skill, including ownership and rollback state.</span>
+              </a>
+              <a class="ledger-row" href="agent-workflows.html">
+                <span class="n">4</span>
+                <span class="stage">Recover</span>
+                <span class="what"><span class="cmdline">skill-suitcase repair --source "$SRC" --target codex --skill &lt;name&gt; --dry-run --json</span>Receipt-aware recovery: track, reconcile, repair, prune, promote, import-target, and rollback, each with its own explicit boundary.</span>
+              </a>
+              <a class="ledger-row" href="upstream-refresh.html">
+                <span class="n">5</span>
+                <span class="stage">Refresh</span>
+                <span class="what"><span class="cmdline">skill-suitcase upstream check --source "$SRC" --json</span>Pinned upstream sources refresh the catalog only, through isolated fetch, diff, and Git review. Never a direct target installer.</span>
+              </a>
+            </div>
+          </section>
+
+          <section>
+            <h2>Safety model</h2>
+            <p>
+              The same rules apply to agents and humans alike. Drift is a report,
+              never permission.
+            </p>
+            <ul class="boundary-list">
+              <li>
+                <span class="stamp readonly">Read-only</span>
+                <span><code>import</code>, <code>validate</code>, <code>targets</code>, <code>plan</code>, <code>status</code>, <code>diff</code>, every <code>--dry-run</code> mode, <code>upstream check</code>, and <code>upstream fetch --dry-run</code> never write roots, receipts, symlinks, or catalog files.</span>
+              </li>
+              <li>
+                <span class="stamp approval">Approval</span>
+                <span><code>apply</code> requires exactly one approved input: a plan lock or a staged artifact. Neither binds the resolved install root, path overrides, or copy-versus-symlink mode, so approve those at invocation time.</span>
+              </li>
+              <li>
+                <span class="stamp approval">Approval</span>
+                <span><code>reconcile</code>, <code>repair</code>, <code>prune</code>, <code>promote</code>, and <code>import-target</code> mutations require <code>--apply</code> plus an explicitly named scope. <code>prune --apply</code> additionally requires the exact plan ID returned by its dry-run.</span>
+              </li>
+              <li>
+                <span class="stamp approval">Approval</span>
+                <span><code>track</code> mutates on explicit invocation, writes only a receipt and never skill files, and requires the target to exactly match catalog source. Its <code>--skill</code> selection is optional; omitting it uses all-planned-skills mode.</span>
+              </li>
+              <li>
+                <span class="stamp approval">Approval</span>
+                <span><code>rollback</code> requires an explicit receipt path.</span>
+              </li>
+              <li>
+                <span class="stamp refused">Refused</span>
+                <span>Provider-backed targets (OpenCode and Pi) are read-only. Target-aware materialization and mutation return <code>read_only_target</code> instead of writing provider-managed homes.</span>
+              </li>
+              <li>
+                <span class="stamp refused">Refused</span>
+                <span>Nothing auto-commits. <code>upstream import --apply</code> writes only catalog source and the upstream lock, never live agent homes, and leaves the Git diff for review.</span>
+              </li>
+            </ul>
+            <p>
+              The full model, including receipts and the status enum, is on the
+              <a href="safety-model.html">safety model</a> page.
+            </p>
+          </section>
+
+          <section>
+            <h2>Modeled targets</h2>
+            <p>
+              Target IDs are <code>openclaw</code>, <code>codex</code>,
+              <code>openclaw-codex</code>, <code>agents</code>, <code>claude</code>,
+              <code>opencode</code>, <code>pi</code>, and <code>grok</code>. Paths
+              stay portable with explicit overrides:
+            </p>
+            <div class="def-rows">
+              <div><span class="k">--agents-skills &lt;dir&gt;</span><span class="v">shared agents skill root</span></div>
+              <div><span class="k">--codex-home &lt;dir&gt;</span><span class="v">Codex home directory</span></div>
+              <div><span class="k">--codex-skills &lt;dir&gt;</span><span class="v">Codex skills root</span></div>
+              <div><span class="k">--claude-skills &lt;dir&gt;</span><span class="v">Claude skills root</span></div>
+              <div><span class="k">--grok-skills &lt;dir&gt;</span><span class="v">Grok skills root</span></div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Where next</h2>
+            <ul>
+              <li><a href="install.html">Install</a>: get the CLI, the operator skill, and a catalog onto a machine.</li>
+              <li><a href="safety-model.html">Safety model</a>: the inspect, stage, mutate phases, receipts, and the status enum.</li>
+              <li><a href="catalog-model.html">Catalog model</a>: the manifest contract, variants, groups, and source policy.</li>
+              <li><a href="upstream-refresh.html">Upstream refresh</a>: the catalog-only lane for pinned upstream sources.</li>
+              <li><a href="agent-workflows.html">Agent workflows</a>: the audit loop and the recovery decision tree.</li>
+              <li><a href="troubleshooting.html">Troubleshooting</a>: refusal codes and what each status state asks you to do.</li>
+              <li><a href="reference.html">CLI reference</a>: every command on one page.</li>
+            </ul>
+          </section>
+        </article>
+        <footer class="pager" id="pager"></footer>
+      </main>
+
+      <aside class="toc-col"><p class="toc-title">On this page</p><nav id="toc" aria-label="On this page"></nav></aside>
+    </div>
+
+    <footer class="colophon"><div class="colophon-inner"><span>Skill Suitcase docs</span><span>MIT</span><a href="https://github.com/calvinnwq/skill-suitcase">GitHub</a></div></footer>
+  </body>
+</html>
