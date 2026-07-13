@@ -103,8 +103,10 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
             <p>
               Run the matching dry-run before <code>reconcile</code>,
               <code>repair</code>, <code>prune</code>, <code>promote</code>, or
-              <code>import-target</code>, and use receipt-backed
-              <code>rollback</code> when a mutation needs to be reversed.
+              <code>import-target</code>. Use receipt-backed
+              <code>rollback</code> only to reverse eligible
+              <code>apply</code>, <code>reconcile</code>, or <code>repair</code>
+              state.
             </p>
           </section>
 

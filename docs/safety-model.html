@@ -86,9 +86,10 @@
             </div>
             <p>
               <code>apply</code> is transactional, refuses unmanaged targets,
-              preserves executable file modes, and writes a receipt for every
-              managed skill. <code>--mode symlink</code> links selected current
-              catalog source into the target and records that mode explicitly.
+              preserves executable file modes, and updates the target receipt with
+              a record for every managed skill. <code>--mode symlink</code> links
+              selected current catalog source into the target and records that
+              mode explicitly.
             </p>
           </section>
 
@@ -145,7 +146,7 @@
               metadata, not a status value.
             </p>
             <div class="def-rows">
-              <div><span class="k">current</span><span class="v">receipt-owned content matches receipt and catalog; symlink installs point at the selected catalog source</span></div>
+              <div><span class="k">current</span><span class="v">for copy installs, receipt-owned files match the receipt and its version and hash match catalog source; preserved extras outside <code>installedFiles</code> do not make the skill dirty. Symlink installs point at the selected catalog source and <code>sourcePolicy.exclude</code> is empty; the stored receipt version and hash are not revalidated on that path</span></div>
               <div><span class="k">missing</span><span class="v">the planned target is absent</span></div>
               <div><span class="k">version</span><span class="v">the installed receipt version differs from current SKILL.md frontmatter</span></div>
               <div><span class="k">behind</span><span class="v">receipt-owned target is unchanged but the catalog moved ahead</span></div>

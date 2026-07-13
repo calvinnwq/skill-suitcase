@@ -34,16 +34,21 @@ executor so the pinned pnpm version runs without changing Corepack or global
 package-manager shims:
 
 ```bash
-mkdir -p "$HOME/repos"
-git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase" 2>/dev/null || true
-cd "$HOME/repos/skill-suitcase"
-git pull --ff-only
-pnpm() {
-  npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
-}
-test "$(pnpm --version)" = "10.34.4"
-pnpm install --frozen-lockfile
-pnpm run build
+if mkdir -p "$HOME/repos" &&
+  (test -d "$HOME/repos/skill-suitcase" || git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase") &&
+  git -C "$HOME/repos/skill-suitcase" pull --ff-only &&
+  cd "$HOME/repos/skill-suitcase"
+then
+  pnpm() {
+    npm exec --yes --package=pnpm@10.34.4 -- pnpm "$@"
+  }
+  test "$(pnpm --version)" = "10.34.4" &&
+  pnpm install --frozen-lockfile &&
+  pnpm run build
+else
+  printf 'Source checkout setup failed.\n' >&2
+  false
+fi
 ```
 
 Use the source CLI as:
@@ -135,14 +140,9 @@ Restart the agent runtime after installing or replacing a skill.
 ## 3. Install Or Refresh The Skills Catalog
 
 ```bash
-mkdir -p "$HOME/repos"
-git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills" 2>/dev/null || true
-git -C "$HOME/repos/skills" pull --ff-only
-```
-
-Use the catalog as the source of truth:
-
-```bash
+mkdir -p "$HOME/repos" &&
+(test -d "$HOME/repos/skills" || git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills") &&
+git -C "$HOME/repos/skills" pull --ff-only &&
 export SRC="$HOME/repos/skills"
 ```
 

@@ -244,14 +244,15 @@ skill-suitcase pack \
 
             <div class="cmd" id="apply">
               <div class="cmd-head"><h3>apply</h3><span class="cmd-flag approval">approval</span></div>
+              <p>Apply with a staged artifact:</p>
               <pre><code>skill-suitcase apply \
   --source "$SRC" \
   --target codex \
   --codex-home "$HOME/.codex" \
   --artifact "/path/to/staged/skill-suitcase-bundle.json" \
-  --json
-
-skill-suitcase apply \
+  --json</code></pre>
+              <p>Or apply with a plan lock and an explicitly approved symlink mode:</p>
+              <pre><code>skill-suitcase apply \
   --source "$SRC" \
   --target codex \
   --codex-home "$HOME/.codex" \
@@ -260,9 +261,10 @@ skill-suitcase apply \
   --json</code></pre>
               <p>
                 Requires exactly one approved input, a staged artifact or a plan
-                lock, writes transactionally, and emits a receipt per installed
-                skill. Copy is the default mode; symlink mode links selected source
-                paths inside the catalog source root. Lock mode reassesses the
+                lock, writes transactionally, and updates the target receipt with
+                a record for every installed skill. Copy is the default mode;
+                symlink mode links selected source paths inside the catalog source
+                root. Lock mode reassesses the
                 current plan and hashes against the lock; artifact mode rebuilds
                 ordinary missing or behind writes from current catalog source and
                 enforces artifact file hashes only for the dirty-behind exception.
@@ -302,9 +304,15 @@ skill-suitcase apply \
   --codex-home "$HOME/.codex" \
   --skill existing-skill \
   --dry-run \
-  --json
-<span class="c"># after approval:</span>
-skill-suitcase reconcile ... --skill existing-skill --apply --json</code></pre>
+  --json</code></pre>
+              <p>After approval:</p>
+              <pre><code>skill-suitcase reconcile \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --apply \
+  --json</code></pre>
               <p>
                 Replaces explicitly named receiptless mismatches from catalog
                 source. Targets selected <code>unknown</code> catalog-planned
@@ -323,9 +331,15 @@ skill-suitcase reconcile ... --skill existing-skill --apply --json</code></pre>
   --codex-home "$HOME/.codex" \
   --skill existing-skill \
   --dry-run \
-  --json
-<span class="c"># after approval:</span>
-skill-suitcase repair ... --skill existing-skill --apply --json</code></pre>
+  --json</code></pre>
+              <p>After approval:</p>
+              <pre><code>skill-suitcase repair \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --apply \
+  --json</code></pre>
               <p>
                 Restores explicitly named <code>dirty</code>, receipt-owned copy
                 installs when catalog source should win. Dry-run reports the
@@ -345,9 +359,16 @@ skill-suitcase repair ... --skill existing-skill --apply --json</code></pre>
   --codex-home "$HOME/.codex" \
   --skill obsolete-skill \
   --dry-run \
-  --json
-<span class="c"># after approval naming target, skills, and plan id:</span>
-skill-suitcase prune ... --skill obsolete-skill --plan-id &lt;reviewed-plan-id&gt; --apply --json</code></pre>
+  --json</code></pre>
+              <p>After approval naming the target, skills, and plan ID:</p>
+              <pre><code>skill-suitcase prune \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill obsolete-skill \
+  --plan-id &lt;reviewed-plan-id&gt; \
+  --apply \
+  --json</code></pre>
               <p>
                 Removes explicit receipt-owned installs no longer assigned to the
                 selected writable target. Dry-run returns a stable plan ID; apply
@@ -380,9 +401,13 @@ skill-suitcase prune ... --skill obsolete-skill --plan-id &lt;reviewed-plan-id&g
   --source "$SRC" \
   --target-skill "$HOME/.codex/skills/new-skill" \
   --dry-run \
-  --json
-<span class="c"># after approval:</span>
-skill-suitcase promote --source "$SRC" --target-skill "$HOME/.codex/skills/new-skill" --apply --json</code></pre>
+  --json</code></pre>
+              <p>After approval:</p>
+              <pre><code>skill-suitcase promote \
+  --source "$SRC" \
+  --target-skill "$HOME/.codex/skills/new-skill" \
+  --apply \
+  --json</code></pre>
               <p>
                 Moves a new target-created skill into catalog ownership. Apply
                 copies the content, verifies hashes, replaces the original
@@ -401,9 +426,15 @@ skill-suitcase promote --source "$SRC" --target-skill "$HOME/.codex/skills/new-s
   --codex-home "$HOME/.codex" \
   --skill existing-skill \
   --dry-run \
-  --json
-<span class="c"># after approval:</span>
-skill-suitcase import-target ... --skill existing-skill --apply --json</code></pre>
+  --json</code></pre>
+              <p>After approval:</p>
+              <pre><code>skill-suitcase import-target \
+  --source "$SRC" \
+  --target codex \
+  --codex-home "$HOME/.codex" \
+  --skill existing-skill \
+  --apply \
+  --json</code></pre>
               <p>
                 Imports intentional edits to selected dirty, receipt-owned catalog
                 skills back into the catalog. At least one repeatable

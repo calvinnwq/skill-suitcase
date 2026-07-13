@@ -59,10 +59,9 @@
 skill-suitcase upstream check --source "$SRC" --json
 
 <span class="c"># fetch one named skill into an isolated temp workspace/home and diff it</span>
-skill-suitcase upstream fetch --source "$SRC" --skill &lt;skill-name&gt; --dry-run --json
-
-<span class="c"># after approval for catalog-only source import</span>
-skill-suitcase upstream import --source "$SRC" --skill &lt;skill-name&gt; --apply --json</code></pre>
+skill-suitcase upstream fetch --source "$SRC" --skill &lt;skill-name&gt; --dry-run --json</code></pre>
+            <p>After approval for the catalog-only source import:</p>
+            <pre><code>skill-suitcase upstream import --source "$SRC" --skill &lt;skill-name&gt; --apply --json</code></pre>
           </section>
 
           <section>

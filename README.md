@@ -135,14 +135,11 @@ Skill Suitcase separates three phases:
 3. Mutate only with explicit approval through `apply`, a targeted `--apply`
    command, or a receipt-backed rollback.
 
-`apply` is transactional, refuses unmanaged targets, preserves executable file
-modes, and writes a receipt for every managed skill. Lock mode reassesses the
-current plan and hashes against the deterministic lock. Artifact mode validates
-the artifact manifest, but ordinary create/behind writes are built from current
-catalog source; artifact file hashes gate only the dirty-behind exception. Pack
-again immediately before artifact apply and inspect the current `diff` rather
-than treating an older artifact as byte-for-byte approval. `--mode symlink`
-links selected current catalog source into the target.
+`apply` is transactional, refuses unmanaged targets, preserves executable file modes, and updates the target receipt with a record for every managed skill.
+Lock mode reassesses the current plan and hashes against the deterministic lock.
+Artifact mode validates the artifact manifest, but ordinary create/behind writes are built from current catalog source; artifact file hashes gate only the dirty-behind exception.
+Pack again immediately before artifact apply and inspect the current `diff` rather than treating an older artifact as byte-for-byte approval.
+`--mode symlink` links selected current catalog source into the target.
 
 Receipts record ownership, source provenance, install mode, file hashes, and
 rollback metadata. `status` classifies modeled installs as `current`, `behind`,
