@@ -89,20 +89,27 @@ function publicDocumentPaths(): string[] {
   return paths.sort();
 }
 
-function decodeHtml(value: string): string {
+function decodeHtmlEntities(value: string): string {
   return value
-    .replace(/<[^>]+>/g, "")
     .replace(/&#(?:x([0-9a-f]+)|(\d+));/gi, (reference, hexadecimal: string | undefined, decimal: string | undefined) => {
       const codePoint = Number.parseInt(hexadecimal ?? decimal ?? "", hexadecimal === undefined ? 10 : 16);
       return codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
         ? String.fromCodePoint(codePoint)
         : reference;
     })
+    .replace(/&(?:nbsp|ensp|emsp|thinsp|hairsp|numsp|puncsp|MediumSpace);/gi, " ")
+    .replace(/&(?:Tab|NewLine);/g, " ")
+    .replaceAll("&bsol;", "\\")
+    .replaceAll("&sol;", "/")
     .replaceAll("&amp;", "&")
     .replaceAll("&gt;", ">")
     .replaceAll("&lt;", "<")
     .replaceAll("&quot;", "\"")
     .replaceAll("&#39;", "'");
+}
+
+function decodeHtml(value: string): string {
+  return decodeHtmlEntities(value.replace(/<[^>]+>/g, ""));
 }
 
 function shellDialect(language: string): ShellDialect {
@@ -484,6 +491,78 @@ function skipShellArithmetic(source: string, start: number, segments: string[]):
   return source.length;
 }
 
+function isShellArrayAssignmentPrefix(segment: string): boolean {
+  return /(?:^|\s)[A-Za-z_][A-Za-z0-9_]*\+?=$/.test(segment);
+}
+
+function skipShellArrayAssignment(source: string, start: number, segments: string[]): number {
+  let depth = 0;
+  let quote: "\"" | "'" | null = null;
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index] ?? "";
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote === "'") {
+      if (character === "'") quote = null;
+      continue;
+    }
+    if (quote === "\"") {
+      if (character === "\"") {
+        quote = null;
+      } else if (character === "$" && source[index + 1] === "(") {
+        if (source[index + 2] === "(") {
+          index = skipShellArithmetic(source, index + 3, segments);
+        } else {
+          index = collectShellSegments(source, segments, "posix", index + 2, ")");
+        }
+      } else if (character === "`") {
+        index = collectShellSegments(source, segments, "posix", index + 1, "`");
+      }
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "$" && source[index + 1] === "(") {
+      if (source[index + 2] === "(") {
+        index = skipShellArithmetic(source, index + 3, segments);
+      } else {
+        index = collectShellSegments(source, segments, "posix", index + 2, ")");
+      }
+      continue;
+    }
+    if ((character === "<" || character === ">") && source[index + 1] === "(") {
+      index = collectShellSegments(source, segments, "posix", index + 2, ")");
+      continue;
+    }
+    if (character === "`") {
+      index = collectShellSegments(source, segments, "posix", index + 1, "`");
+      continue;
+    }
+    if (character === "(") {
+      depth += 1;
+      continue;
+    }
+    if (character !== ")") continue;
+    if (depth > 0) {
+      depth -= 1;
+      continue;
+    }
+    return index;
+  }
+
+  return source.length;
+}
+
 function collectShellSegments(
   source: string,
   segments: string[],
@@ -579,6 +658,10 @@ function collectShellSegments(
       if (dialect === "posix" && source[index + 1] === "(") {
         segment += SHELL_SUBSTITUTION_PLACEHOLDER;
         index = skipShellArithmetic(source, index + 2, segments);
+        continue;
+      }
+      if (dialect === "posix" && isShellArrayAssignmentPrefix(segment)) {
+        index = skipShellArrayAssignment(source, index + 1, segments);
         continue;
       }
       finishSegment();
@@ -847,10 +930,12 @@ function shellCommandTokens(tokens: string[]): string[] | null {
     const wrapper = executableName(commandTokens[0] ?? "");
     if (wrapper !== "command" && wrapper !== "env" && wrapper !== "sudo"
       && wrapper !== "exec" && wrapper !== "nice" && wrapper !== "nohup"
-      && wrapper !== "time" && wrapper !== "timeout") {
+      && wrapper !== "time" && wrapper !== "timeout" && wrapper !== "xargs") {
       return commandTokens;
     }
-    const wrappedCommand = wrapper === "exec" || wrapper === "nice" || wrapper === "nohup"
+    const wrappedCommand = wrapper === "xargs"
+      ? xargsCommandTokens(commandTokens)
+      : wrapper === "exec" || wrapper === "nice" || wrapper === "nohup"
       || wrapper === "time" || wrapper === "timeout"
       ? shellExecutionPrefixTokens(commandTokens, wrapper)
       : shellWrapperCommandTokens(commandTokens, wrapper);
@@ -904,6 +989,72 @@ function shellExecutionPrefixTokens(
       }
     }
     if (token.startsWith("-")) return null;
+    return tokens.slice(index);
+  }
+
+  return null;
+}
+
+function xargsCommandTokens(tokens: string[]): string[] | null {
+  const booleanOptions = new Set([
+    "--null",
+    "--open-tty",
+    "--interactive",
+    "--no-run-if-empty",
+    "--show-limits",
+    "--verbose",
+    "--exit",
+    "-0",
+    "-o",
+    "-p",
+    "-r",
+    "-t",
+    "-x"
+  ]);
+  const optionsWithValues = new Set([
+    "--arg-file",
+    "--delimiter",
+    "--max-args",
+    "--max-chars",
+    "--max-procs",
+    "--process-slot-var",
+    "-E",
+    "-I",
+    "-L",
+    "-P",
+    "-a",
+    "-d",
+    "-n",
+    "-s"
+  ]);
+  const optionalValueOptions = new Set(["--eof", "--max-lines", "--replace", "-e", "-i", "-l"]);
+  const nonExecutingOptions = new Set(["--help", "--version"]);
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    if (token === "--") return tokens[index + 1] === undefined ? null : tokens.slice(index + 1);
+    if (nonExecutingOptions.has(token)) return null;
+    if (optionsWithValues.has(token)) {
+      index += 1;
+      continue;
+    }
+    if (booleanOptions.has(token)
+      || optionalValueOptions.has(token)
+      || /^-[0oprtx]+$/.test(token)
+      || /^-(?:[EILPands]).+/.test(token)
+      || /^-[eil].+/.test(token)
+      || [...optionalValueOptions].some((option) => option.startsWith("--") && token.startsWith(`${option}=`))
+      || [...optionsWithValues].some((option) => option.startsWith("--") && token.startsWith(`${option}=`))) {
+      continue;
+    }
+    if (token.startsWith("-")) {
+      assert.equal(
+        containsCliLauncherText(tokens.slice(index)),
+        false,
+        "xargs options before skill-suitcase are unsupported in public examples"
+      );
+      return null;
+    }
     return tokens.slice(index);
   }
 
@@ -1025,6 +1176,27 @@ function isSourceCliEntrypoint(token: string, dialect: ShellDialect = "posix"): 
     || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
 }
 
+function windowsCommandProcessorTokens(tokens: string[]): string[] | null {
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = (tokens[index] ?? "").toLowerCase();
+    if (/^(?:(?:\/[adqsu]|\/[efv]:(?:on|off)))*(?:\/[ck])$/.test(token)) {
+      return tokens[index + 1] === undefined ? null : tokens.slice(index + 1);
+    }
+    if (/^\/(?:[adqsu]|[efv]:(?:on|off))$/.test(token)) {
+      continue;
+    }
+    if (token === "/?") return null;
+    assert.equal(
+      containsCliLauncherText(tokens.slice(index)),
+      false,
+      "cmd options before skill-suitcase are unsupported in public examples"
+    );
+    return null;
+  }
+
+  return null;
+}
+
 function powershellCommandTokens(tokens: string[]): string[] {
   const commandTokens = withoutPowershellPrompt(tokens.map((value) => ({ value })))
     .map((token) => token.value);
@@ -1111,6 +1283,11 @@ function skillSuitcaseLauncher(tokens: string[], dialect: ShellDialect = "posix"
   }
 
   const wrapper = executableNameForDialect(candidate, dialect);
+  const windowsWrapper = executableName(candidate).toLowerCase();
+  if (windowsWrapper === "cmd" || windowsWrapper === "cmd.exe") {
+    const nestedCommand = windowsCommandProcessorTokens(commandTokens);
+    return nestedCommand === null ? null : skillSuitcaseLauncher(nestedCommand, dialect);
+  }
   if (wrapper === "npx" || wrapper === "bunx") {
     const executable = packageRunnerExecutable(commandTokens, 1, wrapper, dialect);
     return executable === null
@@ -1153,6 +1330,12 @@ function nestedCommandStringExample(
   if (commandTokens === null) return null;
 
   const executable = executableName(commandTokens[0] ?? "").toLowerCase().replace(/\.exe$/, "");
+  if (executable === "cmd") {
+    const nestedCommand = windowsCommandProcessorTokens(commandTokens);
+    if (nestedCommand?.length === 1 && /\s/.test(nestedCommand[0] ?? "")) {
+      return { contents: nestedCommand[0] ?? "", dialect: "powershell" };
+    }
+  }
   if (["bash", "dash", "fish", "ksh", "sh", "zsh"].includes(executable)) {
     const commandOptionIndex = commandTokens.findIndex(
       (token, index) => index > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(token)
@@ -1557,7 +1740,7 @@ function validateCommandExample(path: string, example: CommandExample): number {
 }
 
 function assertNoPrivateMachinePaths(path: string, contents: string): void {
-  const normalizedContents = contents.replace(/\\{2,}/g, "\\").replaceAll("\\/", "/");
+  const normalizedContents = decodeHtmlEntities(contents).replace(/\\{2,}/g, "\\").replaceAll("\\/", "/");
   const localPathContents = normalizedContents.replace(/\bhttps?:\/\/[^\s`"'<>]+/gi, "");
   assert.doesNotMatch(localPathContents, /\/Users\/[^/\\\s`"']+/, `${path} contains a macOS user path`);
   assert.doesNotMatch(localPathContents, /\/home\/[^/\\\s`"']+/, `${path} contains a Linux user path`);
@@ -1608,6 +1791,8 @@ test("private machine path checks cover roots and Windows separators", () => {
     "/c/Users/alice/project",
     "~alice/project",
     String.raw`\\server\Users\alice\project`,
+    String.raw`C:&#92;Users&#92;alice&#92;project`,
+    String.raw`C:&bsol;Users&bsol;alice&bsol;project`,
     String.raw`{"path":"C:\\Users\\alice\\project"}`
   ]) {
     assert.throws(() => assertNoPrivateMachinePaths("fixture.md", privatePath), /contains a .* user path/);
@@ -1774,6 +1959,17 @@ test("CLI example parsing validates command substitutions and subshells", () => 
   assert.equal(
     validateCliExamples("fixture.md", "```sh\nskill-suitcase status --source `pwd` --json\n```"),
     1
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```bash\ncmd=(skill-suitcase status)\n```"),
+    0
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```bash\ncmd=($(skill-suitcase bogus --json))\n```"
+    ),
+    /unknown command: bogus/
   );
   assert.equal(
     validateCliExamples(
@@ -2023,7 +2219,14 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
     "nice -n 5 skill-suitcase bogus --json",
     "timeout 30 skill-suitcase bogus --json",
     "timeout -sTERM 30 skill-suitcase bogus --json",
-    "timeout -k5s 30 skill-suitcase bogus --json"
+    "timeout -k5s 30 skill-suitcase bogus --json",
+    "xargs skill-suitcase bogus --json",
+    "xargs -0r skill-suitcase bogus --json",
+    "xargs -n1 skill-suitcase bogus --json",
+    "xargs -I{} skill-suitcase bogus --json {}",
+    "cmd /c skill-suitcase bogus --json",
+    "cmd /d/s/c skill-suitcase bogus --json",
+    "cmd /d /s /c \"skill-suitcase bogus --json\""
   ]) {
     assert.throws(
       () => validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``),
@@ -2296,6 +2499,14 @@ test("HTML command examples include visible cmdline elements", () => {
     );
     assert.throws(
       () => validateCliExamples(path, "<code>skill-suitcase&#32;bogus --json</code>"),
+      /unknown command: bogus/
+    );
+    assert.throws(
+      () => validateCliExamples(path, "<code>skill-suitcase&nbsp;bogus --json</code>"),
+      /unknown command: bogus/
+    );
+    assert.throws(
+      () => validateCliExamples(path, "<code>skill-suitcase&emsp;bogus --json</code>"),
       /unknown command: bogus/
     );
   }
