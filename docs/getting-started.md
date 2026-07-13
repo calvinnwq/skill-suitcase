@@ -88,22 +88,50 @@ The catalog, not any live agent home, is the source of truth.
 If your team already has a reviewed catalog repository, replace `<your-catalog-remote>` with its HTTPS remote URL and clone it:
 
 ```bash
+unset SRC
 CATALOG_REMOTE="<your-catalog-remote>"
-mkdir -p "$HOME/.skill-suitcase"
-git clone "$CATALOG_REMOTE" "$HOME/.skill-suitcase/skills"
-SRC="$HOME/.skill-suitcase/skills"
+CATALOG_PARENT="$HOME/.skill-suitcase"
+CATALOG_DEST="$CATALOG_PARENT/skills"
+
+if test -e "$CATALOG_DEST" || test -L "$CATALOG_DEST"; then
+  printf 'Refusing to replace existing catalog path: %s\n' "$CATALOG_DEST" >&2
+  false
+elif ! mkdir -p "$CATALOG_PARENT"; then
+  printf 'Could not create catalog parent: %s\n' "$CATALOG_PARENT" >&2
+  false
+elif git clone "$CATALOG_REMOTE" "$CATALOG_DEST"; then
+  SRC="$CATALOG_DEST"
+else
+  printf 'Catalog clone failed; SRC was not assigned.\n' >&2
+  false
+fi
 ```
 
 Otherwise, create a minimal catalog with one starter skill.
-The `if` guard keeps this snippet from overwriting a catalog that already exists at the standard location.
+The setup function leaves a valid existing catalog unchanged and refuses any other file, directory, or symlink at the standard location, so it never overwrites an existing path.
 Git backing is the preferred operating model, and staging refuses selected skills with untracked, non-ignored files in a Git-backed catalog, so the fresh-catalog branch initializes Git and commits only the two files it creates:
 
 ```bash
 SRC="$HOME/.skill-suitcase/skills"
-if test -e "$SRC/skill-suitcase.yaml"; then
-  echo "A catalog already exists at $SRC; skip to the next section."
-else
-  mkdir -p "$SRC/skills/hello-world"
+create_starter_catalog() {
+  if test -e "$SRC" || test -L "$SRC"; then
+    if test -f "$SRC/skill-suitcase.yaml"; then
+      printf 'A catalog already exists at %s; leaving it unchanged.\n' "$SRC"
+      return 0
+    fi
+    printf 'Refusing to modify existing non-catalog path: %s\n' "$SRC" >&2
+    return 1
+  fi
+
+  if ! git var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+    printf '%s\n' \
+      'Git author identity is not configured; no catalog files were written.' \
+      'Configure it with `git config --global user.name "Your Name"` and' \
+      '`git config --global user.email "you@example.com"`, then rerun this snippet.' >&2
+    return 1
+  fi
+
+  mkdir -p "$SRC/skills/hello-world" || return 1
 
   cat > "$SRC/skill-suitcase.yaml" <<'YAML'
 suitcases:
@@ -135,14 +163,16 @@ description: Use when trying Skill Suitcase for the first time.
 A starter skill used to exercise the Skill Suitcase install workflow.
 MARKDOWN
 
-  git -C "$SRC" init
+  git -C "$SRC" init || return 1
   git -C "$SRC" add -- \
     skill-suitcase.yaml \
-    skills/hello-world/SKILL.md
+    skills/hello-world/SKILL.md || return 1
   git -C "$SRC" commit -m "feat: add hello-world starter skill" -- \
     skill-suitcase.yaml \
-    skills/hello-world/SKILL.md
-fi
+    skills/hello-world/SKILL.md || return 1
+}
+
+create_starter_catalog
 ```
 
 The manifest declares suitcases (named skill groups), assignments (which suitcases a target receives), and assignment paths (where each target installs).
@@ -159,6 +189,7 @@ The manifest does not expand `~` or environment variables; per-machine paths com
 | `--codex-skills` | `codex` | Codex skills root directly |
 | `--claude-skills` | `claude` | Claude skills root |
 | `--agents-skills` | `agents` | Shared agents skills root |
+| `--hermes-skills` | `hermes` | Hermes skills root |
 | `--grok-skills` | `grok` | Grok skills root |
 
 For this walkthrough, keep the target disposable:

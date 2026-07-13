@@ -150,24 +150,28 @@ install_operator_skill</code></pre>
               Replace <code>&lt;your-catalog-remote&gt;</code> with the HTTPS URL of
               your reviewed catalog repository:
             </p>
-            <pre><code>if mkdir -p "$HOME/.skill-suitcase"; then
-  CATALOG_REMOTE="&lt;your-catalog-remote&gt;"
-  if test -e "$HOME/.skill-suitcase/skills/.git"; then
-    git -C "$HOME/.skill-suitcase/skills" pull --ff-only
-  else
-    git clone "$CATALOG_REMOTE" "$HOME/.skill-suitcase/skills"
-  fi
+            <pre><code>unset SRC
+CATALOG_DIR="$HOME/.skill-suitcase/skills"
+CATALOG_REMOTE="&lt;your-catalog-remote&gt;"
+if mkdir -p "$HOME/.skill-suitcase" &amp;&amp;
+  {
+    if test -e "$HOME/.skill-suitcase/skills/.git"; then
+      git -C "$CATALOG_DIR" pull --ff-only
+    else
+      git clone "$CATALOG_REMOTE" "$CATALOG_DIR"
+    fi
+  }
+then
+  export SRC="$CATALOG_DIR"
 else
-  printf 'Catalog checkout setup failed.\n' &gt;&amp;2
+  printf 'Catalog checkout update failed; SRC was not exported.\n' &gt;&amp;2
   false
-fi
-
-export SRC="$HOME/.skill-suitcase/skills"</code></pre>
+fi</code></pre>
             <p>
               If you do not have a catalog yet, the
               <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/getting-started.md">getting-started walkthrough</a>
-              creates a guarded minimal catalog without overwriting an existing
-              manifest.
+              creates a guarded minimal catalog without overwriting any existing
+              catalog path.
             </p>
             <div class="callout" data-kind="note">
               <p class="callout-label">Note</p>

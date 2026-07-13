@@ -156,26 +156,27 @@ Use the reviewed catalog repository the operator names.
 Replace `<your-catalog-remote>` with its HTTPS remote URL, then clone it into Skill Suitcase's own catalog home:
 
 ```bash
-if mkdir -p "$HOME/.skill-suitcase"; then
-  CATALOG_REMOTE="<your-catalog-remote>"
-  if test -e "$HOME/.skill-suitcase/skills/.git"; then
-    git -C "$HOME/.skill-suitcase/skills" pull --ff-only
-  else
-    git clone "$CATALOG_REMOTE" "$HOME/.skill-suitcase/skills"
-  fi
+unset SRC
+CATALOG_DIR="$HOME/.skill-suitcase/skills"
+CATALOG_REMOTE="<your-catalog-remote>"
+if mkdir -p "$HOME/.skill-suitcase" &&
+  {
+    if test -e "$HOME/.skill-suitcase/skills/.git"; then
+      git -C "$CATALOG_DIR" pull --ff-only
+    else
+      git clone "$CATALOG_REMOTE" "$CATALOG_DIR"
+    fi
+  }
+then
+  export SRC="$CATALOG_DIR"
 else
-  printf 'Catalog checkout setup failed.\n' >&2
+  printf 'Catalog checkout update failed; SRC was not exported.\n' >&2
   false
 fi
 ```
 
 If no catalog exists yet, create a minimal one by following [`docs/getting-started.md`](docs/getting-started.md).
-
-Use the catalog as the source of truth:
-
-```bash
-export SRC="$HOME/.skill-suitcase/skills"
-```
+On success, the checkout command exports that catalog as `SRC`.
 
 New-machine setup installs from this catalog through Skill Suitcase, not directly from `skills.sh` or `npx skills`.
 If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the repository diff, and then resume the normal Suitcase audit and sync flow.
@@ -302,7 +303,9 @@ and ownership boundaries rather than target adapters.
 Use `track` for exact matches only:
 
 ```bash
-skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill <skill-name> --skill <another-skill> --json
+SKILL_NAME="skill-name"
+ANOTHER_SKILL_NAME="another-skill"
+skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill "$SKILL_NAME" --skill "$ANOTHER_SKILL_NAME" --json
 ```
 
 Use `reconcile` only for selected catalog-owned receiptless drift:
