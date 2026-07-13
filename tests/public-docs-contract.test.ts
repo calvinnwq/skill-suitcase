@@ -43,7 +43,7 @@ function decodeHtml(value: string): string {
 function commandExamples(path: string, contents: string): string[] {
   const markdownBlocks = [...contents.matchAll(/```(?:bash|sh|shell)\n([\s\S]*?)\n```/g)]
     .map((match) => match[1] ?? "");
-  const htmlBlocks = [...contents.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
+  const htmlBlocks = [...contents.matchAll(/<pre\b[^>]*>\s*<code\b[^>]*>([\s\S]*?)<\/code>\s*<\/pre>/gi)]
     .map((match) => decodeHtml(match[1] ?? ""));
   const htmlCommandLines = [...contents.matchAll(/<span\b([^>]*)>/g)]
     .filter((match) => {
@@ -61,6 +61,7 @@ function commandExamples(path: string, contents: string): string[] {
 
 function shellSegments(line: string): string[] {
   const segments: string[] = [];
+  const parenthesisContexts: Array<{ restoreQuote: "\"" | null; substitution: boolean }> = [];
   let start = 0;
   let quote: "\"" | "'" | null = null;
   let escaped = false;
@@ -75,6 +76,14 @@ function shellSegments(line: string): string[] {
       escaped = true;
       continue;
     }
+    if (character === "$" && line[index + 1] === "(" && quote !== "'") {
+      segments.push(line.slice(start, index));
+      parenthesisContexts.push({ restoreQuote: quote, substitution: true });
+      quote = null;
+      index += 1;
+      start = index + 1;
+      continue;
+    }
     if (quote !== null) {
       if (character === quote) quote = null;
       continue;
@@ -87,9 +96,15 @@ function shellSegments(line: string): string[] {
       segments.push(line.slice(start, index));
       return segments;
     }
-    if (character === ";" || character === "|" || character === "&") {
+    if (character === ";" || character === "|" || character === "&" || character === "(" || character === ")") {
       segments.push(line.slice(start, index));
-      if (line[index + 1] === character) index += 1;
+      if (character === "(") {
+        parenthesisContexts.push({ restoreQuote: null, substitution: false });
+      } else if (character === ")") {
+        const context = parenthesisContexts.pop();
+        if (context?.substitution) quote = context.restoreQuote;
+      }
+      if ((character === "|" || character === "&") && line[index + 1] === character) index += 1;
       start = index + 1;
     }
   }
@@ -198,9 +213,10 @@ function validateCliExamples(path: string, contents: string): number {
 }
 
 function assertNoPrivateMachinePaths(path: string, contents: string): void {
-  assert.doesNotMatch(contents, /\/Users\/[^/\s]+(?=\/|\s|$)/, `${path} contains a macOS user path`);
-  assert.doesNotMatch(contents, /\/home\/[^/\s]+(?=\/|\s|$)/, `${path} contains a Linux user path`);
-  assert.doesNotMatch(contents, /[A-Z]:[\\/]Users[\\/][^\\/\s]+(?=[\\/]|\s|$)/i, `${path} contains a Windows user path`);
+  const normalizedContents = contents.replace(/\\{2,}/g, "\\");
+  assert.doesNotMatch(normalizedContents, /\/Users\/[^/\\\s`"']+/, `${path} contains a macOS user path`);
+  assert.doesNotMatch(normalizedContents, /\/home\/[^/\\\s`"']+/, `${path} contains a Linux user path`);
+  assert.doesNotMatch(normalizedContents, /[A-Z]:[\\/]Users[\\/][^\\/\s`"']+/i, `${path} contains a Windows user path`);
 }
 
 test("public and reusable docs contain no contributor-specific machine paths", () => {
@@ -214,7 +230,13 @@ test("public and reusable docs contain no contributor-specific machine paths", (
 });
 
 test("private machine path checks cover roots and Windows separators", () => {
-  for (const privatePath of ["/Users/alice", "/home/alice", "C:/Users/alice/project", "C:\\Users\\alice"]) {
+  for (const privatePath of [
+    "`/Users/alice`",
+    "`/home/alice`",
+    "C:/Users/alice/project",
+    "C:\\Users\\alice",
+    String.raw`{"path":"C:\\Users\\alice\\project"}`
+  ]) {
     assert.throws(() => assertNoPrivateMachinePaths("fixture.md", privatePath), /contains a .* user path/);
   }
 });
@@ -267,11 +289,37 @@ test("CLI example parsing rejects invalid tokens and validates each pipe segment
   );
 });
 
+test("CLI example parsing validates command substitutions and subshells", () => {
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nRESULT=$(skill-suitcase bogus --json)\n```"),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\n(skill-suitcase status)\n```"),
+    /CLI example without --json: skill-suitcase status/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", '```sh\nRESULT="$(skill-suitcase bogus --json)"\n```'),
+    /unknown command: bogus/
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\necho '$(skill-suitcase bogus --json)'\n```"),
+    0
+  );
+});
+
 test("HTML command examples include visible cmdline elements", () => {
   assert.throws(
     () => validateCliExamples(
       "fixture.html",
       '<span class="what"><span class="example cmdline">skill-suitcase bogus --json</span>Details.</span>'
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.html",
+      '<pre class="example">\n  <code class="language-shell">skill-suitcase bogus --json</code>\n</pre>'
     ),
     /unknown command: bogus/
   );

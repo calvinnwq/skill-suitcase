@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { test } from "node:test";
 
 import { parse } from "yaml";
@@ -26,6 +27,24 @@ const DOC_PAGES = [
 
 function read(path: string): string {
   return readFileSync(path, "utf8");
+}
+
+function htmlPagePaths(directory: string): string[] {
+  const pages: string[] = [];
+
+  function visit(currentDirectory: string): void {
+    for (const entry of readdirSync(currentDirectory, { withFileTypes: true })) {
+      const path = join(currentDirectory, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+      } else if (entry.isFile() && entry.name.endsWith(".html")) {
+        pages.push(relative(directory, path).split(sep).join("/"));
+      }
+    }
+  }
+
+  visit(directory);
+  return pages.sort();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -97,10 +116,7 @@ test("docs site pages share the expected chrome", () => {
 test("navigation manifest covers every page in numbered reading order", () => {
   const js = read("docs/site.js");
   const entries = navigationEntries(js);
-  const sitePages = readdirSync("docs")
-    .filter((path) => path.endsWith(".html"))
-    .map((path) => `docs/${path}`)
-    .sort();
+  const sitePages = htmlPagePaths("docs").map((path) => `docs/${path}`);
 
   assert.deepEqual(
     entries.map((entry) => entry.href),
@@ -139,6 +155,19 @@ test("navigation extraction includes unnumbered internal entries", () => {
     { number: undefined, title: "Overview copy", href: "index.html" },
     { number: "02", title: "Install", href: "install.html" }
   ]);
+});
+
+test("HTML page inventory includes nested docs routes", (t) => {
+  const fixture = mkdtempSync(join(tmpdir(), "skill-suitcase-docs-site-"));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  mkdirSync(join(fixture, "guides"));
+  writeFileSync(join(fixture, "index.html"), "");
+  writeFileSync(join(fixture, "guides", "setup.html"), "");
+
+  assert.deepEqual(
+    htmlPagePaths(fixture),
+    ["guides/setup.html", "index.html"]
+  );
 });
 
 test("table of contents preserves canonical fragment owners", () => {
