@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { allowedNodeEnvironmentFlags, execPath } from "node:process";
 import { test } from "node:test";
+import { parse as parseYaml } from "yaml";
 
 import { createCommandRegistry, parseCommandArgs } from "../src/commands/index.js";
 
@@ -36,6 +37,7 @@ type ShellDialect = "posix" | "powershell";
 interface CommandExample {
   contents: string;
   dialect: ShellDialect;
+  fish?: boolean;
   interactive?: boolean;
 }
 
@@ -175,6 +177,7 @@ function markdownShellBlocks(contents: string): CommandExample[] {
         blocks.push({
           contents: executableContents,
           dialect,
+          fish: language === "fish",
           interactive: language === "console" || language === "shell-session" || language === "terminal"
         });
       }
@@ -296,12 +299,16 @@ function commandExamples(path: string, contents: string): CommandExample[] {
       };
     });
   const reusableTextCommands = REUSABLE_TEXT_COMMAND_EXTENSIONS.some((extension) => path.endsWith(extension))
-    ? reusableTextCommandExamples(contents)
+    ? reusableTextCommandExamples(path, contents)
     : [];
   return [...markdownBlocks, ...htmlCodeBlocks, ...htmlCommandLines, ...reusableTextCommands];
 }
 
-function reusableTextCommandExamples(contents: string): CommandExample[] {
+function reusableTextCommandExamples(path: string, contents: string): CommandExample[] {
+  if (/\.(?:json|ya?ml)$/.test(path)) {
+    return structuredReusableTextCommandExamples(contents);
+  }
+
   const examples: CommandExample[] = [];
   const launcher = /(?<![$A-Za-z0-9_-])(?:skill-suitcase(?:\.(?:cmd|ps1))?|\$\{CLI\}|\$CLI|dist[\\/]src[\\/]cli\.js)(?=\s|$|["'`,;.)}\]])/gi;
   const lines = contents.split(/\r?\n/);
@@ -311,8 +318,7 @@ function reusableTextCommandExamples(contents: string): CommandExample[] {
     for (const match of line.matchAll(launcher)) {
       const documentPrefix = [...lines.slice(0, lineIndex), line.slice(0, match.index)].join("\n");
       if (!isReusableCommandPosition(line, match.index, documentPrefix, lines, lineIndex)) continue;
-      const command = line
-        .slice(match.index)
+      const command = reusableCommandValue(line, match.index)
         .replace(/(?:\\[nrt]|[\s"'`,;.)}\]])+$/g, "");
       if (containsCommandShapedInvocation(command, true)) {
         examples.push({ contents: command, dialect: "posix" });
@@ -321,6 +327,67 @@ function reusableTextCommandExamples(contents: string): CommandExample[] {
   }
 
   return examples;
+}
+
+function structuredReusableTextCommandExamples(contents: string): CommandExample[] {
+  const document = parseYaml(contents) as unknown;
+  const examples: CommandExample[] = [];
+  const visited = new WeakSet<object>();
+
+  function visit(value: unknown, owner = ""): void {
+    if (typeof value === "string") {
+      const isCommand = isReusableCommandName(owner)
+        ? containsCommandShapedInvocation(value, true)
+        : owner.length === 0 && hasReusableCommandSyntax(value);
+      if (isCommand) {
+        examples.push({ contents: value, dialect: "posix" });
+      }
+      return;
+    }
+    if (value === null || typeof value !== "object" || visited.has(value)) return;
+    visited.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, owner);
+      return;
+    }
+    for (const [name, item] of Object.entries(value)) visit(item, name);
+  }
+
+  visit(document);
+  return examples;
+}
+
+function reusableCommandValue(line: string, start: number): string {
+  let quote: "\"" | "'" | "`" | null = null;
+  let escaped = false;
+
+  for (let index = 0; index < start; index += 1) {
+    const character = line[index] ?? "";
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (quote === null && (character === "\"" || character === "'" || character === "`")) {
+      quote = character;
+    } else if (character === quote) {
+      quote = null;
+    }
+  }
+
+  if (quote === null) return line.slice(start);
+  escaped = false;
+  for (let index = start; index < line.length; index += 1) {
+    const character = line[index] ?? "";
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (character === quote) {
+      return line.slice(start, index);
+    }
+  }
+  return line.slice(start);
 }
 
 function isReusableCommandPosition(
@@ -988,7 +1055,14 @@ function shellExecutionPrefixTokens(
         return tokens[index + 1] === undefined ? null : tokens.slice(index + 1);
       }
     }
-    if (token.startsWith("-")) return null;
+    if (token.startsWith("-")) {
+      assert.equal(
+        containsCliLauncherText(tokens.slice(index)),
+        false,
+        `${wrapper} options before skill-suitcase are unsupported in public examples`
+      );
+      return null;
+    }
     return tokens.slice(index);
   }
 
@@ -1433,6 +1507,17 @@ function withoutPosixPrompt<T extends { value: string }>(tokens: T[], interactiv
     : tokens;
 }
 
+function withoutFishCommandPrefixes<T extends { value: string }>(tokens: T[]): T[] {
+  let index = 0;
+  while (isShellCommandPrefix(tokens[index]?.value ?? "")
+    || tokens[index]?.value === "and"
+    || tokens[index]?.value === "not"
+    || tokens[index]?.value === "or") {
+    index += 1;
+  }
+  return tokens.slice(index);
+}
+
 function shellInvocationTokens(
   segment: string,
   dialect: ShellDialect,
@@ -1699,7 +1784,8 @@ function validateCommandExample(path: string, example: CommandExample): number {
 
   for (const line of logicalShellLines(example)) {
     for (const segment of shellSegments(line, example.dialect)) {
-      const tokens = shellInvocationTokens(segment, example.dialect, example.interactive);
+      const shellTokens = shellInvocationTokens(segment, example.dialect, example.interactive);
+      const tokens = example.fish ? withoutFishCommandPrefixes(shellTokens) : shellTokens;
       const nestedExample = nestedCommandStringExample(tokens, example.dialect);
       if (nestedExample !== null) invocationCount += validateCommandExample(path, nestedExample);
 
@@ -1732,6 +1818,10 @@ function validateCommandExample(path: string, example: CommandExample): number {
       assert.ok(
         COMMAND_REGISTRY.find(parsed) !== null,
         `${path} CLI does not accept invocation: ${invocation.join(" ")}`
+      );
+      assert.ok(
+        parsed.command !== "pack" || !parsed.dryRun || parsed.output === undefined,
+        `${path} CLI invocation cannot produce deterministic JSON: ${invocation.join(" ")}`
       );
     }
   }
@@ -2233,6 +2323,13 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
       /unknown command: bogus/
     );
   }
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\n/usr/bin/time -f '%E' skill-suitcase bogus --json\n```"
+    ),
+    /time options before skill-suitcase are unsupported/
+  );
 });
 
 test("CLI example parsing excludes shell redirections from CLI arguments", () => {
@@ -2381,6 +2478,32 @@ test("CLI example parsing covers command strings in reusable text formats", () =
     );
   }
 
+  assert.equal(
+    validateCliExamples(
+      "fixture.json",
+      '{"command":"skill-suitcase status --source . --json","description":"ok"}\n'
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.js",
+      'const config = { command: "skill-suitcase status --source . --json", description: "ok" };\n'
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.yaml",
+      "command: >\n  skill-suitcase status --source .\n  --json\n"
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples("fixture.yaml", "- skill-suitcase status reports target state.\n"),
+    0
+  );
+
   for (const [path, contents] of [
     ["fixture.yaml", "description: skill-suitcase status reports target state.\n"],
     ["fixture.yaml", "notes:\n  - skill-suitcase status reports target state.\n"],
@@ -2524,10 +2647,31 @@ test("CLI example parsing recognizes POSIX control and grouping prefixes", () =>
   }
 });
 
+test("CLI example parsing recognizes Fish execution prefixes", () => {
+  for (const command of [
+    "not skill-suitcase bogus --json",
+    "and skill-suitcase bogus --json",
+    "or skill-suitcase bogus --json",
+    "if not skill-suitcase bogus --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", `\`\`\`fish\n${command}\n\`\`\``),
+      /unknown command: bogus/
+    );
+  }
+});
+
 test("CLI example parsing validates registry acceptance", () => {
   assert.throws(
     () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status --json\n```"),
     /CLI does not accept invocation: skill-suitcase status --json/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nskill-suitcase pack --source . --target codex --dry-run --output out --json\n```"
+    ),
+    /CLI invocation cannot produce deterministic JSON/
   );
   assert.equal(
     validateCliExamples("fixture.md", "```sh\nskill-suitcase status --source . --json\n```"),
