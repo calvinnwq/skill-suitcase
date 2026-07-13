@@ -9,7 +9,8 @@ import { createCommandRegistry, parseCommandArgs } from "../src/commands/index.j
 
 const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
 const TEXT_DOCUMENT_EXTENSIONS = [".css", ".html", ".js", ".json", ".md", ".yaml", ".yml"];
-const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(createCommandRegistry().names());
+const COMMAND_REGISTRY = createCommandRegistry();
+const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
 const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "command", "do", "elif", "env", "if", "sudo", "then", "until", "while"]);
 const SHELL_FENCE_LANGUAGES = new Set([
   "",
@@ -27,6 +28,7 @@ const SHELL_FENCE_LANGUAGES = new Set([
   "zsh"
 ]);
 const SHELL_SUBSTITUTION_PLACEHOLDER = "__shell_command_substitution__";
+const OPTIONAL_INVOCATION_PLACEHOLDERS = new Set(["<local-overrides>"]);
 const NODE_CLI_VALUE_OPTIONS = nodeCliValueOptions();
 type ShellDialect = "posix" | "powershell";
 
@@ -128,8 +130,78 @@ function markdownShellBlocks(contents: string): CommandExample[] {
   return blocks;
 }
 
+function markdownNonFencedLines(contents: string): string[] {
+  const lines = contents.split(/\r?\n/);
+  const visibleLines = [...lines];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const opening = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*[^\r]*$/)?.[1];
+    if (opening === undefined) continue;
+
+    visibleLines[index] = "";
+    for (index += 1; index < lines.length; index += 1) {
+      const closing = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1];
+      visibleLines[index] = "";
+      if (closing !== undefined && closing[0] === opening[0] && closing.length >= opening.length) break;
+    }
+  }
+
+  return visibleLines;
+}
+
+function containsCommandShapedInvocation(contents: string): boolean {
+  return shellSegments(contents, "posix").some((segment) => {
+    const tokens = withoutShellRedirections(shellTokens(segment, "posix"));
+    const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value));
+    return launcher !== null && tokens[launcher.executableIndex + 1]?.value !== undefined;
+  });
+}
+
+function markdownIndentedAndInlineCode(contents: string): CommandExample[] {
+  const lines = markdownNonFencedLines(contents);
+  const examples: CommandExample[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const firstLine = lines[index]?.match(/^(?: {4}|\t)(.*)$/)?.[1];
+    if (firstLine === undefined) continue;
+
+    const block = [firstLine];
+    while (index + 1 < lines.length) {
+      const nextLine = lines[index + 1] ?? "";
+      const indented = nextLine.match(/^(?: {4}|\t)(.*)$/)?.[1];
+      if (indented !== undefined) {
+        block.push(indented);
+        index += 1;
+        continue;
+      }
+      if (nextLine.trim().length === 0) {
+        block.push("");
+        index += 1;
+        continue;
+      }
+      break;
+    }
+    examples.push({ contents: block.join("\n"), dialect: "posix" });
+  }
+
+  const inlineSource = lines
+    .map((line) => /^(?: {4}|\t)/.test(line) ? "" : line)
+    .join("\n");
+  for (const match of inlineSource.matchAll(/(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g)) {
+    const inlineCode = (match[2] ?? "").replace(/\r?\n/g, " ");
+    if (containsCommandShapedInvocation(inlineCode)) {
+      examples.push({ contents: inlineCode, dialect: "posix" });
+    }
+  }
+
+  return examples;
+}
+
 function commandExamples(path: string, contents: string): CommandExample[] {
-  const markdownBlocks = markdownShellBlocks(contents);
+  const markdownBlocks = [
+    ...markdownShellBlocks(contents),
+    ...(path.endsWith(".md") ? markdownIndentedAndInlineCode(contents) : [])
+  ];
   const htmlBlocks = [...contents.matchAll(/<pre\b[^>]*>\s*<code\b([^>]*)>([\s\S]*?)<\/code>\s*<\/pre>/gi)]
     .map((match) => {
       const attributes = match[1] ?? "";
@@ -565,6 +637,9 @@ function skillSuitcaseLauncher(tokens: string[]): CliLauncher | null {
   if (isSkillSuitcaseExecutable(candidate)) {
     return { executableIndex: index };
   }
+  if (isSourceCliEntrypoint(candidate)) {
+    return { executableIndex: index };
+  }
 
   const wrapper = executableName(candidate);
   if (wrapper === "npx" || wrapper === "bunx") {
@@ -769,7 +844,9 @@ function validateCliExamples(path: string, contents: string): number {
 
         invocationCount += 1;
         const launcherInvocation = tokens.slice(launcher.executableIndex);
-        const invocation = launcherInvocation.map((token) => token.value);
+        const invocation = launcherInvocation
+          .map((token) => token.value)
+          .filter((token) => !OPTIONAL_INVOCATION_PLACEHOLDERS.has(token));
         const command = invocation[1] ?? "";
         const possibleSubcommand = invocation[2];
         assert.ok(PUBLIC_COMMANDS.has(command), `${path} documents unknown command: ${command}`);
@@ -783,12 +860,17 @@ function validateCliExamples(path: string, contents: string): number {
           invocation.includes("--json"),
           `${path} has a CLI example without --json: ${invocation.join(" ")}`
         );
+        let parsed: ReturnType<typeof parseCommandArgs>;
         try {
-          parseCommandArgs(invocation.slice(1));
+          parsed = parseCommandArgs(invocation.slice(1));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           assert.fail(`${path} has an invalid CLI invocation: ${invocation.join(" ")} (${message})`);
         }
+        assert.ok(
+          COMMAND_REGISTRY.find(parsed) !== null,
+          `${path} CLI does not accept invocation: ${invocation.join(" ")}`
+        );
       }
     }
   }
@@ -863,14 +945,14 @@ test("CLI example parsing rejects invalid tokens and validates each pipe segment
   assert.throws(
     () => validateCliExamples(
       "fixture.md",
-      "```sh\nskill-suitcase status --json | skill-suitcase validate\n```"
+      "```sh\nskill-suitcase status --source . --json | skill-suitcase validate\n```"
     ),
     /CLI example without --json: skill-suitcase validate/
   );
   assert.throws(
     () => validateCliExamples(
       "fixture.md",
-      "```sh\nskill-suitcase status --json | skill-suitcase bogus --json\n```"
+      "```sh\nskill-suitcase status --source . --json | skill-suitcase bogus --json\n```"
     ),
     /unknown command: bogus/
   );
@@ -1011,6 +1093,14 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
     /unknown command: bogus/
   );
   assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\n\"$CLI\" bogus --json\n```"),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\n${CLI} bogus --json\n```"),
+    /unknown command: bogus/
+  );
+  assert.throws(
     () => validateCliExamples(
       "fixture.md",
       "```sh\nnode --require ./hook.js dist/src/cli.js bogus --json\n```"
@@ -1067,22 +1157,26 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
     /unknown command: bogus/
   );
   assert.equal(
-    validateCliExamples("fixture.md", "```sh\nnpx skill-suitcase status --json\n```"),
+    validateCliExamples("fixture.md", "```sh\nnpx skill-suitcase status --source . --json\n```"),
     1
   );
   assert.equal(
-    validateCliExamples("fixture.md", "```sh\nnode \"$CLI\" status --json\n```"),
+    validateCliExamples("fixture.md", "```sh\nnode \"$CLI\" status --source . --json\n```"),
+    1
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\n\"$CLI\" status --source ./catalog --json\n```"),
     1
   );
   assert.equal(
     validateCliExamples(
       "fixture.md",
-      "```sh\nnpm exec --yes --package skill-suitcase -- skill-suitcase status --json\n```"
+      "```sh\nnpm exec --yes --package skill-suitcase -- skill-suitcase status --source . --json\n```"
     ),
     1
   );
   assert.equal(
-    validateCliExamples("fixture.md", "```sh\nnpm exec -- skill-suitcase status --json\n```"),
+    validateCliExamples("fixture.md", "```sh\nnpm exec -- skill-suitcase status --source . --json\n```"),
     1
   );
   assert.throws(
@@ -1128,13 +1222,13 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
 
 test("CLI example parsing excludes shell redirections from CLI arguments", () => {
   for (const command of [
-    "skill-suitcase status --json > status.json",
-    "skill-suitcase status --json 2>errors.log",
-    "skill-suitcase status --json 2>&1",
-    "skill-suitcase status --json &> combined.log",
-    "skill-suitcase status --json &>> combined.log",
-    "skill-suitcase status --json >| status.json",
-    "skill-suitcase status --json>status.json"
+    "skill-suitcase status --source . --json > status.json",
+    "skill-suitcase status --source . --json 2>errors.log",
+    "skill-suitcase status --source . --json 2>&1",
+    "skill-suitcase status --source . --json &> combined.log",
+    "skill-suitcase status --source . --json &>> combined.log",
+    "skill-suitcase status --source . --json >| status.json",
+    "skill-suitcase status --source . --json>status.json"
   ]) {
     assert.equal(validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``), 1);
   }
@@ -1183,7 +1277,7 @@ test("CLI example parsing excludes shell redirections from CLI arguments", () =>
   assert.equal(
     validateCliExamples(
       "fixture.md",
-      "```bash\nskill-suitcase status --json <<EOF\nskill-suitcase bogus --json\nEOF\n```"
+      "```bash\nskill-suitcase status --source . --json <<EOF\nskill-suitcase bogus --json\nEOF\n```"
     ),
     1
   );
@@ -1208,7 +1302,7 @@ test("CLI example parsing excludes shell redirections from CLI arguments", () =>
   assert.equal(
     validateCliExamples(
       "fixture.md",
-      ["```bash", "cat <<'EOF'", `body${"\\"}`, "EOF", "skill-suitcase status --json", "```"].join("\n")
+      ["```bash", "cat <<'EOF'", `body${"\\"}`, "EOF", "skill-suitcase status --source . --json", "```"].join("\n")
     ),
     1
   );
@@ -1249,8 +1343,55 @@ test("HTML command examples include visible cmdline elements", () => {
   assert.equal(
     validateCliExamples(
       "fixture.html",
-      '<pre><code class="language-powershell">skill-suitcase status `\n  --json</code></pre>'
+      '<pre><code class="language-powershell">skill-suitcase status --source . `\n  --json</code></pre>'
     ),
     1
+  );
+});
+
+test("CLI example parsing validates registry acceptance", () => {
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status --json\n```"),
+    /CLI does not accept invocation: skill-suitcase status --json/
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nskill-suitcase status --source . --json\n```"),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```sh\n$CLI status --source . --target <target-id> <local-overrides> --json\n```"
+    ),
+    1
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\n$CLI status --source . <unknown-placeholder> --json\n```"
+    ),
+    /invalid CLI invocation.*Unknown argument: <unknown-placeholder>/
+  );
+});
+
+test("CLI example parsing covers indented and inline Markdown code", () => {
+  assert.throws(
+    () => validateCliExamples("fixture.md", "    skill-suitcase bogus --json\n"),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "Run `skill-suitcase bogus --json` now.\n"),
+    /unknown command: bogus/
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "Run ``skill-suitcase status --source . --json`` now.\n"),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "The `skill-suitcase` binary reads `skill-suitcase.yaml`.\n"
+    ),
+    0
   );
 });
