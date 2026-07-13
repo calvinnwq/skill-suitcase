@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { allowedNodeEnvironmentFlags, execPath } from "node:process";
 import { test } from "node:test";
 
 import { createCommandRegistry, parseCommandArgs } from "../src/commands/index.js";
@@ -10,17 +12,58 @@ const TEXT_DOCUMENT_EXTENSIONS = [".css", ".html", ".js", ".json", ".md", ".yaml
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(createCommandRegistry().names());
 const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "command", "do", "elif", "env", "if", "sudo", "then", "until", "while"]);
 const SHELL_FENCE_LANGUAGES = new Set([
+  "",
   "bash",
   "console",
   "fish",
   "powershell",
+  "ps1",
   "pwsh",
   "sh",
   "shell",
   "shell-session",
+  "shellscript",
+  "terminal",
   "zsh"
 ]);
 const SHELL_SUBSTITUTION_PLACEHOLDER = "__shell_command_substitution__";
+const NODE_CLI_VALUE_OPTIONS = nodeCliValueOptions();
+type ShellDialect = "posix" | "powershell";
+
+interface CommandExample {
+  contents: string;
+  dialect: ShellDialect;
+}
+
+interface ShellToken {
+  protected: boolean;
+  syntax: string;
+  value: string;
+}
+
+interface CliLauncher {
+  executableIndex: number;
+}
+
+interface PackageRunnerExecutable {
+  executableIndex: number;
+  separatorBeforeExecutable: boolean;
+}
+
+function nodeCliValueOptions(): ReadonlySet<string> {
+  const options = new Set<string>();
+  const help = execFileSync(execPath, ["--help"], { encoding: "utf8" });
+
+  for (const line of help.split(/\r?\n/)) {
+    if (!/^\s+--?/.test(line) || !line.includes("=...")) continue;
+    for (const match of line.matchAll(/(?:^|[,\s])(--?[A-Za-z][A-Za-z0-9-]*)/g)) {
+      const option = match[1];
+      if (option !== undefined) options.add(option);
+    }
+  }
+
+  return options;
+}
 
 function publicDocumentPaths(): string[] {
   const paths = readdirSync(".", { withFileTypes: true })
@@ -52,8 +95,14 @@ function decodeHtml(value: string): string {
     .replaceAll("&#39;", "'");
 }
 
-function markdownShellBlocks(contents: string): string[] {
-  const blocks: string[] = [];
+function shellDialect(language: string): ShellDialect {
+  return language === "powershell" || language === "ps1" || language === "pwsh"
+    ? "powershell"
+    : "posix";
+}
+
+function markdownShellBlocks(contents: string): CommandExample[] {
+  const blocks: CommandExample[] = [];
   const lines = contents.split(/\r?\n/);
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -65,12 +114,13 @@ function markdownShellBlocks(contents: string): string[] {
     const pandocLanguage = info.match(/^\{\.?([A-Za-z0-9_-]+)\}/)?.[1];
     const language = (pandocLanguage ?? info.split(/\s+/, 1)[0] ?? "").toLowerCase();
     const isShellBlock = SHELL_FENCE_LANGUAGES.has(language);
+    const dialect = shellDialect(language);
 
     const blockStart = index + 1;
     for (index = blockStart; index < lines.length; index += 1) {
       const closing = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1];
       if (closing === undefined || closing[0] !== fence[0] || closing.length < fence.length) continue;
-      if (isShellBlock) blocks.push(lines.slice(blockStart, index).join("\n"));
+      if (isShellBlock) blocks.push({ contents: lines.slice(blockStart, index).join("\n"), dialect });
       break;
     }
   }
@@ -78,10 +128,14 @@ function markdownShellBlocks(contents: string): string[] {
   return blocks;
 }
 
-function commandExamples(path: string, contents: string): string[] {
+function commandExamples(path: string, contents: string): CommandExample[] {
   const markdownBlocks = markdownShellBlocks(contents);
-  const htmlBlocks = [...contents.matchAll(/<pre\b[^>]*>\s*<code\b[^>]*>([\s\S]*?)<\/code>\s*<\/pre>/gi)]
-    .map((match) => decodeHtml(match[1] ?? ""));
+  const htmlBlocks = [...contents.matchAll(/<pre\b[^>]*>\s*<code\b([^>]*)>([\s\S]*?)<\/code>\s*<\/pre>/gi)]
+    .map((match) => {
+      const attributes = match[1] ?? "";
+      const language = attributes.match(/\b(?:lang|language)-([A-Za-z0-9_-]+)\b/i)?.[1]?.toLowerCase() ?? "";
+      return { contents: decodeHtml(match[2] ?? ""), dialect: shellDialect(language) };
+    });
   const htmlCommandLines = [...contents.matchAll(/<span\b([^>]*)>/g)]
     .filter((match) => {
       const classAttribute = (match[1] ?? "").match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/);
@@ -91,20 +145,84 @@ function commandExamples(path: string, contents: string): string[] {
     .map((match) => {
       const contentStart = (match.index ?? 0) + match[0].length;
       const contentEnd = contents.indexOf("</span>", contentStart);
-      return decodeHtml(contentEnd < 0 ? contents.slice(contentStart) : contents.slice(contentStart, contentEnd));
+      return {
+        contents: decodeHtml(contentEnd < 0 ? contents.slice(contentStart) : contents.slice(contentStart, contentEnd)),
+        dialect: "posix" as const
+      };
     });
   return path.endsWith(".html") ? [...htmlBlocks, ...htmlCommandLines] : markdownBlocks;
 }
 
-function shellSegments(line: string): string[] {
+function shellSegments(line: string, dialect: ShellDialect): string[] {
   const segments: string[] = [];
-  collectShellSegments(line, segments);
+  collectShellSegments(line, segments, dialect);
   return segments;
+}
+
+function skipShellArithmetic(source: string, start: number, segments: string[]): number {
+  let depth = 0;
+  let quote: "\"" | "'" | null = null;
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index] ?? "";
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote !== null) {
+      if (character === quote) {
+        quote = null;
+      } else if (quote === "\"" && character === "$" && source[index + 1] === "(") {
+        if (source[index + 2] === "(") {
+          index = skipShellArithmetic(source, index + 3, segments);
+        } else {
+          index = collectShellSegments(source, segments, "posix", index + 2, ")");
+        }
+      } else if (quote === "\"" && character === "`") {
+        index = collectShellSegments(source, segments, "posix", index + 1, "`");
+      }
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "(") {
+      depth += 1;
+      continue;
+    }
+    if (character === "$" && source[index + 1] === "(") {
+      if (source[index + 2] === "(") {
+        index = skipShellArithmetic(source, index + 3, segments);
+      } else {
+        index = collectShellSegments(source, segments, "posix", index + 2, ")");
+      }
+      continue;
+    }
+    if (character === "`") {
+      index = collectShellSegments(source, segments, "posix", index + 1, "`");
+      continue;
+    }
+    if (character !== ")") continue;
+    if (depth > 0) {
+      depth -= 1;
+      continue;
+    }
+    if (source[index + 1] === ")") return index + 1;
+  }
+
+  return source.length;
 }
 
 function collectShellSegments(
   source: string,
   segments: string[],
+  dialect: ShellDialect,
   start = 0,
   terminator: ")" | "`" | null = null
 ): number {
@@ -124,7 +242,8 @@ function collectShellSegments(
       escaped = false;
       continue;
     }
-    if (character === "\\" && quote !== "'") {
+    if (((dialect === "posix" && character === "\\") || (dialect === "powershell" && character === "`"))
+      && quote !== "'") {
       segment += character;
       escaped = true;
       continue;
@@ -138,12 +257,18 @@ function collectShellSegments(
       if (character === quote) {
         segment += character;
         quote = null;
+      } else if (dialect === "posix"
+        && character === "$"
+        && source[index + 1] === "("
+        && source[index + 2] === "(") {
+        segment += SHELL_SUBSTITUTION_PLACEHOLDER;
+        index = skipShellArithmetic(source, index + 3, segments);
       } else if (character === "$" && source[index + 1] === "(") {
         segment += SHELL_SUBSTITUTION_PLACEHOLDER;
-        index = collectShellSegments(source, segments, index + 2, ")");
-      } else if (character === "`") {
+        index = collectShellSegments(source, segments, dialect, index + 2, ")");
+      } else if (dialect === "posix" && character === "`") {
         segment += SHELL_SUBSTITUTION_PLACEHOLDER;
-        index = collectShellSegments(source, segments, index + 1, "`");
+        index = collectShellSegments(source, segments, dialect, index + 1, "`");
       } else {
         segment += character;
       }
@@ -158,14 +283,27 @@ function collectShellSegments(
       quote = character;
       continue;
     }
-    if (character === "$" && source[index + 1] === "(") {
+    if (dialect === "posix"
+      && character === "$"
+      && source[index + 1] === "("
+      && source[index + 2] === "(") {
       segment += SHELL_SUBSTITUTION_PLACEHOLDER;
-      index = collectShellSegments(source, segments, index + 2, ")");
+      index = skipShellArithmetic(source, index + 3, segments);
       continue;
     }
-    if (character === "`") {
+    if (character === "$" && source[index + 1] === "(") {
       segment += SHELL_SUBSTITUTION_PLACEHOLDER;
-      index = collectShellSegments(source, segments, index + 1, "`");
+      index = collectShellSegments(source, segments, dialect, index + 2, ")");
+      continue;
+    }
+    if (dialect === "posix" && (character === "<" || character === ">") && source[index + 1] === "(") {
+      segment += SHELL_SUBSTITUTION_PLACEHOLDER;
+      index = collectShellSegments(source, segments, dialect, index + 2, ")");
+      continue;
+    }
+    if (dialect === "posix" && character === "`") {
+      segment += SHELL_SUBSTITUTION_PLACEHOLDER;
+      index = collectShellSegments(source, segments, dialect, index + 1, "`");
       continue;
     }
     if (character === "#" && (index === 0 || /[\s;&|()]/.test(source[index - 1] ?? ""))) {
@@ -173,8 +311,21 @@ function collectShellSegments(
       return source.length;
     }
     if (character === "(") {
+      if (dialect === "posix" && source[index + 1] === "(") {
+        segment += SHELL_SUBSTITUTION_PLACEHOLDER;
+        index = skipShellArithmetic(source, index + 2, segments);
+        continue;
+      }
       finishSegment();
-      index = collectShellSegments(source, segments, index + 1, ")");
+      index = collectShellSegments(source, segments, dialect, index + 1, ")");
+      continue;
+    }
+    if (character === "&" && (source[index - 1] === ">" || source[index - 1] === "<" || source[index + 1] === ">")) {
+      segment += character;
+      continue;
+    }
+    if (character === "|" && source[index - 1] === ">") {
+      segment += character;
       continue;
     }
     if (character === ")" || character === ";" || character === "|" || character === "&") {
@@ -189,28 +340,35 @@ function collectShellSegments(
   return source.length;
 }
 
-function shellTokens(segment: string): string[] {
-  const tokens: string[] = [];
+function shellTokens(segment: string, dialect: ShellDialect): ShellToken[] {
+  const tokens: ShellToken[] = [];
   let token = "";
+  let tokenProtected = false;
+  let tokenSyntax = "";
   let tokenStarted = false;
   let quote: "\"" | "'" | null = null;
   let escaped = false;
 
   function finishToken(): void {
     if (!tokenStarted) return;
-    tokens.push(token);
+    tokens.push({ protected: tokenProtected, syntax: tokenSyntax, value: token });
     token = "";
+    tokenProtected = false;
+    tokenSyntax = "";
     tokenStarted = false;
   }
 
   for (const character of segment) {
     if (escaped) {
       token += character;
+      tokenProtected = true;
+      tokenSyntax += "x";
       tokenStarted = true;
       escaped = false;
       continue;
     }
-    if (character === "\\" && quote !== "'") {
+    if (((dialect === "posix" && character === "\\") || (dialect === "powershell" && character === "`"))
+      && quote !== "'") {
       escaped = true;
       tokenStarted = true;
       continue;
@@ -220,12 +378,14 @@ function shellTokens(segment: string): string[] {
         quote = null;
       } else {
         token += character;
+        tokenSyntax += "x";
       }
       tokenStarted = true;
       continue;
     }
     if (character === "\"" || character === "'") {
       quote = character;
+      tokenProtected = true;
       tokenStarted = true;
       continue;
     }
@@ -234,10 +394,15 @@ function shellTokens(segment: string): string[] {
       continue;
     }
     token += character;
+    tokenSyntax += character;
     tokenStarted = true;
   }
 
-  if (escaped) token += "\\";
+  if (escaped) {
+    token += dialect === "powershell" ? "`" : "\\";
+    tokenProtected = true;
+    tokenSyntax += "x";
+  }
   finishToken();
   return tokens;
 }
@@ -252,33 +417,335 @@ function executableName(token: string): string {
 
 function isSkillSuitcaseExecutable(token: string, allowPackageVersion = false): boolean {
   const name = executableName(token);
-  return name === "skill-suitcase" || (allowPackageVersion && /^skill-suitcase@[^/]+$/.test(name));
+  return name === "skill-suitcase"
+    || (allowPackageVersion && /^skill-suitcase@[^/]+$/.test(name));
 }
 
-function skillSuitcaseExecutableIndex(tokens: string[]): number {
+function packageRunnerExecutable(
+  tokens: string[],
+  start: number,
+  runner: "bunx" | "npm" | "npx" | "pnpm" | "yarn"
+): PackageRunnerExecutable | null {
+  const booleanOptions = new Set(["--quiet", "--shell-mode", "--silent", "--yes", "-q", "-y"]);
+  if (runner === "npm") booleanOptions.add("-p");
+  const optionsWithValues = new Set([
+    "--cache",
+    "--config",
+    "--cwd",
+    "--dir",
+    "--filter",
+    "--package",
+    "--prefix",
+    "--registry",
+    "--reporter",
+    "--userconfig",
+    "--workspace",
+    "-C",
+    "-w"
+  ]);
+  if (runner === "bunx" || runner === "npx" || runner === "yarn") optionsWithValues.add("-p");
+
+  for (let index = start; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    if (token === "--") {
+      return isSkillSuitcaseExecutable(tokens[index + 1] ?? "", true)
+        ? { executableIndex: index + 1, separatorBeforeExecutable: true }
+        : null;
+    }
+    if ((runner === "npm" || runner === "npx")
+      && (token === "--call" || token === "-c" || /^(?:--call|-c)=/.test(token))) {
+      return null;
+    }
+    if (optionsWithValues.has(token)) {
+      index += 1;
+      continue;
+    }
+    if (booleanOptions.has(token) || /^--[^=]+=/.test(token)) continue;
+    if (token.startsWith("-")) return null;
+    return isSkillSuitcaseExecutable(token, true)
+      ? { executableIndex: index, separatorBeforeExecutable: false }
+      : null;
+  }
+
+  return null;
+}
+
+function packageRunnerActionIndex(
+  tokens: string[],
+  start: number,
+  runner: "npm" | "pnpm" | "yarn"
+): number {
+  const booleanOptions = new Set(["--quiet", "--silent", "--verbose", "--yes", "-q", "-s", "-y"]);
+  const optionsWithValues = new Set([
+    "--cache",
+    "--config",
+    "--cwd",
+    "--dir",
+    "--filter",
+    "--prefix",
+    "--registry",
+    "--reporter",
+    "--userconfig",
+    "--workspace",
+    "-C",
+    "-w"
+  ]);
+
+  for (let index = start; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    if (optionsWithValues.has(token)) {
+      index += 1;
+      continue;
+    }
+    if (booleanOptions.has(token) || /^--[^=]+=/.test(token)) continue;
+    if (token === "exec" || ((runner === "pnpm" || runner === "yarn") && token === "dlx")) {
+      return index;
+    }
+    return -1;
+  }
+
+  return -1;
+}
+
+function isSourceCliEntrypoint(token: string): boolean {
+  const normalized = token.replaceAll("\\", "/");
+  return token === "$CLI" || token === "${CLI}" || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
+}
+
+function nodeSourceCliEntrypointIndex(tokens: string[], start: number): number {
+  const fileLaunchOptions = new Set(["--watch", "--watch-preserve-output"]);
+  const nonScriptOptions = new Set([
+    "--check",
+    "--completion-bash",
+    "--eval",
+    "--help",
+    "--input-type",
+    "--print",
+    "--prof-process",
+    "--run",
+    "--test",
+    "--version",
+    "-c",
+    "-e",
+    "-h",
+    "-p",
+    "-v"
+  ]);
+
+  for (let index = start; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    if (token === "--") return isSourceCliEntrypoint(tokens[index + 1] ?? "") ? index + 1 : -1;
+    if (nonScriptOptions.has(token)
+      || /^(?:--eval|--input-type|--print|--run|-e|-p)=?./.test(token)) {
+      return -1;
+    }
+    if (NODE_CLI_VALUE_OPTIONS.has(token)) {
+      index += 1;
+      continue;
+    }
+    if (fileLaunchOptions.has(token)
+      || (token.startsWith("-") && allowedNodeEnvironmentFlags.has(token))
+      || /^(?:--conditions|--env-file(?:-if-exists)?|--experimental-loader|--import|--inspect-port|--loader|--require|--title)=/.test(token)
+      || /^-r.+/.test(token)) {
+      continue;
+    }
+    if (token.startsWith("-")) return -1;
+    return isSourceCliEntrypoint(token) ? index : -1;
+  }
+
+  return -1;
+}
+
+function skillSuitcaseLauncher(tokens: string[]): CliLauncher | null {
   let index = 0;
   while (isShellCommandPrefix(tokens[index] ?? "")) index += 1;
 
   const candidate = tokens[index];
-  if (candidate === undefined) return -1;
-  if (isSkillSuitcaseExecutable(candidate)) return index;
+  if (candidate === undefined) return null;
+  if (isSkillSuitcaseExecutable(candidate)) {
+    return { executableIndex: index };
+  }
 
   const wrapper = executableName(candidate);
   if (wrapper === "npx" || wrapper === "bunx") {
-    index += 1;
-    while (["--", "--quiet", "--yes", "-q", "-y"].includes(tokens[index] ?? "")) index += 1;
-    return isSkillSuitcaseExecutable(tokens[index] ?? "", true) ? index : -1;
+    const executable = packageRunnerExecutable(tokens, index + 1, wrapper);
+    return executable === null
+      ? null
+      : { executableIndex: executable.executableIndex };
   }
 
-  const action = tokens[index + 1];
-  if ((wrapper === "npm" && action === "exec")
-    || ((wrapper === "pnpm" || wrapper === "yarn") && (action === "dlx" || action === "exec"))) {
-    index += 2;
-    if (tokens[index] === "--") index += 1;
-    return isSkillSuitcaseExecutable(tokens[index] ?? "", true) ? index : -1;
+  if (wrapper === "node") {
+    const executableIndex = nodeSourceCliEntrypointIndex(tokens, index + 1);
+    return executableIndex < 0 ? null : { executableIndex };
   }
 
-  return -1;
+  if (wrapper === "npm" || wrapper === "pnpm" || wrapper === "yarn") {
+    const actionIndex = packageRunnerActionIndex(tokens, index + 1, wrapper);
+    if (actionIndex < 0) return null;
+    const executable = packageRunnerExecutable(tokens, actionIndex + 1, wrapper);
+    if (wrapper === "npm" && executable !== null) {
+      assert.equal(
+        executable.separatorBeforeExecutable,
+        true,
+        "npm exec examples must use -- before skill-suitcase"
+      );
+    }
+    return executable === null
+      ? null
+      : { executableIndex: executable.executableIndex };
+  }
+
+  return null;
+}
+
+function withoutShellRedirections(tokens: ShellToken[]): ShellToken[] {
+  const commandTokens: ShellToken[] = [];
+  const standaloneOperator = /^(?:\d+|\*)?(?:>>>?|<<<|<<-?|<>|>\||>|<|>&|<&|&>>?)$/;
+  const attachedRedirection = /^(?:(?:\d+|\*)?(?:>>>?|<<<|<<-?|<>|>\||>|<).+|(?:\d+|\*)?(?:>&|<&)(?:\d+|-)|&>>?.+)$/;
+
+  function requireTarget(index: number): void {
+    const target = tokens[index + 1];
+    assert.ok(
+      target !== undefined
+        && !standaloneOperator.test(target.syntax)
+        && !attachedRedirection.test(target.syntax),
+      "shell redirection requires a target"
+    );
+  }
+
+  function inlineRedirectionIndex(syntax: string): number {
+    for (let index = 1; index < syntax.length; index += 1) {
+      const character = syntax[index] ?? "";
+      if (character !== "<" && character !== ">" && !(character === "&" && syntax[index + 1] === ">")) {
+        continue;
+      }
+      const suffix = syntax.slice(index);
+      if (standaloneOperator.test(suffix) || attachedRedirection.test(suffix)) return index;
+    }
+    return -1;
+  }
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === undefined) continue;
+    if (/^<[^<>]+>$/.test(token.syntax)) {
+      commandTokens.push(token);
+      continue;
+    }
+    if (standaloneOperator.test(token.syntax)) {
+      requireTarget(index);
+      index += 1;
+      continue;
+    }
+    if (attachedRedirection.test(token.syntax)) continue;
+    const redirectionIndex = inlineRedirectionIndex(token.syntax);
+    if (redirectionIndex >= 0) {
+      commandTokens.push({
+        protected: token.protected,
+        syntax: token.syntax.slice(0, redirectionIndex),
+        value: token.value.slice(0, redirectionIndex)
+      });
+      if (standaloneOperator.test(token.syntax.slice(redirectionIndex))) {
+        requireTarget(index);
+        index += 1;
+      }
+      continue;
+    }
+    commandTokens.push(token);
+  }
+
+  return commandTokens;
+}
+
+function logicalShellLines(example: CommandExample): string[] {
+  if (example.dialect === "powershell") {
+    return example.contents.replace(/`\r?\n[ \t]*/g, " ").split(/\r?\n/);
+  }
+
+  const lines = example.contents.split(/\r?\n/);
+
+  const commandLines: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    let line = lines[index] ?? "";
+    while (line.endsWith("\\") && index + 1 < lines.length) {
+      index += 1;
+      line = `${line.slice(0, -1)} ${(lines[index] ?? "").replace(/^\s*/, "")}`;
+    }
+    commandLines.push(line);
+    for (const heredoc of shellHeredocDelimiters(line)) {
+      let found = false;
+      while (index + 1 < lines.length) {
+        index += 1;
+        const bodyLine = lines[index] ?? "";
+        const candidate = heredoc.stripTabs ? bodyLine.replace(/^\t+/, "") : bodyLine;
+        if (candidate === heredoc.delimiter) {
+          found = true;
+          break;
+        }
+        if (!heredoc.quoted) commandLines.push(...shellHereDocExpansionSegments(bodyLine));
+      }
+      assert.ok(found, `shell here-document requires delimiter: ${heredoc.delimiter}`);
+    }
+  }
+
+  return commandLines;
+}
+
+function shellHeredocDelimiters(line: string): Array<{ delimiter: string; quoted: boolean; stripTabs: boolean }> {
+  const heredocs: Array<{ delimiter: string; quoted: boolean; stripTabs: boolean }> = [];
+
+  for (const segment of shellSegments(line, "posix")) {
+    const tokens = shellTokens(segment, "posix");
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (token === undefined) continue;
+      const standalone = token.syntax.match(/^(?:\d*)<<(-?)$/);
+      if (standalone !== null) {
+        const delimiter = tokens[index + 1]?.value;
+        assert.ok(delimiter !== undefined && delimiter.length > 0, "shell here-document requires a delimiter");
+        heredocs.push({
+          delimiter,
+          quoted: tokens[index + 1]?.protected ?? false,
+          stripTabs: standalone[1] === "-"
+        });
+        index += 1;
+        continue;
+      }
+      const attached = token.syntax.match(/^(?:\d*)<<(-?)(?!<)(.+)$/);
+      if (attached === null) continue;
+      const operatorIndex = token.syntax.indexOf("<<");
+      const delimiter = token.value.slice(operatorIndex + 2 + (attached[1] === "-" ? 1 : 0));
+      assert.ok(delimiter.length > 0, "shell here-document requires a delimiter");
+      heredocs.push({ delimiter, quoted: token.protected, stripTabs: attached[1] === "-" });
+    }
+  }
+
+  return heredocs;
+}
+
+function shellHereDocExpansionSegments(line: string): string[] {
+  const segments: string[] = [];
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? "";
+    if (character === "\\") {
+      index += 1;
+      continue;
+    }
+    if (character === "$" && line[index + 1] === "(") {
+      if (line[index + 2] === "(") {
+        index = skipShellArithmetic(line, index + 3, segments);
+      } else {
+        index = collectShellSegments(line, segments, "posix", index + 2, ")");
+      }
+      continue;
+    }
+    if (character === "`") {
+      index = collectShellSegments(line, segments, "posix", index + 1, "`");
+    }
+  }
+
+  return segments;
 }
 
 function isPublicUpstreamSubcommand(token: string | undefined): boolean {
@@ -293,16 +760,16 @@ function isPublicUpstreamSubcommand(token: string | undefined): boolean {
 function validateCliExamples(path: string, contents: string): number {
   let invocationCount = 0;
 
-  for (const block of commandExamples(path, contents)) {
-    const logicalLines = block.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/);
-    for (const line of logicalLines) {
-      for (const segment of shellSegments(line)) {
-        const tokens = shellTokens(segment);
-        const executableIndex = skillSuitcaseExecutableIndex(tokens);
-        if (executableIndex < 0) continue;
+  for (const example of commandExamples(path, contents)) {
+    for (const line of logicalShellLines(example)) {
+      for (const segment of shellSegments(line, example.dialect)) {
+        const tokens = withoutShellRedirections(shellTokens(segment, example.dialect));
+        const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value));
+        if (launcher === null) continue;
 
         invocationCount += 1;
-        const invocation = tokens.slice(executableIndex);
+        const launcherInvocation = tokens.slice(launcher.executableIndex);
+        const invocation = launcherInvocation.map((token) => token.value);
         const command = invocation[1] ?? "";
         const possibleSubcommand = invocation[2];
         assert.ok(PUBLIC_COMMANDS.has(command), `${path} documents unknown command: ${command}`);
@@ -407,6 +874,19 @@ test("CLI example parsing rejects invalid tokens and validates each pipe segment
     ),
     /unknown command: bogus/
   );
+  for (const nodeFlag of ["--inspect", "--inspect-brk", "--no-deprecation", "--watch"]) {
+    assert.throws(
+      () => validateCliExamples(
+        "fixture.md",
+        `\`\`\`sh\nnode ${nodeFlag} dist/src/cli.js bogus --json\n\`\`\``
+      ),
+      /unknown command: bogus/
+    );
+  }
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nnpm exec -p skill-suitcase bogus --json\n```"),
+    /npm exec examples must use -- before skill-suitcase/
+  );
   assert.throws(
     () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status | jq --json\n```"),
     /CLI example without --json: skill-suitcase status/
@@ -423,6 +903,10 @@ test("CLI example parsing rejects invalid tokens and validates each pipe segment
     () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status --not-a-real-flag --json\n```"),
     /invalid CLI invocation.*Unknown argument: --not-a-real-flag/
   );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase -- status --json\n```"),
+    /unknown command: --/
+  );
 });
 
 test("CLI example parsing covers common shell fence forms", () => {
@@ -434,6 +918,9 @@ test("CLI example parsing covers common shell fence forms", () => {
     "```zsh\nskill-suitcase bogus --json\n```",
     "```fish\nskill-suitcase bogus --json\n```",
     "```pwsh\nskill-suitcase bogus --json\n```",
+    "```\nskill-suitcase bogus --json\n```",
+    "```terminal\nskill-suitcase bogus --json\n```",
+    "```shellscript\nskill-suitcase bogus --json\n```",
     "```{bash}\nskill-suitcase bogus --json\n```",
     "```bash\r\nskill-suitcase bogus --json\r\n```",
     "```BASH\nskill-suitcase bogus --json\n````"
@@ -476,6 +963,34 @@ test("CLI example parsing validates command substitutions and subshells", () => 
     validateCliExamples("fixture.md", "```sh\nskill-suitcase status --source `pwd` --json\n```"),
     1
   );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```bash\nvalue=$((1 << 2))\n((value = 1 << 2))\nskill-suitcase status --source \"$((value + 1))\" --json\n```"
+    ),
+    1
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```bash\necho \"$(( $(skill-suitcase bogus --json) + 1 ))\"\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```bash\necho $((`skill-suitcase bogus --json` + 1))\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```pwsh\n$((skill-suitcase bogus --json))\n```"
+    ),
+    /unknown command: bogus/
+  );
 });
 
 test("CLI example parsing recognizes wrappers and path-qualified executables", () => {
@@ -487,9 +1002,232 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
     () => validateCliExamples("fixture.md", "```sh\n/usr/local/bin/skill-suitcase bogus --json\n```"),
     /unknown command: bogus/
   );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nnode dist/src/cli.js bogus --json\n```"),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nnode \"$CLI\" bogus --json\n```"),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nnode --require ./hook.js dist/src/cli.js bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nnode -C development dist/src/cli.js bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nnode --trace-event-categories node.async_hooks dist/src/cli.js bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nnpm exec --package=skill-suitcase -- skill-suitcase bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nnpm exec --workspace docs -- skill-suitcase bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nnpm --silent exec -- skill-suitcase bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nyarn dlx -p skill-suitcase skill-suitcase bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nyarn --cwd docs dlx -p skill-suitcase skill-suitcase bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
   assert.equal(
     validateCliExamples("fixture.md", "```sh\nnpx skill-suitcase status --json\n```"),
     1
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nnode \"$CLI\" status --json\n```"),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```sh\nnpm exec --yes --package skill-suitcase -- skill-suitcase status --json\n```"
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nnpm exec -- skill-suitcase status --json\n```"),
+    1
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nnpm exec skill-suitcase status --json\n```"),
+    /npm exec examples must use -- before skill-suitcase/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nnpm exec -- skill-suitcase -- status --json\n```"),
+    /unknown command: --/
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nnpx cowsay -- skill-suitcase bogus --json\n```"),
+    0
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nnpx skill-suitcase -- status --json\n```"),
+    /unknown command: --/
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```sh\nnpm exec --call \"echo ok\" skill-suitcase status --json\n```"
+    ),
+    0
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nnode --require dist/src/cli.js other.js bogus --json\n```"),
+    0
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nnode -e \"console.log('ok')\" dist/src/cli.js bogus --json\n```"),
+    0
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nnode no-deprecation dist/src/cli.js status --json\n```"),
+    0
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nnode --input-type=module dist/src/cli.js status --json\n```"),
+    0
+  );
+});
+
+test("CLI example parsing excludes shell redirections from CLI arguments", () => {
+  for (const command of [
+    "skill-suitcase status --json > status.json",
+    "skill-suitcase status --json 2>errors.log",
+    "skill-suitcase status --json 2>&1",
+    "skill-suitcase status --json &> combined.log",
+    "skill-suitcase status --json &>> combined.log",
+    "skill-suitcase status --json >| status.json",
+    "skill-suitcase status --json>status.json"
+  ]) {
+    assert.equal(validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``), 1);
+  }
+
+  for (const source of ['">"', '">catalog"', "\\>"]) {
+    assert.equal(
+      validateCliExamples("fixture.md", `\`\`\`sh\nskill-suitcase status --source ${source} --json\n\`\`\``),
+      1
+    );
+  }
+
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status > --json\n```"),
+    /CLI example without --json: skill-suitcase status/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\n>status.json skill-suitcase bogus --json\n```"),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nnpx 2>/dev/null skill-suitcase bogus --json\n```"),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status --json >\n```"),
+    /shell redirection requires a target/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status --json > >status.json\n```"),
+    /shell redirection requires a target/
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```bash\nskill-suitcase status --source <(make-catalog) --json\n```"
+    ),
+    1
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```bash\nskill-suitcase status --source <(skill-suitcase bogus --json) --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```bash\nskill-suitcase status --json <<EOF\nskill-suitcase bogus --json\nEOF\n```"
+    ),
+    1
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```bash\nskill-suitcase status --json <<EOF\nmissing\n```"),
+    /shell here-document requires delimiter: EOF/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```bash\ncat <<EOF\n$(skill-suitcase bogus --json)\nEOF\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```bash\ncat <<'EOF'\n$(skill-suitcase bogus --json)\nEOF\n```"
+    ),
+    0
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      ["```bash", "cat <<'EOF'", `body${"\\"}`, "EOF", "skill-suitcase status --json", "```"].join("\n")
+    ),
+    1
+  );
+});
+
+test("CLI example parsing applies PowerShell continuation and escaping", () => {
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```pwsh\nskill-suitcase status `\n  --source \"C:\\catalog` name\" `\n  --json > status.json\n```"
+    ),
+    1
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```powershell\nskill-suitcase bogus `\n  --json\n```"
+    ),
+    /unknown command: bogus/
   );
 });
 
@@ -507,5 +1245,12 @@ test("HTML command examples include visible cmdline elements", () => {
       '<pre class="example">\n  <code class="language-shell">skill-suitcase bogus --json</code>\n</pre>'
     ),
     /unknown command: bogus/
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.html",
+      '<pre><code class="language-powershell">skill-suitcase status `\n  --json</code></pre>'
+    ),
+    1
   );
 });
