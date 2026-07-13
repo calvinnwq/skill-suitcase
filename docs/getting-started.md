@@ -57,13 +57,17 @@ git clone "$CATALOG_REMOTE" "$HOME/.skill-suitcase/skills"
 SRC="$HOME/.skill-suitcase/skills"
 ```
 
-Otherwise, create a minimal catalog with one starter skill:
+Otherwise, create a minimal catalog with one starter skill.
+The `if` guard keeps this snippet from overwriting a catalog that already exists at the standard location:
 
 ```bash
 SRC="$HOME/.skill-suitcase/skills"
-mkdir -p "$SRC/skills/hello-world"
+if test -e "$SRC/skill-suitcase.yaml"; then
+  echo "A catalog already exists at $SRC; skip to the next section."
+else
+  mkdir -p "$SRC/skills/hello-world"
 
-cat > "$SRC/skill-suitcase.yaml" <<'YAML'
+  cat > "$SRC/skill-suitcase.yaml" <<'YAML'
 suitcases:
   starter:
     skills:
@@ -81,7 +85,7 @@ assignmentPaths:
     path: /path/to/claude/skills
 YAML
 
-cat > "$SRC/skills/hello-world/SKILL.md" <<'MARKDOWN'
+  cat > "$SRC/skills/hello-world/SKILL.md" <<'MARKDOWN'
 ---
 name: hello-world
 version: 2026.01.01
@@ -92,6 +96,7 @@ description: Use when trying Skill Suitcase for the first time.
 
 A starter skill used to exercise the Skill Suitcase install workflow.
 MARKDOWN
+fi
 ```
 
 Git backing is the preferred operating model, and staging refuses selected skills with untracked, non-ignored files in a Git-backed catalog, so commit the initial content:
