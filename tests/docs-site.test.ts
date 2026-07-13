@@ -332,6 +332,15 @@ test("reference page documents the complete shipped command surface", () => {
 
 test("install page covers the npm install and pinned source fallback", () => {
   const install = read("docs/install.html");
+  const operatorSkillCodeBlock = install.match(
+    /<pre><code><span class="c"># use the source checkout[\s\S]*?<\/code><\/pre>/
+  )?.[0];
+  assert.ok(operatorSkillCodeBlock, "the install page must keep its copyable operator-skill block");
+  const operatorSkillCode = operatorSkillCodeBlock
+    .replace(/<[^>]+>/g, "")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
 
   assert.ok(install.includes("npm install --global skill-suitcase"));
   assert.ok(install.includes("Node.js 20 or newer"));
@@ -344,6 +353,22 @@ test("install page covers the npm install and pinned source fallback", () => {
   assert.ok(install.includes('mv "$TARGET" "$INSTALL_TMP/previous"'));
   assert.ok(install.includes('mv "$INSTALL_TMP/replacement" "$TARGET"'));
   assert.match(install, /Skill source not found:[\s\S]*?return 1/);
+  for (const root of [
+    "$HOME/.codex/skills",
+    "$HOME/.claude/skills",
+    "$HOME/.agents/skills",
+    "$HOME/.grok/skills",
+    "$HOME/.hermes/skills",
+    "$HOME/.hermes/profiles/<name>/skills",
+  ]) {
+    assert.ok(operatorSkillCode.includes(root), `the operator-skill block must document ${root}`);
+  }
+  assert.match(operatorSkillCode, /^AGENT_SKILLS_DIR="\$HOME\/\.codex\/skills"$/m);
+  assert.equal(
+    operatorSkillCode.match(/^\s*(?:export\s+)?AGENT_SKILLS_DIR\s*=/gm)?.length ?? 0,
+    1,
+    "the docs-site operator-skill block must leave only one active assignment"
+  );
   assert.ok(
     install.indexOf('cp -R "$SKILL_SRC/." "$INSTALL_TMP/replacement/"')
       < install.indexOf('mv "$TARGET" "$INSTALL_TMP/previous"'),
