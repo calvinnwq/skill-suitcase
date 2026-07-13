@@ -9,7 +9,18 @@ const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
 const TEXT_DOCUMENT_EXTENSIONS = [".css", ".html", ".js", ".json", ".md", ".yaml", ".yml"];
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(createCommandRegistry().names());
 const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "command", "do", "elif", "env", "if", "sudo", "then", "until", "while"]);
-const SHELL_FENCE_LANGUAGES = new Set(["bash", "sh", "shell", "console", "shell-session"]);
+const SHELL_FENCE_LANGUAGES = new Set([
+  "bash",
+  "console",
+  "fish",
+  "powershell",
+  "pwsh",
+  "sh",
+  "shell",
+  "shell-session",
+  "zsh"
+]);
+const SHELL_SUBSTITUTION_PLACEHOLDER = "__shell_command_substitution__";
 
 function publicDocumentPaths(): string[] {
   const paths = readdirSync(".", { withFileTypes: true })
@@ -50,7 +61,9 @@ function markdownShellBlocks(contents: string): string[] {
     if (opening === undefined || opening === null) continue;
 
     const fence = opening[1] ?? "";
-    const language = (opening[2] ?? "").trim().split(/\s+/, 1)[0]?.toLowerCase() ?? "";
+    const info = (opening[2] ?? "").trim();
+    const pandocLanguage = info.match(/^\{\.?([A-Za-z0-9_-]+)\}/)?.[1];
+    const language = (pandocLanguage ?? info.split(/\s+/, 1)[0] ?? "").toLowerCase();
     const isShellBlock = SHELL_FENCE_LANGUAGES.has(language);
 
     const blockStart = index + 1;
@@ -85,72 +98,95 @@ function commandExamples(path: string, contents: string): string[] {
 
 function shellSegments(line: string): string[] {
   const segments: string[] = [];
-  const parenthesisContexts: Array<{ restoreQuote: "\"" | null; substitution: boolean }> = [];
-  let start = 0;
+  collectShellSegments(line, segments);
+  return segments;
+}
+
+function collectShellSegments(
+  source: string,
+  segments: string[],
+  start = 0,
+  terminator: ")" | "`" | null = null
+): number {
+  let segment = "";
   let quote: "\"" | "'" | null = null;
-  let inBacktickSubstitution = false;
-  let backtickRestoreQuote: "\"" | null = null;
   let escaped = false;
 
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
+  function finishSegment(): void {
+    if (segment.trim().length > 0) segments.push(segment);
+    segment = "";
+  }
+
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index] ?? "";
     if (escaped) {
+      segment += character;
       escaped = false;
       continue;
     }
     if (character === "\\" && quote !== "'") {
+      segment += character;
       escaped = true;
       continue;
     }
-    if (character === "$" && line[index + 1] === "(" && quote !== "'") {
-      segments.push(line.slice(start, index));
-      parenthesisContexts.push({ restoreQuote: quote, substitution: true });
-      quote = null;
-      index += 1;
-      start = index + 1;
-      continue;
-    }
-    if (character === "`" && quote !== "'") {
-      segments.push(line.slice(start, index));
-      if (inBacktickSubstitution) {
-        inBacktickSubstitution = false;
-        quote = backtickRestoreQuote;
-        backtickRestoreQuote = null;
-      } else {
-        inBacktickSubstitution = true;
-        backtickRestoreQuote = quote === "\"" ? quote : null;
-        quote = null;
-      }
-      start = index + 1;
-      continue;
-    }
-    if (quote !== null) {
+    if (quote === "'") {
+      segment += character;
       if (character === quote) quote = null;
       continue;
     }
+    if (quote === "\"") {
+      if (character === quote) {
+        segment += character;
+        quote = null;
+      } else if (character === "$" && source[index + 1] === "(") {
+        segment += SHELL_SUBSTITUTION_PLACEHOLDER;
+        index = collectShellSegments(source, segments, index + 2, ")");
+      } else if (character === "`") {
+        segment += SHELL_SUBSTITUTION_PLACEHOLDER;
+        index = collectShellSegments(source, segments, index + 1, "`");
+      } else {
+        segment += character;
+      }
+      continue;
+    }
+    if (terminator !== null && character === terminator) {
+      finishSegment();
+      return index;
+    }
     if (character === "\"" || character === "'") {
+      segment += character;
       quote = character;
       continue;
     }
-    if (character === "#" && (index === 0 || /[\s;&|()]/.test(line[index - 1] ?? ""))) {
-      segments.push(line.slice(start, index));
-      return segments;
+    if (character === "$" && source[index + 1] === "(") {
+      segment += SHELL_SUBSTITUTION_PLACEHOLDER;
+      index = collectShellSegments(source, segments, index + 2, ")");
+      continue;
     }
-    if (character === ";" || character === "|" || character === "&" || character === "(" || character === ")") {
-      segments.push(line.slice(start, index));
-      if (character === "(") {
-        parenthesisContexts.push({ restoreQuote: null, substitution: false });
-      } else if (character === ")") {
-        const context = parenthesisContexts.pop();
-        if (context?.substitution) quote = context.restoreQuote;
-      }
-      if ((character === "|" || character === "&") && line[index + 1] === character) index += 1;
-      start = index + 1;
+    if (character === "`") {
+      segment += SHELL_SUBSTITUTION_PLACEHOLDER;
+      index = collectShellSegments(source, segments, index + 1, "`");
+      continue;
     }
+    if (character === "#" && (index === 0 || /[\s;&|()]/.test(source[index - 1] ?? ""))) {
+      finishSegment();
+      return source.length;
+    }
+    if (character === "(") {
+      finishSegment();
+      index = collectShellSegments(source, segments, index + 1, ")");
+      continue;
+    }
+    if (character === ")" || character === ";" || character === "|" || character === "&") {
+      finishSegment();
+      if ((character === "|" || character === "&") && source[index + 1] === character) index += 1;
+      continue;
+    }
+    segment += character;
   }
 
-  segments.push(line.slice(start));
-  return segments;
+  finishSegment();
+  return source.length;
 }
 
 function shellTokens(segment: string): string[] {
@@ -210,6 +246,41 @@ function isShellCommandPrefix(token: string): boolean {
   return SHELL_COMMAND_PREFIXES.has(token) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 }
 
+function executableName(token: string): string {
+  return token.replaceAll("\\", "/").split("/").at(-1) ?? token;
+}
+
+function isSkillSuitcaseExecutable(token: string, allowPackageVersion = false): boolean {
+  const name = executableName(token);
+  return name === "skill-suitcase" || (allowPackageVersion && /^skill-suitcase@[^/]+$/.test(name));
+}
+
+function skillSuitcaseExecutableIndex(tokens: string[]): number {
+  let index = 0;
+  while (isShellCommandPrefix(tokens[index] ?? "")) index += 1;
+
+  const candidate = tokens[index];
+  if (candidate === undefined) return -1;
+  if (isSkillSuitcaseExecutable(candidate)) return index;
+
+  const wrapper = executableName(candidate);
+  if (wrapper === "npx" || wrapper === "bunx") {
+    index += 1;
+    while (["--", "--quiet", "--yes", "-q", "-y"].includes(tokens[index] ?? "")) index += 1;
+    return isSkillSuitcaseExecutable(tokens[index] ?? "", true) ? index : -1;
+  }
+
+  const action = tokens[index + 1];
+  if ((wrapper === "npm" && action === "exec")
+    || ((wrapper === "pnpm" || wrapper === "yarn") && (action === "dlx" || action === "exec"))) {
+    index += 2;
+    if (tokens[index] === "--") index += 1;
+    return isSkillSuitcaseExecutable(tokens[index] ?? "", true) ? index : -1;
+  }
+
+  return -1;
+}
+
 function isPublicUpstreamSubcommand(token: string | undefined): boolean {
   if (token === undefined) return false;
   try {
@@ -227,8 +298,8 @@ function validateCliExamples(path: string, contents: string): number {
     for (const line of logicalLines) {
       for (const segment of shellSegments(line)) {
         const tokens = shellTokens(segment);
-        const executableIndex = tokens.indexOf("skill-suitcase");
-        if (executableIndex < 0 || !tokens.slice(0, executableIndex).every(isShellCommandPrefix)) continue;
+        const executableIndex = skillSuitcaseExecutableIndex(tokens);
+        if (executableIndex < 0) continue;
 
         invocationCount += 1;
         const invocation = tokens.slice(executableIndex);
@@ -245,6 +316,12 @@ function validateCliExamples(path: string, contents: string): number {
           invocation.includes("--json"),
           `${path} has a CLI example without --json: ${invocation.join(" ")}`
         );
+        try {
+          parseCommandArgs(invocation.slice(1));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          assert.fail(`${path} has an invalid CLI invocation: ${invocation.join(" ")} (${message})`);
+        }
       }
     }
   }
@@ -259,7 +336,7 @@ function assertNoPrivateMachinePaths(path: string, contents: string): void {
   assert.doesNotMatch(localPathContents, /\/home\/[^/\\\s`"']+/, `${path} contains a Linux user path`);
   assert.doesNotMatch(
     localPathContents,
-    /(?:^|[^A-Za-z0-9._~/-])\/root(?:[\/\\]|(?=[\s`"'<>]|$))/m,
+    /(?:^|[^A-Za-z0-9._~/-])\/root(?=[^A-Za-z0-9_-]|$)/m,
     `${path} contains a Linux root user path`
   );
   assert.doesNotMatch(localPathContents, /[A-Z]:[\\/]Users[\\/][^\\/\s`"']+/i, `${path} contains a Windows user path`);
@@ -280,6 +357,8 @@ test("private machine path checks cover roots and Windows separators", () => {
     "`/Users/alice`",
     "`/home/alice`",
     "`/root/project`",
+    "Use /root.",
+    "(/root)",
     "path:/root/project",
     "C:/Users/alice/project",
     "C:\\Users\\alice",
@@ -340,6 +419,10 @@ test("CLI example parsing rejects invalid tokens and validates each pipe segment
     () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status # add --json for scripts\n```"),
     /CLI example without --json: skill-suitcase status/
   );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase status --not-a-real-flag --json\n```"),
+    /invalid CLI invocation.*Unknown argument: --not-a-real-flag/
+  );
 });
 
 test("CLI example parsing covers common shell fence forms", () => {
@@ -348,6 +431,10 @@ test("CLI example parsing covers common shell fence forms", () => {
     "```console\n$ skill-suitcase bogus --json\n```",
     '```bash title="demo"\nskill-suitcase bogus --json\n```',
     "```shell-session\n$ skill-suitcase bogus --json\n```",
+    "```zsh\nskill-suitcase bogus --json\n```",
+    "```fish\nskill-suitcase bogus --json\n```",
+    "```pwsh\nskill-suitcase bogus --json\n```",
+    "```{bash}\nskill-suitcase bogus --json\n```",
     "```bash\r\nskill-suitcase bogus --json\r\n```",
     "```BASH\nskill-suitcase bogus --json\n````"
   ]) {
@@ -380,6 +467,29 @@ test("CLI example parsing validates command substitutions and subshells", () => 
   assert.equal(
     validateCliExamples("fixture.md", "```sh\necho '$(skill-suitcase bogus --json)'\n```"),
     0
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", '```sh\nskill-suitcase status --source "$(pwd)" --json\n```'),
+    1
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nskill-suitcase status --source `pwd` --json\n```"),
+    1
+  );
+});
+
+test("CLI example parsing recognizes wrappers and path-qualified executables", () => {
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nnpx skill-suitcase bogus --json\n```"),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\n/usr/local/bin/skill-suitcase bogus --json\n```"),
+    /unknown command: bogus/
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nnpx skill-suitcase status --json\n```"),
+    1
   );
 });
 
