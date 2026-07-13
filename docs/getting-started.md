@@ -52,14 +52,14 @@ If your team already has a reviewed catalog repository, replace `<your-catalog-r
 
 ```bash
 CATALOG_REMOTE="<your-catalog-remote>"
-git clone "$CATALOG_REMOTE" "$HOME/repos/skills-catalog"
-SRC="$HOME/repos/skills-catalog"
+git clone "$CATALOG_REMOTE" "$HOME/.skill-suitcase/skills"
+SRC="$HOME/.skill-suitcase/skills"
 ```
 
 Otherwise, create a minimal catalog with one starter skill:
 
 ```bash
-SRC="$HOME/repos/skills-catalog"
+SRC="$HOME/.skill-suitcase/skills"
 mkdir -p "$SRC/skills/hello-world"
 
 cat > "$SRC/skill-suitcase.yaml" <<'YAML'

@@ -40,8 +40,8 @@ test("operator skill has complete frontmatter and conservative live-mutation rul
   assert.match(skill, /Never force provider-managed Codex skills such as Codex `linear`/);
   assert.match(skill, /pack --output/);
   assert.match(skill, /apply --artifact/);
-  assert.match(skill, /\$HOME\/repos\/skills-catalog/);
-  assert.doesNotMatch(skill, /(?:~|\$HOME)\/repos\/skills(?=[/"`\s]|$)/);
+  assert.match(skill, /\$HOME\/\.skill-suitcase\/skills/);
+  assert.doesNotMatch(skill, /(?:~|\$HOME)\/repos\/skills(?:-catalog)?(?=[/"`\s]|$)/);
 });
 
 test("agent install guide tells agents how to install and verify the skill", async () => {

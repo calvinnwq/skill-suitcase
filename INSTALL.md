@@ -18,8 +18,8 @@ Check first:
 
 ```bash
 command -v skill-suitcase || true
-if command -v skill-suitcase >/dev/null 2>&1 && test -d "$HOME/repos/skills-catalog"; then
-  skill-suitcase targets --source "$HOME/repos/skills-catalog" --json
+if command -v skill-suitcase >/dev/null 2>&1 && test -d "$HOME/.skill-suitcase/skills"; then
+  skill-suitcase targets --source "$HOME/.skill-suitcase/skills" --json
 fi
 ```
 
@@ -27,7 +27,7 @@ If missing, install the published CLI:
 
 ```bash
 npm install --global skill-suitcase
-test -d "$HOME/repos/skills-catalog" && skill-suitcase targets --source "$HOME/repos/skills-catalog" --json
+test -d "$HOME/.skill-suitcase/skills" && skill-suitcase targets --source "$HOME/.skill-suitcase/skills" --json
 ```
 
 Source installs require Node.js 20 or newer and pnpm 10.34.4, as pinned by
@@ -62,7 +62,7 @@ Use the source CLI as:
 
 ```bash
 export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
-node "$CLI" targets --source "$HOME/repos/skills-catalog" --json
+node "$CLI" targets --source "$HOME/.skill-suitcase/skills" --json
 ```
 
 ## 2. Install The Operator Skill
@@ -147,15 +147,15 @@ Restart the agent runtime after installing or replacing a skill.
 ## 3. Install Or Refresh The Skills Catalog
 
 Use the reviewed catalog repository the operator names.
-Replace `<your-catalog-remote>` with its remote URL, then clone it to a portable local path:
+Replace `<your-catalog-remote>` with its remote URL, then clone it into Skill Suitcase's own catalog home:
 
 ```bash
-if mkdir -p "$HOME/repos"; then
+if mkdir -p "$HOME/.skill-suitcase"; then
   CATALOG_REMOTE="<your-catalog-remote>"
-  if test -d "$HOME/repos/skills-catalog/.git"; then
-    git -C "$HOME/repos/skills-catalog" pull --ff-only
+  if test -d "$HOME/.skill-suitcase/skills/.git"; then
+    git -C "$HOME/.skill-suitcase/skills" pull --ff-only
   else
-    git clone "$CATALOG_REMOTE" "$HOME/repos/skills-catalog"
+    git clone "$CATALOG_REMOTE" "$HOME/.skill-suitcase/skills"
   fi
 else
   printf 'Catalog checkout setup failed.\n' >&2
@@ -168,7 +168,7 @@ If no catalog exists yet, create a minimal one by following [`docs/getting-start
 Use the catalog as the source of truth:
 
 ```bash
-export SRC="$HOME/repos/skills-catalog"
+export SRC="$HOME/.skill-suitcase/skills"
 ```
 
 New-machine setup installs from this catalog through Skill Suitcase, not directly from `skills.sh` or `npx skills`.
