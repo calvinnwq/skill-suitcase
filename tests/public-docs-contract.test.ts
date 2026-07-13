@@ -11,7 +11,7 @@ const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
 const TEXT_DOCUMENT_EXTENSIONS = [".css", ".html", ".js", ".json", ".md", ".yaml", ".yml"];
 const COMMAND_REGISTRY = createCommandRegistry();
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
-const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "do", "elif", "if", "then", "until", "while"]);
+const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "do", "elif", "else", "if", "then", "until", "while", "{"]);
 const SHELL_FENCE_LANGUAGES = new Set([
   "",
   "bash",
@@ -119,6 +119,7 @@ function markdownShellBlocks(contents: string): CommandExample[] {
     const dialect = shellDialect(language);
 
     const blockStart = index + 1;
+    let closed = false;
     for (index = blockStart; index < lines.length; index += 1) {
       const closing = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1];
       if (closing === undefined || closing[0] !== fence[0] || closing.length < fence.length) continue;
@@ -129,8 +130,10 @@ function markdownShellBlocks(contents: string): CommandExample[] {
       if (isShellBlock || containsCommandShapedInvocation(executableContents, true)) {
         blocks.push({ contents: executableContents, dialect });
       }
+      closed = true;
       break;
     }
+    assert.ok(closed, "unterminated Markdown fence");
   }
 
   return blocks;
@@ -155,10 +158,14 @@ function markdownNonFencedLines(contents: string): string[] {
   return visibleLines;
 }
 
-function containsCommandShapedInvocation(contents: string, allowLauncherOnly = false): boolean {
-  return shellSegments(contents, "posix").some((segment) => {
-    const tokens = withoutShellRedirections(shellTokens(segment, "posix"));
-    const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value));
+function containsCommandShapedInvocation(
+  contents: string,
+  allowLauncherOnly = false,
+  dialect: ShellDialect = "posix"
+): boolean {
+  return shellSegments(contents, dialect).some((segment) => {
+    const tokens = shellInvocationTokens(segment, dialect);
+    const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value), dialect);
     return launcher !== null && (allowLauncherOnly || launcher.invocation[1] !== undefined);
   });
 }
@@ -208,12 +215,22 @@ function commandExamples(path: string, contents: string): CommandExample[] {
     ...markdownShellBlocks(contents),
     ...(path.endsWith(".md") ? markdownIndentedAndInlineCode(contents) : [])
   ];
-  const htmlBlocks = [...contents.matchAll(/<pre\b[^>]*>\s*<code\b([^>]*)>([\s\S]*?)<\/code>\s*<\/pre>/gi)]
+  const htmlCodeBlocks = [...contents.matchAll(/<code\b([^>]*)>([\s\S]*?)<\/code>/gi)]
     .map((match) => {
       const attributes = match[1] ?? "";
       const language = attributes.match(/\b(?:lang|language)-([A-Za-z0-9_-]+)\b/i)?.[1]?.toLowerCase() ?? "";
-      return { contents: decodeHtml(match[2] ?? ""), dialect: shellDialect(language) };
-    });
+      return {
+        contents: decodeHtml(match[2] ?? ""),
+        dialect: shellDialect(language),
+        index: match.index ?? 0
+      };
+    })
+    .filter((example) => {
+      const prefix = contents.slice(0, example.index).toLowerCase();
+      const isPreformatted = prefix.lastIndexOf("<pre") > prefix.lastIndexOf("</pre>");
+      return isPreformatted || containsCommandShapedInvocation(example.contents, false, example.dialect);
+    })
+    .map(({ contents: exampleContents, dialect }) => ({ contents: exampleContents, dialect }));
   const htmlCommandLines = [...contents.matchAll(/<span\b([^>]*)>/g)]
     .filter((match) => {
       const classAttribute = (match[1] ?? "").match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/);
@@ -228,7 +245,7 @@ function commandExamples(path: string, contents: string): CommandExample[] {
         dialect: "posix" as const
       };
     });
-  return path.endsWith(".html") ? [...htmlBlocks, ...htmlCommandLines] : markdownBlocks;
+  return [...markdownBlocks, ...htmlCodeBlocks, ...htmlCommandLines];
 }
 
 function shellSegments(line: string, dialect: ShellDialect): string[] {
@@ -766,6 +783,17 @@ function isSourceCliEntrypoint(token: string): boolean {
   return token === "$CLI" || token === "${CLI}" || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
 }
 
+function powershellCommandTokens(tokens: string[]): string[] {
+  const commandTokens = withoutPowershellPrompt(tokens.map((value) => ({ value })))
+    .map((token) => token.value);
+
+  if (/^\$(?:[A-Za-z_][A-Za-z0-9_]*:)?[A-Za-z_][A-Za-z0-9_]*$/.test(commandTokens[0] ?? "")
+    && commandTokens[1] === "=") {
+    return commandTokens.slice(2);
+  }
+  return commandTokens;
+}
+
 function nodeSourceCliEntrypointIndex(tokens: string[], start: number): number {
   const fileLaunchOptions = new Set(["--watch", "--watch-preserve-output"]);
   const nonScriptOptions = new Set([
@@ -810,8 +838,9 @@ function nodeSourceCliEntrypointIndex(tokens: string[], start: number): number {
   return -1;
 }
 
-function skillSuitcaseLauncher(tokens: string[]): CliLauncher | null {
-  const commandTokens = shellCommandTokens(tokens);
+function skillSuitcaseLauncher(tokens: string[], dialect: ShellDialect = "posix"): CliLauncher | null {
+  const dialectTokens = dialect === "powershell" ? powershellCommandTokens(tokens) : tokens;
+  const commandTokens = shellCommandTokens(dialectTokens);
   if (commandTokens === null) return null;
 
   const candidate = commandTokens[0];
@@ -912,6 +941,20 @@ function withoutShellRedirections(tokens: ShellToken[]): ShellToken[] {
   }
 
   return commandTokens;
+}
+
+function withoutPowershellPrompt<T extends { value: string }>(tokens: T[]): T[] {
+  if (tokens[0]?.value === "PS>") return tokens.slice(1);
+  if (tokens[0]?.value !== "PS") return tokens;
+
+  const promptEnd = tokens.findIndex((token, index) => index > 0 && token.value.endsWith(">"));
+  return promptEnd < 0 ? tokens : tokens.slice(promptEnd + 1);
+}
+
+function shellInvocationTokens(segment: string, dialect: ShellDialect): ShellToken[] {
+  const tokens = shellTokens(segment, dialect);
+  const promptlessTokens = dialect === "powershell" ? withoutPowershellPrompt(tokens) : tokens;
+  return withoutShellRedirections(promptlessTokens);
 }
 
 function logicalShellLines(example: CommandExample): string[] {
@@ -1020,8 +1063,8 @@ function validateCliExamples(path: string, contents: string): number {
   for (const example of commandExamples(path, contents)) {
     for (const line of logicalShellLines(example)) {
       for (const segment of shellSegments(line, example.dialect)) {
-        const tokens = withoutShellRedirections(shellTokens(segment, example.dialect));
-        const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value));
+        const tokens = shellInvocationTokens(segment, example.dialect);
+        const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value), example.dialect);
         if (launcher === null) continue;
 
         invocationCount += 1;
@@ -1213,6 +1256,10 @@ test("CLI example parsing covers common shell fence forms", () => {
   assert.throws(
     () => validateCliExamples("fixture.md", "```text\n$ skill-suitcase\n```"),
     /unknown command: /
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nskill-suitcase bogus --json"),
+    /unterminated Markdown fence/
   );
 });
 
@@ -1591,6 +1638,15 @@ test("CLI example parsing applies PowerShell continuation and escaping", () => {
     ),
     /unknown command: bogus/
   );
+  for (const command of [
+    "PS> skill-suitcase bogus --json",
+    "$result = skill-suitcase bogus --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", `\`\`\`pwsh\n${command}\n\`\`\``),
+      /unknown command: bogus/
+    );
+  }
 });
 
 test("HTML command examples include visible cmdline elements", () => {
@@ -1615,6 +1671,31 @@ test("HTML command examples include visible cmdline elements", () => {
     ),
     1
   );
+  for (const path of ["fixture.html", "fixture.md"]) {
+    assert.throws(
+      () => validateCliExamples(path, "<code>skill-suitcase bogus --json</code>"),
+      /unknown command: bogus/
+    );
+    assert.throws(
+      () => validateCliExamples(
+        path,
+        '<pre><code class="language-shell">skill-suitcase bogus --json</code></pre>'
+      ),
+      /unknown command: bogus/
+    );
+  }
+});
+
+test("CLI example parsing recognizes POSIX control and grouping prefixes", () => {
+  for (const command of [
+    "else skill-suitcase bogus --json",
+    "{ skill-suitcase bogus --json; }"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``),
+      /unknown command: bogus/
+    );
+  }
 });
 
 test("CLI example parsing validates registry acceptance", () => {
