@@ -18,6 +18,7 @@ const COMMAND_VALUE_KEYS = new Set(["command", "commands", "example", "examples"
 const COMMAND_REGISTRY = createCommandRegistry();
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
 const OPTIONAL_INVOCATION_PLACEHOLDERS = new Set(["<local-overrides>"]);
+const POWERSHELL_CALL_WRAPPER = "__powershell_call__";
 const EXECUTION_WRAPPERS = new Set([
   "and",
   "command",
@@ -34,7 +35,18 @@ const EXECUTION_WRAPPERS = new Set([
   "time",
   "xargs"
 ]);
-const SHELL_EXECUTORS = new Set(["bash", "dash", "fish", "ksh", "powershell", "powershell.exe", "pwsh", "sh", "zsh"]);
+const SHELL_EXECUTORS = new Set([
+  "bash",
+  "dash",
+  "fish",
+  "ksh",
+  "powershell",
+  "powershell.exe",
+  "pwsh",
+  "pwsh.exe",
+  "sh",
+  "zsh"
+]);
 const NODE_VALUE_OPTIONS = new Set([
   "-C",
   "-r",
@@ -71,6 +83,7 @@ interface HtmlAttribute {
 interface HtmlNode {
   attrs?: HtmlAttribute[];
   childNodes?: HtmlNode[];
+  data?: string;
   nodeName: string;
   tagName?: string;
   value?: string;
@@ -252,7 +265,6 @@ function normalizeInteractiveSource(contents: string): string {
   return contents
     .split(/\r?\n/)
     .map((line) => line
-      .replace(/^\s*PS>\s+/i, "")
       .replace(/^\s*\$\s+(?=\S)/, "")
       .replace(/^\s*[^\s@]+@[^\s:]+:[^$]*\$\s+/, ""))
     .join("\n");
@@ -320,12 +332,72 @@ function normalizePowershellHereStrings(contents: string): string {
   return normalized.join("\n");
 }
 
+function normalizePowershellStatement(statement: string): string {
+  const assignment = statement.match(/^(\s*)\$([A-Za-z_][A-Za-z0-9_:]*)\s*=\s*(.+)$/s);
+  const assignedVariable = assignment?.[2]?.split(":").at(-1)?.toLowerCase();
+  const command = assignment !== null && assignedVariable !== "cli" && hasCliReference(assignment[3] ?? "")
+    ? `${assignment[1] ?? ""}${assignment[3] ?? ""}`
+    : statement;
+  return command.replace(
+    /^(\s*)&\s+(?=(?:[A-Za-z]:[\\/]|\.?[\\/]|"\$\{?CLI\}?"|\$\{?CLI\}?|skill-suitcase))/i,
+    `$1${POWERSHELL_CALL_WRAPPER} `
+  );
+}
+
+function normalizePowershellStatements(line: string): string {
+  const normalized: string[] = [];
+  let quote: "\"" | "'" | null = null;
+  let statementStart = 0;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? "";
+    if (quote === "'") {
+      if (character !== "'") continue;
+      if (line[index + 1] === "'") index += 1;
+      else quote = null;
+      continue;
+    }
+    if (character === "`") {
+      index += 1;
+      continue;
+    }
+    if (quote === "\"") {
+      if (character === "\"") quote = null;
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+      continue;
+    }
+
+    const separator = line.startsWith("&&", index) || line.startsWith("||", index)
+      ? line.slice(index, index + 2)
+      : character === ";" || character === "|"
+        ? character
+        : null;
+    if (separator === null) continue;
+    normalized.push(normalizePowershellStatement(line.slice(statementStart, index)), separator);
+    index += separator.length - 1;
+    statementStart = index + 1;
+  }
+
+  normalized.push(normalizePowershellStatement(line.slice(statementStart)));
+  return normalized.join("");
+}
+
 function normalizePowershellSource(contents: string): string {
   const logicalLines: string[] = [];
   let current = "";
   let quote: "\"" | "'" | null = null;
   const normalizedContents = normalizePowershellHereStrings(
-    normalizeInteractiveSource(contents).replaceAll("\\", "/")
+    normalizeInteractiveSource(contents)
+      .split(/\r?\n/)
+      .map((line) => line.replace(
+        /^\s*PS(?:>|\s+(?=[^>\r\n]*(?:[\\/]|[A-Za-z]:|~))[^>\r\n]+>)\s+/i,
+        ""
+      ))
+      .join("\n")
+      .replaceAll("\\", "/")
   );
 
   for (const sourceLine of normalizedContents.split(/\r?\n/)) {
@@ -342,13 +414,7 @@ function normalizePowershellSource(contents: string): string {
   if (current.length > 0) logicalLines.push(current);
 
   return logicalLines
-    .map((line) => {
-      const assignment = line.match(/^(\s*)\$[A-Za-z_][A-Za-z0-9_:]*\s*=\s*(.+)$/s);
-      const command = assignment !== null && hasCliReference(assignment[2] ?? "")
-        ? `${assignment[1] ?? ""}${assignment[2] ?? ""}`
-        : line;
-      return command.replace(/^(\s*)&\s+(?=(?:[A-Za-z]:[\\/]|\.?[\\/]|\$\{?CLI\}?|skill-suitcase))/i, "$1");
-    })
+    .map(normalizePowershellStatements)
     .join("\n")
     .replace(/`(.)/gs, "\\$1");
 }
@@ -455,12 +521,26 @@ function packageRunnerInvocation(words: Word[]): string[] | null {
   return null;
 }
 
-function invocationFromWords(words: Word[]): string[] | null {
+function invocationFromWords(
+  words: Word[],
+  dialect: ShellDialect,
+  powershellVariableCall = false
+): string[] | null {
   const first = words[0]?.value;
   if (first === undefined) return null;
-  if (isCliExecutable(first)) return words.slice(1).map((word) => word.value);
+  if (isCliExecutable(first)) {
+    const variableLauncher = /^\$\{?CLI\}?$/i.test(first);
+    if (dialect === "powershell" && variableLauncher && !powershellVariableCall) {
+      if (words[1]?.value === "=" || words.length === 1) return null;
+      assert.fail("PowerShell variable CLI launchers require the call operator: & $CLI");
+    }
+    return words.slice(1).map((word) => word.value);
+  }
 
   const executable = executableName(first);
+  if (executable === POWERSHELL_CALL_WRAPPER) {
+    return invocationFromWords(words.slice(1), dialect, true);
+  }
   if (executable === "node" || executable === "node.exe") {
     const entrypoint = nodeEntrypointIndex(words);
     return entrypoint !== null && isSourceEntrypoint(words[entrypoint]?.value ?? "")
@@ -476,29 +556,44 @@ function invocationFromWords(words: Word[]): string[] | null {
   if (executable === "sudo" && words.some((word) => word.value === "-e" || word.value === "--edit")) return null;
 
   for (let index = 1; index < words.length; index += 1) {
-    const invocation = invocationFromWords(words.slice(index));
+    const invocation = invocationFromWords(words.slice(index), dialect, dialect === "powershell");
     if (invocation !== null) return invocation;
   }
   return null;
 }
 
-function nestedCommandSource(command: Command): string | null {
+function nestedCommandExample(command: Command, inheritedLanguage?: string): CommandExample | null {
   const name = executableName(command.name?.value ?? "");
   const words = command.suffix;
 
   if (SHELL_EXECUTORS.has(name)) {
-    const option = words.findIndex((word) => /^(?:-[a-z]*c[a-z]*|-command)$/i.test(word.value));
-    return option >= 0 ? words[option + 1]?.value ?? null : null;
+    const powershell = name === "powershell" || name === "powershell.exe" || name === "pwsh" || name === "pwsh.exe";
+    const option = words.findIndex((word) => powershell
+      ? /^-(?:c|command)$/i.test(word.value)
+      : /^-[a-z]*c[a-z]*$/i.test(word.value));
+    const contents = option >= 0 ? words[option + 1]?.value : undefined;
+    if (contents === undefined) return null;
+    const language = name === "fish"
+      ? "fish"
+      : powershell
+        ? "powershell"
+        : "sh";
+    return { block: true, contents, language };
   }
 
   if (name === "cmd" || name === "cmd.exe") {
     const option = words.findIndex((word) => /(?:^|\/)c$/i.test(word.value));
-    return option >= 0 ? words.slice(option + 1).map((word) => word.value).join(" ") : null;
+    return option >= 0
+      ? { block: true, contents: words.slice(option + 1).map((word) => word.value).join(" ") }
+      : null;
   }
 
   if (name === "env") {
     const option = words.findIndex((word) => word.value === "-S" || word.value === "--split-string");
-    return option >= 0 ? words[option + 1]?.value ?? null : null;
+    const contents = option >= 0 ? words[option + 1]?.value : undefined;
+    return contents === undefined
+      ? null
+      : { block: true, contents, ...(inheritedLanguage === undefined ? {} : { language: inheritedLanguage }) };
   }
 
   return null;
@@ -550,16 +645,17 @@ function validateInvocation(path: string, invocation: string[]): void {
 
 function validateCommandExample(path: string, example: CommandExample): number {
   const commands = parseCommandExample(path, example);
+  const dialect = shellDialect(example.language);
   let invocationCount = 0;
 
   for (const command of commands) {
-    const nested = nestedCommandSource(command);
-    if (nested !== null && hasCliReference(nested)) {
-      invocationCount += validateCommandExample(path, { block: true, contents: nested });
+    const nested = nestedCommandExample(command, example.language);
+    if (nested !== null && hasCliReference(nested.contents)) {
+      invocationCount += validateCommandExample(path, nested);
     }
 
     const words = commandWords(command);
-    const invocation = invocationFromWords(words);
+    const invocation = invocationFromWords(words, dialect);
     if (invocation !== null) {
       if (!example.block && invocation.length === 0) continue;
       validateInvocation(path, invocation);
@@ -593,6 +689,7 @@ function decodedDocumentText(contents: string): string {
 
   function visit(node: HtmlNode): void {
     if (node.nodeName === "#text") values.push(node.value ?? "");
+    if (node.nodeName === "#comment") values.push(node.data ?? "");
     for (const attribute of node.attrs ?? []) values.push(attribute.value);
     for (const child of node.childNodes ?? []) visit(child);
   }
@@ -651,7 +748,8 @@ test("private machine path checks cover portable and private forms", () => {
     "~alice/project",
     String.raw`\\server\Users\alice\project`,
     String.raw`C:&#92;Users&#92;alice&#92;project`,
-    String.raw`C:&bsol;Users&bsol;alice&bsol;project`
+    String.raw`C:&bsol;Users&bsol;alice&bsol;project`,
+    "<!-- /Users/alice/project -->"
   ]) {
     assert.throws(() => assertNoPrivateMachinePaths("fixture.md", privatePath), /contains a .* user path/);
   }
@@ -724,6 +822,7 @@ test("Bash AST traversal validates controls, substitutions, pipelines, and redir
   for (const source of validExamples) {
     assert.equal(validateCliExamples("fixture.md", markdownFixture(source)), 1);
   }
+  assert.equal(validateCliExamples("fixture.md", markdownFixture("ps aux > skill-suitcase")), 0);
 });
 
 test("launcher normalization covers wrappers, runners, paths, and command strings", () => {
@@ -800,6 +899,7 @@ test("dialect normalization validates PowerShell and Fish examples", () => {
   );
   for (const source of [
     "PS> skill-suitcase bogus --json",
+    String.raw`PS C:\repo> skill-suitcase bogus --json`,
     "$result=skill-suitcase bogus --json",
     String.raw`& C:\tools\Skill-Suitcase.cmd bogus --json`
   ]) {
@@ -820,6 +920,71 @@ test("dialect normalization validates PowerShell and Fish examples", () => {
       source
     );
   }
+  for (const [source, language] of [
+    ["powershell -Command '$result = skill-suitcase bogus --json'", "powershell"],
+    ["pwsh.exe -NonInteractive -Command '$result = skill-suitcase bogus --json'", "powershell"],
+    ["fish -c 'if not skill-suitcase bogus --json'", "fish"]
+  ] as const) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", markdownFixture(source, language)),
+      /unknown command: bogus/,
+      source
+    );
+  }
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("$CLI status --source . --json", "powershell")
+    ),
+    /PowerShell variable CLI launchers require the call operator/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("Write-Host ready; $CLI status --source . --json", "powershell")
+    ),
+    /PowerShell variable CLI launchers require the call operator/
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("& $CLI status --source . --json", "powershell")
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture('& "$CLI" status --source . --json', "powershell")
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("$CLI = Resolve-Path ./dist/src/cli.js\n& $CLI status --source . --json", "powershell")
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", markdownFixture('$CLI = "skill-suitcase"', "powershell")),
+    0
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("Write-Host ready; $result = & $CLI status --source . --json", "powershell")
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("sudo $CLI status --source . --json", "powershell")
+    ),
+    1
+  );
+  assert.equal(validateCliExamples("fixture.md", markdownFixture("$CLI", "powershell")), 0);
   assert.equal(
     validateCliExamples(
       "fixture.md",
