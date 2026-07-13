@@ -103,12 +103,37 @@ function shellDialect(language: string): ShellDialect {
     : "posix";
 }
 
+function markdownBlockquoteLine(line: string): { contents: string; depth: number } {
+  let contents = line;
+  let depth = 0;
+
+  while (true) {
+    const prefix = contents.match(/^ {0,3}>[ \t]?/);
+    if (prefix === null) return { contents, depth };
+    contents = contents.slice(prefix[0].length);
+    depth += 1;
+  }
+}
+
+function stripMarkdownBlockquoteDepth(line: string, depth: number): string | null {
+  let contents = line;
+
+  for (let index = 0; index < depth; index += 1) {
+    const prefix = contents.match(/^ {0,3}>[ \t]?/);
+    if (prefix === null) return null;
+    contents = contents.slice(prefix[0].length);
+  }
+
+  return contents;
+}
+
 function markdownShellBlocks(contents: string): CommandExample[] {
   const blocks: CommandExample[] = [];
   const lines = contents.split(/\r?\n/);
 
   for (let index = 0; index < lines.length; index += 1) {
-    const opening = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*([^\r]*)$/);
+    const openingLine = markdownBlockquoteLine(lines[index] ?? "");
+    const opening = openingLine.contents.match(/^ {0,3}(`{3,}|~{3,})[ \t]*([^\r]*)$/);
     if (opening === undefined || opening === null) continue;
 
     const fence = opening[1] ?? "";
@@ -121,9 +146,13 @@ function markdownShellBlocks(contents: string): CommandExample[] {
     const blockStart = index + 1;
     let closed = false;
     for (index = blockStart; index < lines.length; index += 1) {
-      const closing = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1];
+      const blockLine = stripMarkdownBlockquoteDepth(lines[index] ?? "", openingLine.depth);
+      const closing = blockLine?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1];
       if (closing === undefined || closing[0] !== fence[0] || closing.length < fence.length) continue;
-      const blockContents = lines.slice(blockStart, index).join("\n");
+      const blockContents = lines
+        .slice(blockStart, index)
+        .map((line) => stripMarkdownBlockquoteDepth(line, openingLine.depth) ?? line)
+        .join("\n");
       const executableContents = isShellBlock
         ? blockContents
         : markdownNonFencedLines(blockContents).join("\n");
@@ -141,15 +170,17 @@ function markdownShellBlocks(contents: string): CommandExample[] {
 
 function markdownNonFencedLines(contents: string): string[] {
   const lines = contents.split(/\r?\n/);
-  const visibleLines = [...lines];
+  const visibleLines = lines.map((line) => markdownBlockquoteLine(line).contents);
 
   for (let index = 0; index < lines.length; index += 1) {
-    const opening = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*[^\r]*$/)?.[1];
+    const openingLine = markdownBlockquoteLine(lines[index] ?? "");
+    const opening = openingLine.contents.match(/^ {0,3}(`{3,}|~{3,})[ \t]*[^\r]*$/)?.[1];
     if (opening === undefined) continue;
 
     visibleLines[index] = "";
     for (index += 1; index < lines.length; index += 1) {
-      const closing = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1];
+      const blockLine = stripMarkdownBlockquoteDepth(lines[index] ?? "", openingLine.depth);
+      const closing = blockLine?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1];
       visibleLines[index] = "";
       if (closing !== undefined && closing[0] === opening[0] && closing.length >= opening.length) break;
     }
@@ -423,7 +454,8 @@ function collectShellSegments(
       segment += character;
       continue;
     }
-    if (character === ")" || character === ";" || character === "|" || character === "&") {
+    if (character === "\n" || character === "\r"
+      || character === ")" || character === ";" || character === "|" || character === "&") {
       finishSegment();
       if ((character === "|" || character === "&") && source[index + 1] === character) index += 1;
       continue;
@@ -674,11 +706,34 @@ function shellCommandTokens(tokens: string[]): string[] | null {
     while (isShellCommandPrefix(commandTokens[index] ?? "")) index += 1;
     commandTokens = commandTokens.slice(index);
     const wrapper = executableName(commandTokens[0] ?? "");
-    if (wrapper !== "command" && wrapper !== "env" && wrapper !== "sudo") return commandTokens;
-    const wrappedCommand = shellWrapperCommandTokens(commandTokens, wrapper);
+    if (wrapper !== "command" && wrapper !== "env" && wrapper !== "sudo"
+      && wrapper !== "exec" && wrapper !== "time") return commandTokens;
+    const wrappedCommand = wrapper === "exec" || wrapper === "time"
+      ? shellExecutionPrefixTokens(commandTokens, wrapper)
+      : shellWrapperCommandTokens(commandTokens, wrapper);
     if (wrappedCommand === null) return null;
     commandTokens = wrappedCommand;
   }
+  return null;
+}
+
+function shellExecutionPrefixTokens(tokens: string[], wrapper: "exec" | "time"): string[] | null {
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    if (token === "--") return tokens.slice(index + 1);
+    if (wrapper === "exec") {
+      if (token === "-a") {
+        index += 1;
+        continue;
+      }
+      if (/^-[cl]+$/.test(token)) continue;
+    } else if (token === "-p") {
+      continue;
+    }
+    if (token.startsWith("-")) return null;
+    return tokens.slice(index);
+  }
+
   return null;
 }
 
@@ -967,7 +1022,7 @@ function logicalShellLines(example: CommandExample): string[] {
   const commandLines: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     let line = lines[index] ?? "";
-    while (line.endsWith("\\") && index + 1 < lines.length) {
+    while (hasPosixLineContinuation(line) && index + 1 < lines.length) {
       index += 1;
       line = `${line.slice(0, -1)} ${(lines[index] ?? "").replace(/^\s*/, "")}`;
     }
@@ -989,6 +1044,31 @@ function logicalShellLines(example: CommandExample): string[] {
   }
 
   return commandLines;
+}
+
+function hasPosixLineContinuation(line: string): boolean {
+  let quote: "\"" | "'" | null = null;
+  let escaped = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? "";
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      if (index === line.length - 1) return true;
+      escaped = true;
+      continue;
+    }
+    if (quote === null && (character === "\"" || character === "'")) {
+      quote = character;
+    } else if (character === quote) {
+      quote = null;
+    }
+  }
+
+  return false;
 }
 
 function shellHeredocDelimiters(line: string): Array<{ delimiter: string; quoted: boolean; stripTabs: boolean }> {
@@ -1260,6 +1340,20 @@ test("CLI example parsing covers common shell fence forms", () => {
   assert.throws(
     () => validateCliExamples("fixture.md", "```sh\nskill-suitcase bogus --json"),
     /unterminated Markdown fence/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```text\nExample output:\nskill-suitcase bogus --json\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "> ```bash\n> skill-suitcase bogus --json\n> ```"
+    ),
+    /unknown command: bogus/
   );
 });
 
@@ -1533,6 +1627,15 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
     validateCliExamples("fixture.md", "```sh\nnode --input-type=module dist/src/cli.js status --json\n```"),
     0
   );
+  for (const command of [
+    "time skill-suitcase bogus --json",
+    "exec skill-suitcase bogus --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``),
+      /unknown command: bogus/
+    );
+  }
 });
 
 test("CLI example parsing excludes shell redirections from CLI arguments", () => {
@@ -1742,5 +1845,21 @@ test("CLI example parsing covers indented and inline Markdown code", () => {
       "The `skill-suitcase` binary reads `skill-suitcase.yaml`.\n"
     ),
     0
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", ">     skill-suitcase bogus --json\n"),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      [
+        "```sh",
+        "echo example \\\\",
+        "skill-suitcase bogus --json",
+        "```"
+      ].join("\n")
+    ),
+    /unknown command: bogus/
   );
 });
