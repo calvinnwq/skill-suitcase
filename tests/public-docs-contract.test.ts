@@ -15,6 +15,7 @@ import { createCommandRegistry, parseCommandArgs } from "../src/commands/index.j
 const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
 const TEXT_DOCUMENT_EXTENSIONS = new Set([".css", ".html", ".js", ".json", ".md", ".txt", ".yaml", ".yml"]);
 const COMMAND_VALUE_KEYS = new Set(["command", "commands", "example", "examples", "run", "runs", "script", "scripts"]);
+const ARGV_VALUE_KEYS = new Set(["command", "example", "run", "script"]);
 const COMMAND_REGISTRY = createCommandRegistry();
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
 const OPTIONAL_INVOCATION_PLACEHOLDERS = new Set(["<local-overrides>"]);
@@ -233,6 +234,10 @@ function markdownCommandExamples(contents: string): CommandExample[] {
   return examples;
 }
 
+function renderArgv(items: string[]): string {
+  return items.map((item) => `'${item.replaceAll("'", "'\\''")}'`).join(" ");
+}
+
 function structuredCommandExamples(value: unknown, ownerKey?: string, seen = new Set<object>()): CommandExample[] {
   if (typeof value === "string") {
     return ownerKey !== undefined && COMMAND_VALUE_KEYS.has(ownerKey.toLowerCase()) && hasCliReference(value)
@@ -243,6 +248,15 @@ function structuredCommandExamples(value: unknown, ownerKey?: string, seen = new
   seen.add(value);
 
   if (Array.isArray(value)) {
+    if (
+      ownerKey !== undefined
+      && ARGV_VALUE_KEYS.has(ownerKey.toLowerCase())
+      && value.length > 0
+      && value.every((item) => typeof item === "string")
+    ) {
+      const contents = renderArgv(value);
+      return hasCliReference(contents) ? [{ block: true, contents }] : [];
+    }
     return value.flatMap((item) => structuredCommandExamples(item, ownerKey, seen));
   }
 
@@ -265,11 +279,21 @@ function javascriptCommandExamples(path: string, contents: string): CommandExamp
   const sourceFile = ts.createSourceFile(path, contents, ts.ScriptTarget.Latest, true);
   const examples = new Set<string>();
 
-  function collectStrings(node: ts.Expression): void {
+  function collectStrings(node: ts.Expression, ownerKey: string): void {
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       if (hasCliReference(node.text)) examples.add(node.text);
     } else if (ts.isArrayLiteralExpression(node)) {
-      for (const element of node.elements) collectStrings(element);
+      const argv = ARGV_VALUE_KEYS.has(ownerKey)
+        ? node.elements.map((element) => ts.isStringLiteral(element) || ts.isNoSubstitutionTemplateLiteral(element)
+          ? element.text
+          : null)
+        : [];
+      if (argv.length > 0 && argv.every((item): item is string => item !== null)) {
+        const example = renderArgv(argv);
+        if (hasCliReference(example)) examples.add(example);
+        return;
+      }
+      for (const element of node.elements) collectStrings(element, ownerKey);
     }
   }
 
@@ -280,10 +304,10 @@ function javascriptCommandExamples(path: string, contents: string): CommandExamp
   function visit(node: ts.Node): void {
     if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
       const name = propertyName(node.name);
-      if (name !== null && COMMAND_VALUE_KEYS.has(name)) collectStrings(node.initializer);
+      if (name !== null && COMMAND_VALUE_KEYS.has(name)) collectStrings(node.initializer, name);
     } else if (ts.isPropertyAssignment(node)) {
       const name = propertyName(node.name);
-      if (name !== null && COMMAND_VALUE_KEYS.has(name)) collectStrings(node.initializer);
+      if (name !== null && COMMAND_VALUE_KEYS.has(name)) collectStrings(node.initializer, name);
     }
     ts.forEachChild(node, visit);
   }
@@ -511,20 +535,45 @@ function sanitizeShellSource(example: CommandExample): string {
     );
 }
 
-function executableName(value: string): string {
+function executableName(value: string, dialect: ShellDialect): string {
+  const normalized = dialect === "powershell" ? value.replaceAll("\\", "/") : value;
+  const basename = normalized.slice(normalized.lastIndexOf("/") + 1) || normalized;
+  return dialect === "powershell" ? basename.toLowerCase() : basename;
+}
+
+function isCliVariable(value: string, dialect: ShellDialect): boolean {
+  return dialect === "powershell"
+    ? /^\$\{?cli\}?$/i.test(value)
+    : value === "$CLI" || value === "${CLI}";
+}
+
+function isCliExecutable(value: string, dialect: ShellDialect): boolean {
+  const executable = executableName(value, dialect);
+  const normalized = dialect === "powershell" ? executable.replace(/\.(?:cmd|exe|ps1)$/, "") : executable;
+  return normalized === "skill-suitcase" || isCliVariable(value, dialect);
+}
+
+function isCliPackageSpecifier(value: string, dialect: ShellDialect): boolean {
+  const normalized = dialect === "powershell" ? value.toLowerCase() : value;
+  return /^skill-suitcase(?:@[^@\s]+)?$/.test(normalized);
+}
+
+function isCliPackageReference(value: string): boolean {
+  return /^skill-suitcase(?:@[^@\s]+)?$/i.test(value);
+}
+
+function isCliLauncherReference(value: string): boolean {
   const normalized = value.replaceAll("\\", "/");
-  return (normalized.slice(normalized.lastIndexOf("/") + 1) || normalized).toLowerCase();
+  const basename = normalized.slice(normalized.lastIndexOf("/") + 1) || normalized;
+  return /^skill-suitcase(?:\.(?:cmd|exe|ps1))?$/i.test(basename)
+    || /^\$\{?cli\}?$/i.test(value)
+    || /(?:^|\/)dist\/src\/cli\.js$/i.test(normalized);
 }
 
-function isCliExecutable(value: string): boolean {
-  const executable = executableName(value).replace(/\.(?:cmd|exe|ps1)$/i, "");
-  const normalized = value.toLowerCase();
-  return executable === "skill-suitcase" || normalized === "$cli" || normalized === "${cli}";
-}
-
-function isSourceEntrypoint(value: string): boolean {
-  const normalized = value.replaceAll("\\", "/").toLowerCase();
-  return normalized === "$cli" || normalized === "${cli}" || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
+function isSourceEntrypoint(value: string, dialect: ShellDialect): boolean {
+  if (isCliVariable(value, dialect)) return true;
+  const normalized = dialect === "powershell" ? value.replaceAll("\\", "/").toLowerCase() : value;
+  return /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
 }
 
 function nodeEntrypointIndex(words: Word[]): number | null {
@@ -547,8 +596,8 @@ function nodeEntrypointIndex(words: Word[]): number | null {
   return null;
 }
 
-function packageRunnerInvocation(words: Word[]): string[] | null {
-  const executable = executableName(words[0]?.value ?? "");
+function packageRunnerInvocation(words: Word[], dialect: ShellDialect): string[] | null {
+  const executable = executableName(words[0]?.value ?? "", dialect);
   const values = words.map((word) => word.value);
 
   function commandIndex(start: number): number | null {
@@ -570,18 +619,38 @@ function packageRunnerInvocation(words: Word[]): string[] | null {
     const separator = values.indexOf("--", execIndex + 1);
     if (execIndex < 0 || separator < 0) return null;
     const launcher = separator + 1;
-    return isCliExecutable(values[launcher] ?? "") ? values.slice(launcher + 1) : null;
+    const launchValue = values[launcher] ?? "";
+    if (isCliExecutable(launchValue, dialect) || isCliPackageSpecifier(launchValue, dialect)) {
+      return values.slice(launcher + 1);
+    }
+    assert.ok(
+      !isCliLauncherReference(launchValue) && !isCliPackageReference(launchValue),
+      `unsupported CLI package-runner launch form: ${launchValue}`
+    );
+    return null;
   }
 
   if (executable === "npx") {
     const launcher = commandIndex(1);
-    return launcher !== null && isCliExecutable(values[launcher] ?? "") ? values.slice(launcher + 1) : null;
+    const launchValue = launcher === null ? "" : values[launcher] ?? "";
+    if (launcher !== null && isCliPackageSpecifier(launchValue, dialect)) return values.slice(launcher + 1);
+    assert.ok(!isCliPackageReference(launchValue), `unsupported CLI package-runner launch form: ${launchValue}`);
+    return null;
   }
 
   if (executable === "pnpm" || executable === "yarn") {
     const action = values.findIndex((value) => value === "dlx" || value === "exec");
     const launcher = action < 0 ? null : commandIndex(action + 1);
-    return launcher !== null && isCliExecutable(values[launcher] ?? "") ? values.slice(launcher + 1) : null;
+    const launchValue = launcher === null ? "" : values[launcher] ?? "";
+    const packageLaunch = values[action] === "dlx" && isCliPackageSpecifier(launchValue, dialect);
+    if (launcher !== null && (packageLaunch || isCliExecutable(launchValue, dialect))) {
+      return values.slice(launcher + 1);
+    }
+    assert.ok(
+      !isCliLauncherReference(launchValue) && !isCliPackageReference(launchValue),
+      `unsupported CLI package-runner launch form: ${launchValue}`
+    );
+    return null;
   }
 
   return null;
@@ -628,8 +697,8 @@ function invocationFromWords(
 ): string[] | null {
   const first = words[0]?.value;
   if (first === undefined) return null;
-  if (isCliExecutable(first) || isSourceEntrypoint(first)) {
-    const variableLauncher = /^\$\{?CLI\}?$/i.test(first);
+  if (isCliExecutable(first, dialect) || isSourceEntrypoint(first, dialect)) {
+    const variableLauncher = isCliVariable(first, dialect);
     const quotedLauncher = /^(?:"[\s\S]*"|'[\s\S]*')$/.test(words[0]?.text ?? "");
     if (dialect === "powershell" && (variableLauncher || quotedLauncher) && !powershellCallOperator) {
       if (words[1]?.value === "=" || words.length === 1) return null;
@@ -637,19 +706,20 @@ function invocationFromWords(
     }
     return words.slice(1).map((word) => word.value);
   }
+  assert.ok(!isCliLauncherReference(first), `unsupported CLI launch form: ${first}`);
 
-  const executable = executableName(first);
+  const executable = executableName(first, dialect);
   if (executable === POWERSHELL_CALL_WRAPPER) {
     return invocationFromWords(words.slice(1), dialect, true);
   }
   if (executable === "node" || executable === "node.exe") {
     const entrypoint = nodeEntrypointIndex(words);
-    return entrypoint !== null && isSourceEntrypoint(words[entrypoint]?.value ?? "")
+    return entrypoint !== null && isSourceEntrypoint(words[entrypoint]?.value ?? "", dialect)
       ? words.slice(entrypoint + 1).map((word) => word.value)
       : null;
   }
 
-  const packageInvocation = packageRunnerInvocation(words);
+  const packageInvocation = packageRunnerInvocation(words, dialect);
   if (packageInvocation !== null) return packageInvocation;
 
   if (!EXECUTION_WRAPPERS.has(executable)) return null;
@@ -663,7 +733,8 @@ function invocationFromWords(
 }
 
 function nestedCommandExample(command: Command, inheritedLanguage?: string): CommandExample | null {
-  const name = executableName(command.name?.value ?? "");
+  const dialect = shellDialect(inheritedLanguage);
+  const name = executableName(command.name?.value ?? "", dialect);
   const words = command.suffix;
 
   if (SHELL_EXECUTORS.has(name)) {
@@ -763,11 +834,11 @@ function validateCommandExample(path: string, example: CommandExample): number {
       continue;
     }
 
-    const executable = executableName(words[0]?.value ?? "");
+    const executable = executableName(words[0]?.value ?? "", dialect);
     const values = words.map((word) => word.value);
     const npmExec = executable === "npm" && values.some((value) => value === "exec" || value === "x");
     assert.ok(
-      !npmExec || !values.some(isCliExecutable),
+      !npmExec || !values.some((value) => isCliExecutable(value, dialect) || isCliPackageSpecifier(value, dialect)),
       `${path} npm exec CLI examples must use -- before skill-suitcase`
     );
     const unsupportedNodeLaunch = (executable === "node" || executable === "node.exe")
@@ -877,11 +948,14 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     ["fixture.html", "<pre><code>skill-suitcase&nbsp;bogus --json</code></pre>"],
     ["fixture.html", "<span class=\"cmdline\">skill-suitcase bogus --json</span>"],
     ["fixture.yaml", "command: skill-suitcase bogus --json"],
+    ["fixture.yaml", "command: [skill-suitcase, bogus, --json]"],
     ["fixture.yaml", "commands:\n  - skill-suitcase bogus --json"],
     ["fixture.yaml", "commands: { smoke: skill-suitcase bogus --json }"],
     ["fixture.json", "{\"commands\":[\"skill-suitcase bogus --json\"]}"],
+    ["fixture.json", "{\"command\":[\"skill-suitcase\",\"bogus\",\"--json\"]}"],
     ["fixture.json", "{\"commands\":{\"smoke\":\"skill-suitcase bogus --json\"}}"],
     ["fixture.js", "const commands = ['echo ok', 'skill-suitcase bogus --json'];"],
+    ["fixture.js", "const command = ['skill-suitcase', 'bogus', '--json'];"],
     ["fixture.css", ":root { --example: 'skill-suitcase bogus --json'; }"],
     ["fixture.txt", "skill-suitcase bogus --json"]
   ] as const;
@@ -899,6 +973,18 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
   assert.equal(validateCliExamples("fixture.js", "const description = 'Run skill-suitcase bogus --json';"), 0);
   assert.equal(validateCliExamples("fixture.css", ":root { --description: 'Run skill-suitcase bogus --json'; }"), 0);
   assert.equal(validateCliExamples("fixture.yaml", "command: >\n  skill-suitcase status --source .\n  --json"), 1);
+  assert.equal(validateCliExamples(
+    "fixture.yaml",
+    "command: [skill-suitcase, status, --source, ., --json]"
+  ), 1);
+  assert.equal(validateCliExamples(
+    "fixture.json",
+    "{\"command\":[\"skill-suitcase\",\"status\",\"--source\",\".\",\"--json\"]}"
+  ), 1);
+  assert.equal(validateCliExamples(
+    "fixture.js",
+    "const command = ['skill-suitcase', 'status', '--source', '.', '--json'];"
+  ), 1);
 });
 
 test("Bash AST traversal validates controls, substitutions, pipelines, and redirections", () => {
@@ -946,8 +1032,11 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "node dist/src/cli.js bogus --json",
     "\"$CLI\" bogus --json",
     "npx skill-suitcase bogus --json",
+    "npx skill-suitcase@latest bogus --json",
     "npm exec --package=skill-suitcase -- skill-suitcase bogus --json",
     "pnpm dlx skill-suitcase bogus --json",
+    "pnpm dlx skill-suitcase@latest bogus --json",
+    "yarn dlx skill-suitcase@latest bogus --json",
     "sh -c 'skill-suitcase bogus --json'",
     "cmd /c skill-suitcase bogus --json",
     "not skill-suitcase bogus --json"
@@ -981,6 +1070,18 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     () => validateCliExamples("fixture.md", markdownFixture("npm exec skill-suitcase bogus --json")),
     /must use -- before skill-suitcase/
   );
+  for (const source of [
+    "Skill-Suitcase status --source . --json",
+    "skill-suitcase.cmd status --source . --json",
+    "sudo Skill-Suitcase status --source . --json",
+    "npx Skill-Suitcase@latest status --source . --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", markdownFixture(source)),
+      /unsupported CLI (?:package-runner )?launch form/,
+      source
+    );
+  }
 });
 
 test("CLI validation rejects nondeterministic and unaccepted invocations", () => {
