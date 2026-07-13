@@ -92,6 +92,12 @@ function publicDocumentPaths(): string[] {
 function decodeHtml(value: string): string {
   return value
     .replace(/<[^>]+>/g, "")
+    .replace(/&#(?:x([0-9a-f]+)|(\d+));/gi, (reference, hexadecimal: string | undefined, decimal: string | undefined) => {
+      const codePoint = Number.parseInt(hexadecimal ?? decimal ?? "", hexadecimal === undefined ? 10 : 16);
+      return codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+        ? String.fromCodePoint(codePoint)
+        : reference;
+    })
     .replaceAll("&amp;", "&")
     .replaceAll("&gt;", ">")
     .replaceAll("&lt;", "<")
@@ -290,15 +296,18 @@ function commandExamples(path: string, contents: string): CommandExample[] {
 
 function reusableTextCommandExamples(contents: string): CommandExample[] {
   const examples: CommandExample[] = [];
-  const launcher = /(?<![$A-Za-z0-9_-])(?:skill-suitcase(?:\.(?:cmd|ps1))?|\$\{CLI\}|\$CLI|dist[\\/]src[\\/]cli\.js)(?=\s)/gi;
+  const launcher = /(?<![$A-Za-z0-9_-])(?:skill-suitcase(?:\.(?:cmd|ps1))?|\$\{CLI\}|\$CLI|dist[\\/]src[\\/]cli\.js)(?=\s|$|["'`,;.)}\]])/gi;
+  const lines = contents.split(/\r?\n/);
 
-  for (const line of contents.split(/\r?\n/)) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex] ?? "";
     for (const match of line.matchAll(launcher)) {
-      if (!isReusableCommandPosition(line, match.index)) continue;
+      const documentPrefix = [...lines.slice(0, lineIndex), line.slice(0, match.index)].join("\n");
+      if (!isReusableCommandPosition(line, match.index, documentPrefix, lines, lineIndex)) continue;
       const command = line
         .slice(match.index)
         .replace(/(?:\\[nrt]|[\s"'`,;.)}\]])+$/g, "");
-      if (containsCommandShapedInvocation(command)) {
+      if (containsCommandShapedInvocation(command, true)) {
         examples.push({ contents: command, dialect: "posix" });
       }
     }
@@ -307,22 +316,51 @@ function reusableTextCommandExamples(contents: string): CommandExample[] {
   return examples;
 }
 
-function isReusableCommandPosition(line: string, start: number): boolean {
+function isReusableCommandPosition(
+  line: string,
+  start: number,
+  documentPrefix: string,
+  lines: string[],
+  lineIndex: number
+): boolean {
   const prefix = line.slice(0, start);
   if (/^\s*["'`]?\s*$/.test(prefix)) return true;
   if (/^\s*-\s+["'`]?\s*$/.test(prefix)) {
-    return hasReusableCommandSyntax(line.slice(start));
+    return isReusableCommandCollectionItem(lines, lineIndex) || hasReusableCommandSyntax(line.slice(start));
   }
   if (/^\s*(?:[$#%]|[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s]*[$#%])\s+["'`]?\s*$/.test(prefix)) {
     return true;
   }
-  if (isReusableArrayPosition(prefix)) return hasReusableCommandSyntax(line.slice(start));
+  const arrayOwner = reusableArrayOwner(documentPrefix);
+  if (arrayOwner !== null) {
+    return isReusableCommandName(arrayOwner) || hasReusableCommandSyntax(line.slice(start));
+  }
 
   const assignment = prefix.match(
     /(?:^|[,{;])\s*(?:(?:const|let|var)\s+)?["']?([-$A-Za-z_][-$A-Za-z0-9_]*)["']?\s*(?::|=)\s*["'`]?\s*$/
   );
   const name = assignment?.[1] ?? "";
-  return /(?:^|[-_])(?:cmd|command|example|invocation|script)(?:$|[-_])/i.test(name);
+  return isReusableCommandName(name);
+}
+
+function isReusableCommandName(name: string): boolean {
+  return /(?:^|[-_])(?:cmd|command|commands|example|examples|invocation|invocations|script|scripts)(?:$|[-_])/i.test(name);
+}
+
+function isReusableCommandCollectionItem(lines: string[], lineIndex: number): boolean {
+  const itemIndent = lines[lineIndex]?.match(/^(\s*)-\s+/)?.[1]?.length;
+  if (itemIndent === undefined) return false;
+
+  for (let index = lineIndex - 1; index >= 0; index -= 1) {
+    const line = lines[index] ?? "";
+    if (line.trim().length === 0 || /^\s*#/.test(line)) continue;
+    const indent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (indent >= itemIndent) continue;
+    const name = line.match(/^\s*["']?([-$A-Za-z_][-$A-Za-z0-9_]*)["']?\s*:\s*$/)?.[1] ?? "";
+    return isReusableCommandName(name);
+  }
+
+  return false;
 }
 
 function hasReusableCommandSyntax(command: string): boolean {
@@ -342,14 +380,15 @@ function hasReusableCommandSyntax(command: string): boolean {
   }
 }
 
-function isReusableArrayPosition(prefix: string): boolean {
+function reusableArrayOwner(prefix: string): string | null {
   const source = prefix.replace(/["'`]\s*$/, "");
-  if (!/(?:\[|,)\s*$/.test(source)) return false;
+  if (!/(?:\[|,)\s*$/.test(source)) return null;
 
-  let depth = 0;
+  const openingBrackets: number[] = [];
   let quote: "\"" | "'" | "`" | null = null;
   let escaped = false;
-  for (const character of source) {
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index] ?? "";
     if (escaped) {
       escaped = false;
       continue;
@@ -365,13 +404,18 @@ function isReusableArrayPosition(prefix: string): boolean {
     if (character === "\"" || character === "'" || character === "`") {
       quote = character;
     } else if (character === "[") {
-      depth += 1;
+      openingBrackets.push(index);
     } else if (character === "]") {
-      depth = Math.max(0, depth - 1);
+      openingBrackets.pop();
     }
   }
 
-  return depth > 0 && quote === null;
+  const openingBracket = openingBrackets.at(-1);
+  if (openingBracket === undefined || quote !== null) return null;
+  const assignment = source.slice(0, openingBracket).match(
+    /(?:(?:const|let|var)\s+)?["']?([-$A-Za-z_][-$A-Za-z0-9_]*)["']?\s*(?::|=)\s*$/
+  );
+  return assignment?.[1] ?? "";
 }
 
 function shellSegments(line: string, dialect: ShellDialect): string[] {
@@ -2147,6 +2191,27 @@ test("CLI example parsing covers command strings in reusable text formats", () =
   ] as const) {
     assert.equal(validateCliExamples(path, contents), 0);
   }
+
+  for (const [path, contents] of [
+    ["fixture.yaml", "command: skill-suitcase\n"],
+    ["fixture.json", '{"command":"skill-suitcase"}\n']
+  ] as const) {
+    assert.throws(
+      () => validateCliExamples(path, contents),
+      /unknown command: /
+    );
+  }
+
+  for (const [path, contents] of [
+    ["fixture.yaml", "commands:\n  - skill-suitcase bogus extra\n"],
+    ["fixture.json", '{"commands":["skill-suitcase bogus extra"]}\n'],
+    ["fixture.js", 'const commands = ["skill-suitcase bogus extra"];\n']
+  ] as const) {
+    assert.throws(
+      () => validateCliExamples(path, contents),
+      /unknown command: bogus/
+    );
+  }
 });
 
 test("CLI example parsing validates nested command strings", () => {
@@ -2227,6 +2292,10 @@ test("HTML command examples include visible cmdline elements", () => {
         path,
         '<pre><code class="language-shell">skill-suitcase bogus --json</code></pre>'
       ),
+      /unknown command: bogus/
+    );
+    assert.throws(
+      () => validateCliExamples(path, "<code>skill-suitcase&#32;bogus --json</code>"),
       /unknown command: bogus/
     );
   }
