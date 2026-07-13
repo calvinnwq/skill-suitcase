@@ -54,12 +54,18 @@ SRC="/path/to/skills-catalog"
 
 <span class="c"># audit it read-only (writes nothing)</span>
 skill-suitcase import --source "$SRC" --json
-skill-suitcase validate --source "$SRC" --strict --json
+skill-suitcase validate --source "$SRC" --json
 skill-suitcase status --source "$SRC" --json</code></pre>
             <p>
               That is the safe starting path. Read-only commands never create
               install roots, runtime homes, receipts, symlinks, or catalog files.
               Inspect their JSON before staging or mutating anything.
+            </p>
+            <p>
+              Follow the <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/getting-started.md">getting-started walkthrough</a>
+              for a disposable first install and receipt-backed rollback. Use
+              <code>validate --strict</code> as the release gate for a reviewed
+              catalog, not as a requirement for its minimal starter skill.
             </p>
           </section>
 

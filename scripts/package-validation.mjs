@@ -32,6 +32,7 @@ const EXPECTED_FILES_ALLOWLIST = [
   "CODE_OF_CONDUCT.md",
   "CLAUDE.md",
   "docs/command-reference.md",
+  "docs/getting-started.md",
   "docs/install-smoke.md",
   "docs/portability-matrix.md",
   "docs/release-readiness.md",

@@ -6,7 +6,7 @@ description: Use when asked to install, audit, sync, track, reconcile, repair, p
 # Skill Suitcase
 
 Use this skill to operate `skill-suitcase` as a cautious skill package manager.
-The usual source catalog is `~/repos/skills`; the CLI is either the installed
+The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either the installed
 `skill-suitcase` binary or the source checkout at `~/repos/skill-suitcase`.
 
 ## Contract
@@ -62,7 +62,7 @@ Find the CLI and catalog:
 ```bash
 command -v skill-suitcase || true
 test -d "$HOME/repos/skill-suitcase" && ls "$HOME/repos/skill-suitcase/dist/src/cli.js"
-test -d "$HOME/repos/skills" && git -C "$HOME/repos/skills" status --short --branch
+test -d "$HOME/.skill-suitcase/skills" && git -C "$HOME/.skill-suitcase/skills" status --short --branch
 ```
 
 Prefer the global binary when it exists. Otherwise use the built source CLI:
@@ -76,14 +76,14 @@ test "$(pnpm --version)" = "10.34.4" \
   && pnpm install --frozen-lockfile \
   && pnpm run build
 
-export SRC="$HOME/repos/skills"
+export SRC="$HOME/.skill-suitcase/skills"
 export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
 ```
 
 With a global install:
 
 ```bash
-export SRC="$HOME/repos/skills"
+export SRC="$HOME/.skill-suitcase/skills"
 export CLI="skill-suitcase"
 ```
 

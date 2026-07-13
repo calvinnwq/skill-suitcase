@@ -7,6 +7,8 @@ machine. If you are human, paste this line into your agent:
 > install the Skill Suitcase CLI and operator skill, then audit my local skill
 > targets without mutating them until I approve.
 
+If you are a human setting up a machine by hand, start with the walkthrough in [`docs/getting-started.md`](docs/getting-started.md).
+
 Never paste secrets, tokens, API keys, private prompts, or credential dumps into
 chat, issues, PRs, logs, or release notes.
 
@@ -16,8 +18,8 @@ Check first:
 
 ```bash
 command -v skill-suitcase || true
-if command -v skill-suitcase >/dev/null 2>&1 && test -d "$HOME/repos/skills"; then
-  skill-suitcase targets --source "$HOME/repos/skills" --json
+if command -v skill-suitcase >/dev/null 2>&1 && test -d "$HOME/.skill-suitcase/skills"; then
+  skill-suitcase targets --source "$HOME/.skill-suitcase/skills" --json
 fi
 ```
 
@@ -25,7 +27,7 @@ If missing, install the published CLI:
 
 ```bash
 npm install --global skill-suitcase
-test -d "$HOME/repos/skills" && skill-suitcase targets --source "$HOME/repos/skills" --json
+test -d "$HOME/.skill-suitcase/skills" && skill-suitcase targets --source "$HOME/.skill-suitcase/skills" --json
 ```
 
 Source installs require Node.js 20 or newer and pnpm 10.34.4, as pinned by
@@ -35,8 +37,13 @@ package-manager shims:
 
 ```bash
 if mkdir -p "$HOME/repos" &&
-  (test -d "$HOME/repos/skill-suitcase" || git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase") &&
-  git -C "$HOME/repos/skill-suitcase" pull --ff-only &&
+  {
+    if test -e "$HOME/repos/skill-suitcase/.git"; then
+      git -C "$HOME/repos/skill-suitcase" pull --ff-only
+    else
+      git clone https://github.com/calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase"
+    fi
+  } &&
   cd "$HOME/repos/skill-suitcase"
 then
   pnpm() {
@@ -55,7 +62,7 @@ Use the source CLI as:
 
 ```bash
 export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
-node "$CLI" targets --source "$HOME/repos/skills" --json
+node "$CLI" targets --source "$HOME/.skill-suitcase/skills" --json
 ```
 
 ## 2. Install The Operator Skill
@@ -132,12 +139,31 @@ Restart the agent runtime after installing or replacing a skill.
 
 ## 3. Install Or Refresh The Skills Catalog
 
+Use the reviewed catalog repository the operator names.
+Replace `<your-catalog-remote>` with its HTTPS remote URL, then clone it into Skill Suitcase's own catalog home:
+
 ```bash
-mkdir -p "$HOME/repos" &&
-(test -d "$HOME/repos/skills" || git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills") &&
-git -C "$HOME/repos/skills" pull --ff-only &&
-export SRC="$HOME/repos/skills"
+unset SRC
+CATALOG_DIR="$HOME/.skill-suitcase/skills"
+CATALOG_REMOTE="<your-catalog-remote>"
+if mkdir -p "$HOME/.skill-suitcase" &&
+  {
+    if test -e "$HOME/.skill-suitcase/skills/.git"; then
+      git -C "$CATALOG_DIR" pull --ff-only
+    else
+      git clone "$CATALOG_REMOTE" "$CATALOG_DIR"
+    fi
+  }
+then
+  export SRC="$CATALOG_DIR"
+else
+  printf 'Catalog checkout update failed; SRC was not exported.\n' >&2
+  false
+fi
 ```
+
+If no catalog exists yet, create a minimal one by following [`docs/getting-started.md`](docs/getting-started.md).
+On success, the checkout command exports that catalog as `SRC`.
 
 New-machine setup installs from this catalog through Skill Suitcase, not directly from `skills.sh` or `npx skills`.
 If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the repository diff, and then resume the normal Suitcase audit and sync flow.
@@ -149,6 +175,8 @@ With a global CLI:
 
 ```bash
 skill-suitcase import --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --json
+# Reviewed-catalog release gate:
 skill-suitcase validate --source "$SRC" --strict --json
 skill-suitcase targets --source "$SRC" --json
 skill-suitcase status --source "$SRC" --json
@@ -158,10 +186,15 @@ With a source CLI:
 
 ```bash
 node "$CLI" import --source "$SRC" --json
+node "$CLI" validate --source "$SRC" --json
+# Reviewed-catalog release gate:
 node "$CLI" validate --source "$SRC" --strict --json
 node "$CLI" targets --source "$SRC" --json
 node "$CLI" status --source "$SRC" --json
 ```
+
+Use non-strict validation for the minimal starter catalog from the getting-started guide.
+Treat `validate --strict` as the release gate for a reviewed catalog; the starter skill intentionally fails the Skillify authoring contract until it gains the required production sections, scripts, and tests.
 
 Optional upstream source refresh audit:
 
@@ -257,7 +290,9 @@ and ownership boundaries rather than target adapters.
 Use `track` for exact matches only:
 
 ```bash
-skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill office-hours --skill improve --skill gnhf-postflight --json
+SKILL_NAME="skill-name"
+ANOTHER_SKILL_NAME="another-skill"
+skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill "$SKILL_NAME" --skill "$ANOTHER_SKILL_NAME" --json
 ```
 
 Use `reconcile` only for selected catalog-owned receiptless drift:
@@ -393,6 +428,7 @@ skill-suitcase status --source "$SRC" --json
 ```
 
 Report the catalog branch/SHA, target ids inspected, live mutations run, final
-summary counts, receipt or backup paths, and anything skipped. Codex `linear` is
+summary counts, receipt or backup paths, and anything skipped. Leave
+provider-managed skills outside Suitcase ownership; for example, Codex `linear` is
 provider-managed by Codex/plugin/MCP and should not be forced into Suitcase
 ownership.

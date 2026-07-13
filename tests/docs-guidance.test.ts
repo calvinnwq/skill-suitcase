@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { posix } from "node:path";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join, posix } from "node:path";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { test } from "node:test";
 
 test("README stays product-forward, portable, and free of roadmap drift", async () => {
@@ -507,6 +509,310 @@ test("operator-facing docs describe manifest source policy materialization bound
     assert.ok(normalized.includes("generated") || normalized.includes("cache"), `${file} should mention generated/cache paths`);
     assert.ok(normalized.includes("source_denied_path") || normalized.includes("diff_source_denied_path"), `${file} should document denied-path error codes`);
   }
+});
+
+/**
+ * NGX-621 public onboarding docs: the getting-started walkthrough and the
+ * INSTALL runbook are packaged, public-facing documents. They must cover the
+ * full first-run flow (npm install, agent setup, catalog setup, local target
+ * overrides, read-only audit, pack/apply staging, and safe rollback) using
+ * portable paths and generic repo names only.
+ */
+
+test("getting-started guide covers the public onboarding flow with portable examples", async () => {
+  const guide = await readFile("docs/getting-started.md", "utf8");
+  const normalized = normalize(guide);
+
+  assert.ok(guide.includes("npm install --global skill-suitcase"), "guide should install the published CLI");
+  for (const phrase of [
+    "operator skill",
+    "skill-suitcase.yaml",
+    "`--claude-skills`",
+    "`--codex-home`",
+    "read-only",
+    "`pack`",
+    "`apply`",
+    "`rollback`",
+    "receipt",
+    "receipts created by `apply`, `reconcile`, or `repair`",
+    "does not resolve target install paths, so it needs no override flags",
+    "does not restore promotions"
+  ]) {
+    assert.ok(normalized.includes(phrase.toLowerCase()), `getting-started guide should cover: ${phrase}`);
+  }
+
+  for (const heading of [
+    "## 1. install the cli",
+    "## 2. install the operator skill into your agent",
+    "## 3. set up a skills catalog",
+    "## 4. point targets at your machine with local overrides",
+    "## 5. audit read-only first",
+    "## 6. stage with `pack`, install with `apply`",
+    "## 7. roll back safely"
+  ]) {
+    assert.ok(normalized.includes(heading), `getting-started guide should keep the walkthrough section: ${heading}`);
+  }
+
+  assert.doesNotMatch(guide, /\/Users\//, "getting-started examples must not contain maintainer-local paths");
+  assert.doesNotMatch(guide, /calvinnwq\/skills\b/, "getting-started must not reference a private catalog repository");
+  assert.ok(
+    guide.includes('mkdir -p "$CATALOG_PARENT"'),
+    "getting-started should create the catalog parent before cloning"
+  );
+  assert.ok(guide.includes("git var GIT_AUTHOR_IDENT"), "getting-started should preflight Git author identity");
+  assert.ok(guide.includes("`--hermes-skills`"), "getting-started should document the Hermes path override");
+  assert.ok(
+    guide.includes('INSTALL_TMP="$(mktemp -d "$AGENT_SKILLS_DIR/.skill-suitcase.install.XXXXXX")"'),
+    "getting-started should stage the operator skill before replacing an existing install"
+  );
+  assert.doesNotMatch(
+    guide,
+    /rm -rf "\$AGENT_SKILLS_DIR\/skill-suitcase"/,
+    "getting-started must not delete the installed operator skill before staging its replacement"
+  );
+
+  const catalogSection = guide.slice(
+    guide.indexOf("## 3. Set Up A Skills Catalog"),
+    guide.indexOf("## 4. Point Targets At Your Machine With Local Overrides")
+  );
+  const catalogGuard = catalogSection.indexOf('if test -e "$SRC" || test -L "$SRC"; then');
+  const catalogGuardEnd = catalogSection.indexOf("\n}\n\ncreate_starter_catalog", catalogGuard);
+  assert.notEqual(catalogGuard, -1, "getting-started should guard existing catalogs");
+  assert.notEqual(catalogGuardEnd, -1, "getting-started should close the catalog guard after setup");
+  for (const command of [
+    'git -C "$SRC" init',
+    'git -C "$SRC" add --',
+    'git -C "$SRC" commit -m "feat: add hello-world starter skill" --'
+  ]) {
+    const commandPosition = catalogSection.indexOf(command, catalogGuard);
+    assert.ok(
+      commandPosition > catalogGuard && commandPosition < catalogGuardEnd,
+      `getting-started should keep ${command} inside the fresh-catalog branch`
+    );
+  }
+  assert.doesNotMatch(
+    catalogSection,
+    /git -C "\$SRC" add \./,
+    "getting-started should not stage unrelated catalog files"
+  );
+
+  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files: string[] };
+  assert.ok(
+    packageJson.files.includes("docs/getting-started.md"),
+    "getting-started guide must ship in the npm package"
+  );
+  const releaseReadiness = await readFile("docs/release-readiness.md", "utf8");
+  assert.ok(
+    releaseReadiness.includes("`docs/getting-started.md`"),
+    "release-readiness payload inventory should include the getting-started guide"
+  );
+
+  const readme = await readFile("README.md", "utf8");
+  assert.ok(
+    readme.includes("](docs/getting-started.md)"),
+    "README should route new users to the getting-started guide"
+  );
+
+  const install = await readFile("INSTALL.md", "utf8");
+  assert.ok(
+    install.includes("](docs/getting-started.md)"),
+    "INSTALL should route human first-run setup to the getting-started guide"
+  );
+});
+
+function shellBlockAfter(markdown: string, marker: string): string {
+  const markerPosition = markdown.indexOf(marker);
+  assert.notEqual(markerPosition, -1, `missing documentation marker: ${marker}`);
+  const block = markdown.slice(markerPosition).match(/```bash\n([\s\S]*?)\n```/);
+  assert.ok(block?.[1], `missing bash block after: ${marker}`);
+  return block[1];
+}
+
+function htmlShellBlockAfter(html: string, marker: string): string {
+  const markerPosition = html.indexOf(marker);
+  assert.notEqual(markerPosition, -1, `missing HTML documentation marker: ${marker}`);
+  const block = html.slice(markerPosition).match(/<pre><code>([\s\S]*?)<\/code><\/pre>/);
+  assert.ok(block?.[1], `missing HTML shell block after: ${marker}`);
+  return block[1]
+    .replaceAll("&amp;", "&")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&lt;", "<");
+}
+
+test("reviewed-catalog setup returns nonzero when clone fails", async () => {
+  const guide = await readFile("docs/getting-started.md", "utf8");
+  const fixture = await mkdtemp(join(tmpdir(), "skill-suitcase-docs-clone-"));
+
+  try {
+    const snippet = shellBlockAfter(guide, "If your team already has a reviewed catalog repository")
+      .replace("<your-catalog-remote>", join(fixture, "missing-catalog.git"));
+    const result = spawnSync("/bin/sh", ["-c", snippet], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: fixture }
+    });
+
+    assert.notEqual(result.status, 0, "a failed catalog clone must not report success");
+    assert.match(result.stderr, /catalog clone failed; src was not assigned/i);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("starter-catalog setup preserves every byte under an existing partial source", async () => {
+  const guide = await readFile("docs/getting-started.md", "utf8");
+  const fixture = await mkdtemp(join(tmpdir(), "skill-suitcase-docs-existing-"));
+  const sentinel = join(fixture, ".skill-suitcase", "skills", "skills", "hello-world", "SKILL.md");
+  const contents = Buffer.from("existing partial catalog\n\u0000do not replace\n", "utf8");
+
+  try {
+    await mkdir(join(sentinel, ".."), { recursive: true });
+    await writeFile(sentinel, contents);
+    const before = await readFile(sentinel);
+    const snippet = shellBlockAfter(guide, "Otherwise, create a minimal catalog");
+    const result = spawnSync("/bin/sh", ["-c", snippet], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: fixture }
+    });
+
+    assert.notEqual(result.status, 0, "an existing partial catalog must fail closed");
+    assert.deepEqual(await readFile(sentinel), before);
+    assert.match(result.stderr, /refusing to modify existing non-catalog path/i);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("starter-catalog setup is an unchanged no-op for an existing catalog", async () => {
+  const guide = await readFile("docs/getting-started.md", "utf8");
+  const fixture = await mkdtemp(join(tmpdir(), "skill-suitcase-docs-rerun-"));
+  const catalog = join(fixture, ".skill-suitcase", "skills");
+  const manifest = join(catalog, "skill-suitcase.yaml");
+  const contents = Buffer.from("suitcases: {}\n# existing catalog\n", "utf8");
+
+  try {
+    await mkdir(catalog, { recursive: true });
+    await writeFile(manifest, contents);
+    const snippet = shellBlockAfter(guide, "Otherwise, create a minimal catalog");
+    const result = spawnSync("/bin/sh", ["-c", snippet], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: fixture }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(await readFile(manifest), contents);
+    assert.match(result.stdout, /catalog already exists.*leaving it unchanged/i);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("starter-catalog setup writes nothing without a Git author identity", async () => {
+  const guide = await readFile("docs/getting-started.md", "utf8");
+  const fixture = await mkdtemp(join(tmpdir(), "skill-suitcase-docs-git-identity-"));
+  const catalog = join(fixture, ".skill-suitcase", "skills");
+
+  try {
+    const snippet = shellBlockAfter(guide, "Otherwise, create a minimal catalog");
+    const result = spawnSync("/bin/sh", ["-c", snippet], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: fixture,
+        GIT_AUTHOR_NAME: "",
+        GIT_AUTHOR_EMAIL: "",
+        GIT_COMMITTER_NAME: "",
+        GIT_COMMITTER_EMAIL: "",
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "user.useConfigOnly",
+        GIT_CONFIG_VALUE_0: "true"
+      }
+    });
+
+    assert.notEqual(result.status, 0, "missing Git identity must stop catalog creation");
+    assert.match(result.stderr, /git author identity is not configured/i);
+    await assert.rejects(readFile(catalog), { code: "ENOENT" });
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("public catalog checkout snippets fail closed", async () => {
+  const install = await readFile("INSTALL.md", "utf8");
+  const installHtml = await readFile("docs/install.html", "utf8");
+  const fixture = await mkdtemp(join(tmpdir(), "skill-suitcase-docs-install-clone-"));
+  const missingRemote = join(fixture, "missing-catalog.git");
+  const snippets = [
+    shellBlockAfter(install, "Replace `<your-catalog-remote>`"),
+    htmlShellBlockAfter(installHtml, "Replace <code>&lt;your-catalog-remote&gt;</code>")
+  ];
+
+  try {
+    for (const snippet of snippets) {
+      const result = spawnSync("/bin/sh", ["-c", snippet.replace("<your-catalog-remote>", missingRemote)], {
+        encoding: "utf8",
+        env: { ...process.env, HOME: fixture, SRC: "/stale/catalog" }
+      });
+
+      assert.notEqual(result.status, 0, "a failed catalog checkout must not report success");
+      assert.match(result.stderr, /catalog checkout update failed; src was not exported/i);
+    }
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("public track example passes generic skill names as arguments", async () => {
+  const install = await readFile("INSTALL.md", "utf8");
+  const snippet = shellBlockAfter(install, "Use `track` for exact matches only:");
+  const fixture = await mkdtemp(join(tmpdir(), "skill-suitcase-docs-track-"));
+  const command = join(fixture, "skill-suitcase");
+
+  try {
+    await writeFile(command, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", "utf8");
+    await chmod(command, 0o755);
+    const result = spawnSync("/bin/sh", ["-c", snippet], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fixture}:${process.env.PATH ?? ""}`,
+        SRC: "/path/to/catalog"
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^track\n[\s\S]*\nskill-name\n[\s\S]*\nanother-skill\n/m);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("public install runbook uses portable paths and generic repo names", async () => {
+  const install = await readFile("INSTALL.md", "utf8");
+
+  assert.ok(
+    install.includes('mkdir -p "$HOME/.skill-suitcase"'),
+    "install runbook should create the catalog parent before cloning"
+  );
+
+  assert.doesNotMatch(install, /\/Users\//, "INSTALL examples must not contain maintainer-local paths");
+  assert.doesNotMatch(install, /calvinnwq\/skills\b/, "INSTALL must not reference a private catalog repository");
+  assert.doesNotMatch(install, /git@github\.com:/, "INSTALL should clone public repositories over https");
+  assert.doesNotMatch(
+    install,
+    /--skill (?:office-hours|improve|gnhf-postflight)\b/,
+    "INSTALL examples must use generic skill names"
+  );
+  assert.ok(
+    install.includes("<your-catalog-remote>"),
+    "INSTALL catalog setup should use a generic catalog remote placeholder"
+  );
+  assert.equal(
+    install.match(/test -e "\$HOME\/(?:repos\/skill-suitcase|\.skill-suitcase\/skills)\/\.git"/g)?.length,
+    2,
+    "INSTALL should recognize directory- and file-backed Git metadata for both checkout routes"
+  );
 });
 
 test("README points new-machine setup at Suitcase-managed catalog installs", async () => {

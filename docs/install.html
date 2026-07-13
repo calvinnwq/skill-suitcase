@@ -53,8 +53,13 @@
               package-manager shims:
             </p>
             <pre><code>if mkdir -p "$HOME/repos" &amp;&amp;
-  (test -d "$HOME/repos/skill-suitcase" || git clone git@github.com:calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase") &amp;&amp;
-  git -C "$HOME/repos/skill-suitcase" pull --ff-only &amp;&amp;
+  {
+    if test -e "$HOME/repos/skill-suitcase/.git"; then
+      git -C "$HOME/repos/skill-suitcase" pull --ff-only
+    else
+      git clone https://github.com/calvinnwq/skill-suitcase.git "$HOME/repos/skill-suitcase"
+    fi
+  } &amp;&amp;
   cd "$HOME/repos/skill-suitcase"
 then
   pnpm() {
@@ -69,7 +74,7 @@ else
 fi</code></pre>
             <p>Then invoke the source build directly:</p>
             <pre><code>export CLI="$HOME/repos/skill-suitcase/dist/src/cli.js"
-node "$CLI" targets --source "/path/to/skills-catalog" --json</code></pre>
+node "$CLI" targets --source "$HOME/.skill-suitcase/skills" --json</code></pre>
           </section>
 
           <section>
@@ -147,10 +152,33 @@ install_operator_skill</code></pre>
               <code>skills/&lt;name&gt;/SKILL.md</code>. Git backing is the
               preferred operating model.
             </p>
-            <pre><code>mkdir -p "$HOME/repos" &amp;&amp;
-(test -d "$HOME/repos/skills" || git clone git@github.com:calvinnwq/skills.git "$HOME/repos/skills") &amp;&amp;
-git -C "$HOME/repos/skills" pull --ff-only &amp;&amp;
-export SRC="$HOME/repos/skills"</code></pre>
+            <p>
+              Replace <code>&lt;your-catalog-remote&gt;</code> with the HTTPS URL of
+              your reviewed catalog repository:
+            </p>
+            <pre><code>unset SRC
+CATALOG_DIR="$HOME/.skill-suitcase/skills"
+CATALOG_REMOTE="&lt;your-catalog-remote&gt;"
+if mkdir -p "$HOME/.skill-suitcase" &amp;&amp;
+  {
+    if test -e "$HOME/.skill-suitcase/skills/.git"; then
+      git -C "$CATALOG_DIR" pull --ff-only
+    else
+      git clone "$CATALOG_REMOTE" "$CATALOG_DIR"
+    fi
+  }
+then
+  export SRC="$CATALOG_DIR"
+else
+  printf 'Catalog checkout update failed; SRC was not exported.\n' &gt;&amp;2
+  false
+fi</code></pre>
+            <p>
+              If you do not have a catalog yet, the
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/getting-started.md">getting-started walkthrough</a>
+              creates a guarded minimal catalog without overwriting any existing
+              catalog path.
+            </p>
             <div class="callout" data-kind="note">
               <p class="callout-label">Note</p>
               <p>
@@ -167,6 +195,8 @@ export SRC="$HOME/repos/skills"</code></pre>
           <section>
             <h2>Verify with a read-only audit</h2>
             <pre><code>skill-suitcase import --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --json
+<span class="c"># reviewed-catalog release gate</span>
 skill-suitcase validate --source "$SRC" --strict --json
 skill-suitcase targets --source "$SRC" --json
 skill-suitcase status --source "$SRC" --json</code></pre>
@@ -179,6 +209,11 @@ skill-suitcase status --source "$SRC" --json</code></pre>
                 approval boundary.
               </p>
             </div>
+            <p>
+              Use non-strict validation for the minimal starter catalog.
+              Strict validation additionally applies the production Skillify
+              authoring contract and is the release gate for a reviewed catalog.
+            </p>
             <p>
               The full agent setup runbook, including per-runtime pack and apply
               examples, lives in
