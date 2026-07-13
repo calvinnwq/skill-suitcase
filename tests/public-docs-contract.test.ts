@@ -9,6 +9,7 @@ const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
 const TEXT_DOCUMENT_EXTENSIONS = [".css", ".html", ".js", ".json", ".md", ".yaml", ".yml"];
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(createCommandRegistry().names());
 const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "command", "do", "elif", "env", "if", "sudo", "then", "until", "while"]);
+const SHELL_FENCE_LANGUAGES = new Set(["bash", "sh", "shell", "console", "shell-session"]);
 
 function publicDocumentPaths(): string[] {
   const paths = readdirSync(".", { withFileTypes: true })
@@ -40,9 +41,32 @@ function decodeHtml(value: string): string {
     .replaceAll("&#39;", "'");
 }
 
+function markdownShellBlocks(contents: string): string[] {
+  const blocks: string[] = [];
+  const lines = contents.split(/\r?\n/);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const opening = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*([^\r]*)$/);
+    if (opening === undefined || opening === null) continue;
+
+    const fence = opening[1] ?? "";
+    const language = (opening[2] ?? "").trim().split(/\s+/, 1)[0]?.toLowerCase() ?? "";
+    const isShellBlock = SHELL_FENCE_LANGUAGES.has(language);
+
+    const blockStart = index + 1;
+    for (index = blockStart; index < lines.length; index += 1) {
+      const closing = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1];
+      if (closing === undefined || closing[0] !== fence[0] || closing.length < fence.length) continue;
+      if (isShellBlock) blocks.push(lines.slice(blockStart, index).join("\n"));
+      break;
+    }
+  }
+
+  return blocks;
+}
+
 function commandExamples(path: string, contents: string): string[] {
-  const markdownBlocks = [...contents.matchAll(/```(?:bash|sh|shell)\n([\s\S]*?)\n```/g)]
-    .map((match) => match[1] ?? "");
+  const markdownBlocks = markdownShellBlocks(contents);
   const htmlBlocks = [...contents.matchAll(/<pre\b[^>]*>\s*<code\b[^>]*>([\s\S]*?)<\/code>\s*<\/pre>/gi)]
     .map((match) => decodeHtml(match[1] ?? ""));
   const htmlCommandLines = [...contents.matchAll(/<span\b([^>]*)>/g)]
@@ -64,6 +88,8 @@ function shellSegments(line: string): string[] {
   const parenthesisContexts: Array<{ restoreQuote: "\"" | null; substitution: boolean }> = [];
   let start = 0;
   let quote: "\"" | "'" | null = null;
+  let inBacktickSubstitution = false;
+  let backtickRestoreQuote: "\"" | null = null;
   let escaped = false;
 
   for (let index = 0; index < line.length; index += 1) {
@@ -81,6 +107,20 @@ function shellSegments(line: string): string[] {
       parenthesisContexts.push({ restoreQuote: quote, substitution: true });
       quote = null;
       index += 1;
+      start = index + 1;
+      continue;
+    }
+    if (character === "`" && quote !== "'") {
+      segments.push(line.slice(start, index));
+      if (inBacktickSubstitution) {
+        inBacktickSubstitution = false;
+        quote = backtickRestoreQuote;
+        backtickRestoreQuote = null;
+      } else {
+        inBacktickSubstitution = true;
+        backtickRestoreQuote = quote === "\"" ? quote : null;
+        quote = null;
+      }
       start = index + 1;
       continue;
     }
@@ -213,10 +253,16 @@ function validateCliExamples(path: string, contents: string): number {
 }
 
 function assertNoPrivateMachinePaths(path: string, contents: string): void {
-  const normalizedContents = contents.replace(/\\{2,}/g, "\\");
-  assert.doesNotMatch(normalizedContents, /\/Users\/[^/\\\s`"']+/, `${path} contains a macOS user path`);
-  assert.doesNotMatch(normalizedContents, /\/home\/[^/\\\s`"']+/, `${path} contains a Linux user path`);
-  assert.doesNotMatch(normalizedContents, /[A-Z]:[\\/]Users[\\/][^\\/\s`"']+/i, `${path} contains a Windows user path`);
+  const normalizedContents = contents.replace(/\\{2,}/g, "\\").replaceAll("\\/", "/");
+  const localPathContents = normalizedContents.replace(/\bhttps?:\/\/[^\s`"'<>]+/gi, "");
+  assert.doesNotMatch(localPathContents, /\/Users\/[^/\\\s`"']+/, `${path} contains a macOS user path`);
+  assert.doesNotMatch(localPathContents, /\/home\/[^/\\\s`"']+/, `${path} contains a Linux user path`);
+  assert.doesNotMatch(
+    localPathContents,
+    /(?:^|[^A-Za-z0-9._~/-])\/root(?:[\/\\]|(?=[\s`"'<>]|$))/m,
+    `${path} contains a Linux root user path`
+  );
+  assert.doesNotMatch(localPathContents, /[A-Z]:[\\/]Users[\\/][^\\/\s`"']+/i, `${path} contains a Windows user path`);
 }
 
 test("public and reusable docs contain no contributor-specific machine paths", () => {
@@ -233,12 +279,19 @@ test("private machine path checks cover roots and Windows separators", () => {
   for (const privatePath of [
     "`/Users/alice`",
     "`/home/alice`",
+    "`/root/project`",
+    "path:/root/project",
     "C:/Users/alice/project",
     "C:\\Users\\alice",
     String.raw`{"path":"C:\\Users\\alice\\project"}`
   ]) {
     assert.throws(() => assertNoPrivateMachinePaths("fixture.md", privatePath), /contains a .* user path/);
   }
+
+  assert.doesNotThrow(() => assertNoPrivateMachinePaths(
+    "fixture.md",
+    "See /target/root/project, https://docs.example.com/home/alice/setup, and https://docs.example.com/root/project."
+  ));
 });
 
 test("literal public CLI examples use shipped commands and deterministic JSON output", () => {
@@ -289,6 +342,24 @@ test("CLI example parsing rejects invalid tokens and validates each pipe segment
   );
 });
 
+test("CLI example parsing covers common shell fence forms", () => {
+  for (const fixture of [
+    "~~~bash\nskill-suitcase bogus --json\n~~~",
+    "```console\n$ skill-suitcase bogus --json\n```",
+    '```bash title="demo"\nskill-suitcase bogus --json\n```',
+    "```shell-session\n$ skill-suitcase bogus --json\n```",
+    "```bash\r\nskill-suitcase bogus --json\r\n```",
+    "```BASH\nskill-suitcase bogus --json\n````"
+  ]) {
+    assert.throws(() => validateCliExamples("fixture.md", fixture), /unknown command: bogus/);
+  }
+
+  assert.equal(
+    validateCliExamples("fixture.md", "````text\n```bash\nskill-suitcase bogus --json\n```\n````"),
+    0
+  );
+});
+
 test("CLI example parsing validates command substitutions and subshells", () => {
   assert.throws(
     () => validateCliExamples("fixture.md", "```sh\nRESULT=$(skill-suitcase bogus --json)\n```"),
@@ -300,6 +371,10 @@ test("CLI example parsing validates command substitutions and subshells", () => 
   );
   assert.throws(
     () => validateCliExamples("fixture.md", '```sh\nRESULT="$(skill-suitcase bogus --json)"\n```'),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```sh\nRESULT=`skill-suitcase bogus --json`\n```"),
     /unknown command: bogus/
   );
   assert.equal(
