@@ -88,6 +88,74 @@ function navigationEntries(source: string): Array<{ number: string | undefined; 
   return entries;
 }
 
+function runDocsSite(page: string): {
+  clickHandlers: Array<(event: { target: { closest: (selector: string) => unknown } }) => void>;
+  document: any;
+  pager: any;
+  sidebar: any;
+} {
+  const clickHandlers: Array<(event: { target: { closest: (selector: string) => unknown } }) => void> = [];
+  const makeElement = (tagName = "div"): any => {
+    const el: any = {
+      tagName: tagName.toUpperCase(),
+      childNodes: [{ textContent: "" }],
+      children: [],
+      classList: {
+        add() {},
+        remove() {},
+        contains() { return false; },
+        toggle() { return true; }
+      },
+      addEventListener() {},
+      appendChild(child: unknown) {
+        this.children.push(child);
+        return child;
+      },
+      setAttribute() {}
+    };
+    return el;
+  };
+  const sidebar = makeElement("nav");
+  const pager = makeElement("footer");
+  const document: any = {
+    body: {
+      dataset: { page },
+      classList: { remove() {}, contains() { return false; }, toggle() { return true; } },
+      appendChild() {}
+    },
+    documentElement: { dataset: {}, scrollHeight: 1000 },
+    addEventListener(type: string, handler: (event: { target: { closest: (selector: string) => unknown } }) => void) {
+      if (type === "click") clickHandlers.push(handler);
+    },
+    createElement: makeElement,
+    createTextNode(textContent: string) {
+      return { textContent };
+    },
+    getElementById(id: string) {
+      return id === "sidebar" ? sidebar : id === "pager" ? pager : null;
+    },
+    querySelectorAll() {
+      return [];
+    }
+  };
+  const window = {
+    localStorage: {
+      getItem() { throw new Error("blocked"); },
+      setItem() { throw new Error("blocked"); }
+    },
+    matchMedia() {
+      return { matches: true };
+    },
+    addEventListener() {},
+    innerHeight: 800,
+    scrollY: 0
+  };
+  const executeSite = new Function("document", "window", "navigator", "setTimeout", read("docs/site.js"));
+  executeSite(document, window, {}, setTimeout);
+
+  return { clickHandlers, document, pager, sidebar };
+}
+
 test("docs site pages share the expected chrome", () => {
   for (const page of DOC_PAGES) {
     const html = read(page);
@@ -140,6 +208,28 @@ test("navigation manifest covers every page in numbered reading order", () => {
   assert.doesNotMatch(js, /artshelf/i, "the docs chrome must use Skill Suitcase identifiers");
 });
 
+test("rendered pager follows the documented reading order", () => {
+  const pages = DOC_PAGES.map((page) => page.replace("docs/", ""));
+
+  for (const [index, page] of pages.entries()) {
+    const { pager } = runDocsSite(page);
+    const previous = pages[index - 1];
+    const next = pages[index + 1];
+
+    assert.deepEqual(
+      pager.children.map((child: any) => ({
+        className: child.className ?? "",
+        href: child.href ?? null
+      })),
+      [
+        previous ? { className: "prev", href: previous } : { className: "", href: null },
+        next ? { className: "next", href: next } : { className: "", href: null }
+      ],
+      `${page} pager must link to its DOC_PAGES neighbors`
+    );
+  }
+});
+
 test("navigation extraction includes unnumbered internal entries", () => {
   const entries = navigationEntries(`
     var NAV = [{ items: [
@@ -182,67 +272,8 @@ test("table of contents preserves canonical fragment owners", () => {
 });
 
 test("docs chrome renders when web storage is unavailable", () => {
-  const clickHandlers: Array<(event: { target: { closest: (selector: string) => unknown } }) => void> = [];
-  const makeElement = (tagName = "div"): any => {
-    const el: any = {
-      tagName: tagName.toUpperCase(),
-      childNodes: [{ textContent: "" }],
-      children: [],
-      classList: {
-        add() {},
-        remove() {},
-        contains() { return false; },
-        toggle() { return true; }
-      },
-      addEventListener() {},
-      appendChild(child: unknown) {
-        this.children.push(child);
-        return child;
-      },
-      setAttribute() {}
-    };
-    return el;
-  };
-  const sidebar = makeElement("nav");
-  const pager = makeElement("footer");
-  const document: any = {
-    body: {
-      dataset: { page: "index.html" },
-      classList: { remove() {}, contains() { return false; }, toggle() { return true; } },
-      appendChild() {}
-    },
-    documentElement: { dataset: {}, scrollHeight: 1000 },
-    addEventListener(type: string, handler: (event: { target: { closest: (selector: string) => unknown } }) => void) {
-      if (type === "click") clickHandlers.push(handler);
-    },
-    createElement: makeElement,
-    createTextNode(textContent: string) {
-      return { textContent };
-    },
-    getElementById(id: string) {
-      return id === "sidebar" ? sidebar : id === "pager" ? pager : null;
-    },
-    querySelectorAll() {
-      return [];
-    }
-  };
-  const window = {
-    localStorage: {
-      getItem() { throw new Error("blocked"); },
-      setItem() { throw new Error("blocked"); }
-    },
-    matchMedia() {
-      return { matches: true };
-    },
-    addEventListener() {},
-    innerHeight: 800,
-    scrollY: 0
-  };
+  const { clickHandlers, document, sidebar } = runDocsSite("index.html");
 
-  assert.doesNotThrow(() => {
-    const runSite = new Function("document", "window", "navigator", "setTimeout", read("docs/site.js"));
-    runSite(document, window, {}, setTimeout);
-  });
   assert.equal(document.documentElement.dataset.theme, "dark");
   assert.ok(sidebar.children.length > 0, "sidebar should render without storage");
 
