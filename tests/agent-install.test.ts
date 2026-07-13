@@ -47,13 +47,23 @@ test("agent install guide tells agents how to install and verify the skill", asy
 
   assert.match(install, /These instructions are for any coding agent/);
   assert.doesNotMatch(install, /These instructions are for Codex, Claude/);
-  assert.match(
-    install,
-    /# Choose one runtime root: Codex \$HOME\/\.codex\/skills, Claude \$HOME\/\.claude\/skills, shared agents root \$HOME\/\.agents\/skills, or Grok Build \$HOME\/\.grok\/skills/
-  );
-  assert.match(install, /AGENT_SKILLS_DIR="\$HOME\/\.codex\/skills"/);
+  const runtimeRootBlock = install.match(
+    /active assignment below when you are not installing for Codex:\n\n```bash\n([\s\S]*?)\n```/
+  )?.[1];
+  assert.ok(runtimeRootBlock, "the install guide must keep a copyable runtime-root block");
+  for (const root of [
+    "$HOME/.codex/skills",
+    "$HOME/.claude/skills",
+    "$HOME/.agents/skills",
+    "$HOME/.grok/skills",
+    "$HOME/.hermes/skills",
+    "$HOME/.hermes/profiles/<name>/skills",
+  ]) {
+    assert.ok(runtimeRootBlock.includes(root), `the runtime-root block must document ${root}`);
+  }
+  assert.match(runtimeRootBlock, /^AGENT_SKILLS_DIR="\$HOME\/\.codex\/skills"$/m);
   assert.equal(
-    install.match(/^AGENT_SKILLS_DIR=/gm)?.length,
+    runtimeRootBlock.match(/^\s*(?:export\s+)?AGENT_SKILLS_DIR\s*=/gm)?.length ?? 0,
     1,
     "the copyable runtime-root block must leave only one active assignment"
   );
