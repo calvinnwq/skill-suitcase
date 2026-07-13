@@ -113,12 +113,19 @@ function analyzeSourceFile(filePath, text) {
   const processMembers = new Set();
   const consoleMethods = new Set();
   const unrenderedCliWrites = new Set();
-  const processObjectNames = new Set(["process"]);
+  const processObjectBindings = new Set();
   const processStreamBindings = new Map();
   const rendererBindings = new Map();
   let hasSwitchStatement = false;
 
-  collectImportedBindings(sourceFile, checker, processObjectNames, processMembers, processStreamBindings, rendererBindings);
+  collectImportedBindings(
+    sourceFile,
+    checker,
+    processObjectBindings,
+    processMembers,
+    processStreamBindings,
+    rendererBindings
+  );
 
   function visit(node) {
     const specifier = moduleSpecifierFromNode(node);
@@ -126,7 +133,7 @@ function analyzeSourceFile(filePath, text) {
       importSpecifiers.push(specifier);
     }
 
-    const processMember = directProcessMember(node, processObjectNames);
+    const processMember = directProcessMember(node, checker, processObjectBindings);
     if (processMember !== null) {
       processMembers.add(processMember);
     }
@@ -134,13 +141,13 @@ function analyzeSourceFile(filePath, text) {
     if (ts.isVariableDeclaration(node)
       && node.initializer !== undefined
       && ts.isObjectBindingPattern(node.name)
-      && isDirectProcessObject(node.initializer, processObjectNames)) {
+      && isDirectProcessObject(node.initializer, checker, processObjectBindings)) {
       collectGuardedBindingNames(node.name, checker, processMembers, processStreamBindings);
     }
     if (ts.isVariableDeclaration(node)
       && node.initializer !== undefined
       && ts.isIdentifier(node.name)) {
-      const boundStream = directProcessMember(unwrapExpression(node.initializer), processObjectNames);
+      const boundStream = directProcessMember(unwrapExpression(node.initializer), checker, processObjectBindings);
       if (boundStream === "stdout" || boundStream === "stderr") {
         setStreamBinding(node.name, boundStream, checker, processStreamBindings);
       }
@@ -148,7 +155,7 @@ function analyzeSourceFile(filePath, text) {
     if (ts.isBinaryExpression(node)
       && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
       && ts.isObjectLiteralExpression(unwrapExpression(node.left))
-      && isDirectProcessObject(node.right, processObjectNames)) {
+      && isDirectProcessObject(node.right, checker, processObjectBindings)) {
       collectGuardedAssignmentNames(unwrapExpression(node.left), checker, processMembers, processStreamBindings);
     }
 
@@ -158,7 +165,7 @@ function analyzeSourceFile(filePath, text) {
         consoleMethods.add(consoleMethod);
       }
 
-      const stream = directProcessWriteStream(node, checker, processObjectNames, processStreamBindings);
+      const stream = directProcessWriteStream(node, checker, processObjectBindings, processStreamBindings);
       if (stream !== null && !isApprovedRendererWrite(node.arguments[0], stream, checker, rendererBindings)) {
         unrenderedCliWrites.add(stream);
       }
@@ -180,7 +187,14 @@ function analyzeSourceFile(filePath, text) {
   };
 }
 
-function collectImportedBindings(sourceFile, checker, processObjectNames, processMembers, processStreamBindings, rendererBindings) {
+function collectImportedBindings(
+  sourceFile,
+  checker,
+  processObjectBindings,
+  processMembers,
+  processStreamBindings,
+  rendererBindings
+) {
   for (const statement of sourceFile.statements) {
     if (ts.isImportDeclaration(statement) && ts.isStringLiteralLike(statement.moduleSpecifier)) {
       const specifier = statement.moduleSpecifier.text;
@@ -191,11 +205,11 @@ function collectImportedBindings(sourceFile, checker, processObjectNames, proces
 
       if (isNodeProcessSpecifier(specifier)) {
         if (importClause.name !== undefined) {
-          processObjectNames.add(importClause.name.text);
+          addProcessObjectBinding(importClause.name, checker, processObjectBindings);
         }
         if (importClause.namedBindings !== undefined) {
           if (ts.isNamespaceImport(importClause.namedBindings)) {
-            processObjectNames.add(importClause.namedBindings.name.text);
+            addProcessObjectBinding(importClause.namedBindings.name, checker, processObjectBindings);
           } else {
             for (const element of importClause.namedBindings.elements) {
               if (element.isTypeOnly) {
@@ -203,7 +217,7 @@ function collectImportedBindings(sourceFile, checker, processObjectNames, proces
               }
               const importedName = element.propertyName?.text ?? element.name.text;
               if (importedName === "default" || importedName === "process") {
-                processObjectNames.add(element.name.text);
+                addProcessObjectBinding(element.name, checker, processObjectBindings);
               } else if (GUARDED_PROCESS_MEMBERS.has(importedName)) {
                 processMembers.add(importedName);
                 setStreamBinding(element.name, importedName, checker, processStreamBindings);
@@ -240,7 +254,7 @@ function collectImportedBindings(sourceFile, checker, processObjectNames, proces
       && statement.moduleReference.expression !== undefined
       && ts.isStringLiteralLike(statement.moduleReference.expression)
       && isNodeProcessSpecifier(statement.moduleReference.expression.text)) {
-      processObjectNames.add(statement.name.text);
+      addProcessObjectBinding(statement.name, checker, processObjectBindings);
     } else if (ts.isExportDeclaration(statement)
       && !statement.isTypeOnly
       && statement.moduleSpecifier !== undefined
@@ -298,17 +312,17 @@ function moduleSpecifierFromNode(node) {
   return null;
 }
 
-function directProcessMember(node, processObjectNames) {
+function directProcessMember(node, checker, processObjectBindings) {
   if (isInTypeOnlyContext(node)) {
     return null;
   }
   if (ts.isPropertyAccessExpression(node)
-    && isDirectProcessObject(node.expression, processObjectNames)
+    && isDirectProcessObject(node.expression, checker, processObjectBindings)
     && GUARDED_PROCESS_MEMBERS.has(node.name.text)) {
     return node.name.text;
   }
   if (ts.isElementAccessExpression(node)
-    && isDirectProcessObject(node.expression, processObjectNames)
+    && isDirectProcessObject(node.expression, checker, processObjectBindings)
     && node.argumentExpression !== undefined
     && ts.isStringLiteralLike(unwrapExpression(node.argumentExpression))
     && GUARDED_PROCESS_MEMBERS.has(unwrapExpression(node.argumentExpression).text)) {
@@ -332,14 +346,18 @@ function isInTypeOnlyContext(node) {
   return false;
 }
 
-function isDirectProcessObject(node, processObjectNames) {
+function isDirectProcessObject(node, checker, processObjectBindings) {
   const expression = unwrapExpression(node);
   if (ts.isIdentifier(expression)) {
-    return processObjectNames.has(expression.text);
+    if (expression.text === "process") {
+      return true;
+    }
+    const symbol = checker.getSymbolAtLocation(expression);
+    return symbol !== undefined && processObjectBindings.has(symbol);
   }
   if (ts.isPropertyAccessExpression(expression)) {
     if (expression.name.text === "default"
-      && isDirectProcessObject(expression.expression, processObjectNames)) {
+      && isDirectProcessObject(expression.expression, checker, processObjectBindings)) {
       return true;
     }
     return expression.name.text === "process" && isGlobalObject(expression.expression);
@@ -351,18 +369,18 @@ function isDirectProcessObject(node, processObjectNames) {
       return false;
     }
     if (argument.text === "default"
-      && isDirectProcessObject(expression.expression, processObjectNames)) {
+      && isDirectProcessObject(expression.expression, checker, processObjectBindings)) {
       return true;
     }
     return argument.text === "process" && isGlobalObject(expression.expression);
   }
   if (ts.isAwaitExpression(expression)) {
-    return isDirectProcessObject(expression.expression, processObjectNames);
+    return isDirectProcessObject(expression.expression, checker, processObjectBindings);
   }
   return isDirectProcessLoader(expression);
 }
 
-function directProcessWriteStream(node, checker, processObjectNames, processStreamBindings) {
+function directProcessWriteStream(node, checker, processObjectBindings, processStreamBindings) {
   const callee = unwrapExpression(node.expression);
   let streamExpression;
   if (ts.isPropertyAccessExpression(callee)
@@ -376,7 +394,7 @@ function directProcessWriteStream(node, checker, processObjectNames, processStre
   } else {
     return null;
   }
-  const directMember = directProcessMember(streamExpression, processObjectNames);
+  const directMember = directProcessMember(streamExpression, checker, processObjectBindings);
   if (directMember !== null) {
     return directMember;
   }
@@ -472,11 +490,11 @@ function collectGuardedBindingNames(pattern, checker, processMembers, processStr
     if (element.isTypeOnly) {
       continue;
     }
-    const name = element.propertyName ?? element.name;
-    if ((ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && GUARDED_PROCESS_MEMBERS.has(name.text)) {
-      processMembers.add(name.text);
+    const name = propertyNameText(element.propertyName ?? element.name);
+    if (name !== null && GUARDED_PROCESS_MEMBERS.has(name)) {
+      processMembers.add(name);
       if (ts.isIdentifier(element.name)) {
-        setStreamBinding(element.name, name.text, checker, processStreamBindings);
+        setStreamBinding(element.name, name, checker, processStreamBindings);
       }
     }
   }
@@ -496,14 +514,32 @@ function collectGuardedAssignmentNames(pattern, checker, processMembers, process
     if (!ts.isPropertyAssignment(property)) {
       continue;
     }
-    const key = property.name;
+    const key = propertyNameText(property.name);
     const target = unwrapExpression(property.initializer);
-    if ((ts.isIdentifier(key) || ts.isStringLiteralLike(key))
-      && GUARDED_PROCESS_MEMBERS.has(key.text)
+    if (key !== null
+      && GUARDED_PROCESS_MEMBERS.has(key)
       && ts.isIdentifier(target)) {
-      processMembers.add(key.text);
-      setStreamBinding(target, key.text, checker, processStreamBindings);
+      processMembers.add(key);
+      setStreamBinding(target, key, checker, processStreamBindings);
     }
+  }
+}
+
+function propertyNameText(name) {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) {
+    return name.text;
+  }
+  if (!ts.isComputedPropertyName(name)) {
+    return null;
+  }
+  const expression = unwrapExpression(name.expression);
+  return ts.isStringLiteralLike(expression) ? expression.text : null;
+}
+
+function addProcessObjectBinding(identifier, checker, processObjectBindings) {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (symbol !== undefined) {
+    processObjectBindings.add(symbol);
   }
 }
 

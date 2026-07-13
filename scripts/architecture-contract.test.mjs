@@ -119,6 +119,12 @@ test("architecture contract keeps direct process and console output at the CLI b
     ["renderer stdout", "src/renderers/json.ts", 'process.stdout.write("result");', "process.stdout"],
     ["global process", "src/core/planning/index.ts", 'globalThis.process.stdout.write("result");', "process.stdout"],
     ["destructured stderr", "src/core/planning/index.ts", "const { stderr } = process;", "process.stderr"],
+    [
+      "computed destructured stdout",
+      "src/core/planning/index.ts",
+      'const { [("stdout")]: output } = process;\nvoid output;',
+      "process.stdout"
+    ],
     ["named process import", "src/core/planning/index.ts", 'import { stdout } from "node:process";', "process.stdout"],
     [
       "process namespace default",
@@ -224,9 +230,27 @@ test("architecture contract rejects raw CLI writes through direct stream binding
     ]);
   });
 
+  await t.test("computed destructured stream", async () => {
+    const root = await createFixture({
+      "src/cli.ts": 'const { [("stderr")]: errors } = process;\nerrors.write("raw");'
+    });
+    assert.deepEqual(await checkArchitecture(root), [
+      "src/cli.ts writes process.stderr without a renderer helper"
+    ]);
+  });
+
   await t.test("destructuring assignment", async () => {
     const root = await createFixture({
       "src/cli.ts": 'let output;\n({ stdout: output } = process);\noutput.write("raw");'
+    });
+    assert.deepEqual(await checkArchitecture(root), [
+      "src/cli.ts writes process.stdout without a renderer helper"
+    ]);
+  });
+
+  await t.test("computed destructuring assignment", async () => {
+    const root = await createFixture({
+      "src/cli.ts": 'let output;\n({ [("stdout")]: output } = process);\noutput.write("raw");'
     });
     assert.deepEqual(await checkArchitecture(root), [
       "src/cli.ts writes process.stdout without a renderer helper"
@@ -352,6 +376,17 @@ test("architecture contract respects shadowed stream binding names", async () =>
       'function writeLocal(output) { output.write("local"); }',
       "void output;",
       "void writeLocal;"
+    ].join("\n")
+  });
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract respects shadowed imported process aliases", async () => {
+  const root = await createFixture({
+    "src/core/shadowed.ts": [
+      'import runtime from "node:process";',
+      "function inspect(runtime) { return runtime.stdout; }",
+      "void inspect;"
     ].join("\n")
   });
   assert.deepEqual(await checkArchitecture(root), []);
