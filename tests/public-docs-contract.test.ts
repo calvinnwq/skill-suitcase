@@ -11,7 +11,7 @@ const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
 const TEXT_DOCUMENT_EXTENSIONS = [".css", ".html", ".js", ".json", ".md", ".yaml", ".yml"];
 const COMMAND_REGISTRY = createCommandRegistry();
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
-const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "command", "do", "elif", "env", "if", "sudo", "then", "until", "while"]);
+const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "do", "elif", "if", "then", "until", "while"]);
 const SHELL_FENCE_LANGUAGES = new Set([
   "",
   "bash",
@@ -44,7 +44,7 @@ interface ShellToken {
 }
 
 interface CliLauncher {
-  executableIndex: number;
+  invocation: string[];
 }
 
 interface PackageRunnerExecutable {
@@ -122,7 +122,13 @@ function markdownShellBlocks(contents: string): CommandExample[] {
     for (index = blockStart; index < lines.length; index += 1) {
       const closing = lines[index]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1];
       if (closing === undefined || closing[0] !== fence[0] || closing.length < fence.length) continue;
-      if (isShellBlock) blocks.push({ contents: lines.slice(blockStart, index).join("\n"), dialect });
+      const blockContents = lines.slice(blockStart, index).join("\n");
+      const executableContents = isShellBlock
+        ? blockContents
+        : markdownNonFencedLines(blockContents).join("\n");
+      if (isShellBlock || containsCommandShapedInvocation(executableContents, true)) {
+        blocks.push({ contents: executableContents, dialect });
+      }
       break;
     }
   }
@@ -149,11 +155,11 @@ function markdownNonFencedLines(contents: string): string[] {
   return visibleLines;
 }
 
-function containsCommandShapedInvocation(contents: string): boolean {
+function containsCommandShapedInvocation(contents: string, allowLauncherOnly = false): boolean {
   return shellSegments(contents, "posix").some((segment) => {
     const tokens = withoutShellRedirections(shellTokens(segment, "posix"));
     const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value));
-    return launcher !== null && tokens[launcher.executableIndex + 1]?.value !== undefined;
+    return launcher !== null && (allowLauncherOnly || launcher.invocation[1] !== undefined);
   });
 }
 
@@ -480,7 +486,183 @@ function shellTokens(segment: string, dialect: ShellDialect): ShellToken[] {
 }
 
 function isShellCommandPrefix(token: string): boolean {
-  return SHELL_COMMAND_PREFIXES.has(token) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
+  return SHELL_COMMAND_PREFIXES.has(token) || isShellAssignment(token);
+}
+
+function isShellAssignment(token: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
+}
+
+function shellWrapperCommandTokens(tokens: string[], wrapper: "command" | "env" | "sudo"): string[] | null {
+  const booleanOptions = wrapper === "env"
+    ? new Set([
+        "--debug",
+        "--ignore-environment",
+        "--list-signal-handling",
+        "-i",
+        "-v"
+      ])
+    : new Set([
+        "--askpass",
+        "--background",
+        "--bell",
+        "--login",
+        "--non-interactive",
+        "--preserve-groups",
+        "--reset-timestamp",
+        "--set-home",
+        "--shell",
+        "--stdin",
+        "-A",
+        "-B",
+        "-b",
+        "-E",
+        "-H",
+        "-i",
+        "-k",
+        "-n",
+        "-P",
+        "-S",
+        "-s"
+      ]);
+  const optionsWithValues = wrapper === "env"
+    ? new Set(["--argv0", "--chdir", "--unset", "-a", "-C", "-P", "-u"])
+    : new Set([
+        "--chdir",
+        "--chroot",
+        "--close-from",
+        "--command-timeout",
+        "--group",
+        "--host",
+        "--login-class",
+        "--other-user",
+        "--prompt",
+        "--role",
+        "--type",
+        "--user",
+        "-C",
+        "-c",
+        "-D",
+        "-g",
+        "-h",
+        "-p",
+        "-R",
+        "-r",
+        "-T",
+        "-t",
+        "-u"
+      ]);
+  const optionalValueOptions = wrapper === "env"
+    ? new Set(["--block-signal", "--default-signal", "--ignore-signal"])
+    : new Set(["--preserve-env"]);
+  const nonExecutingOptions = wrapper === "sudo"
+    ? new Set(["--edit", "--help", "--list", "--remove-timestamp", "--validate", "--version", "-K", "-V", "-e", "-l", "-v"])
+    : new Set(["--null", "-0"]);
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    if (token === "--") return tokens.slice(index + 1);
+    if (wrapper === "command") {
+      if (token === "-p") continue;
+      if (token === "-v" || token === "-V" || token.startsWith("-")) return null;
+      return tokens.slice(index);
+    }
+    if (nonExecutingOptions.has(token)) return null;
+    if (isShellAssignment(token)) {
+      let commandIndex = index + 1;
+      while (isShellAssignment(tokens[commandIndex] ?? "")) commandIndex += 1;
+      return tokens.slice(commandIndex);
+    }
+    if (wrapper === "env" && isEnvLongSplitStringOption(token)) {
+      assert.equal(
+        containsCliLauncherText(tokens.slice(index)),
+        false,
+        "env split-string CLI launchers are unsupported in public examples"
+      );
+      return null;
+    }
+    if (optionsWithValues.has(token)) {
+      index += 1;
+      continue;
+    }
+    if ([...optionsWithValues].some((option) => option.startsWith("--") && token.startsWith(`${option}=`))) {
+      continue;
+    }
+    if (booleanOptions.has(token)
+      || optionalValueOptions.has(token)
+      || [...optionalValueOptions].some((option) => token.startsWith(`${option}=`))
+    ) {
+      continue;
+    }
+    const shortOption = shortWrapperOption(token, wrapper);
+    if (shortOption === "split-string") {
+      assert.equal(
+        containsCliLauncherText(tokens.slice(index)),
+        false,
+        "env split-string CLI launchers are unsupported in public examples"
+      );
+      return null;
+    }
+    if (shortOption === "non-executing") return null;
+    if (shortOption === "value-next") {
+      index += 1;
+      continue;
+    }
+    if (shortOption === "consumed") continue;
+    if (token.startsWith("-")) return null;
+    return tokens.slice(index);
+  }
+
+  return null;
+}
+
+function containsCliLauncherText(tokens: string[]): boolean {
+  return tokens.some((token) => {
+    const normalized = token.replaceAll("\\", "/");
+    return normalized.includes("skill-suitcase")
+      || normalized.includes("dist/src/cli.js")
+      || token.includes("$CLI")
+      || token.includes("${CLI}");
+  });
+}
+
+function isEnvLongSplitStringOption(token: string): boolean {
+  return token === "--split-string"
+    || token.startsWith("--split-string=");
+}
+
+function shortWrapperOption(
+  token: string,
+  wrapper: "env" | "sudo"
+): "consumed" | "non-executing" | "split-string" | "unsupported" | "value-next" {
+  if (!/^-[^-]/.test(token)) return "unsupported";
+  const booleanOptions = wrapper === "env" ? new Set(["i", "v"]) : new Set(["A", "B", "E", "H", "P", "S", "b", "i", "k", "n", "s"]);
+  const optionsWithValues = wrapper === "env" ? new Set(["C", "P", "a", "u"]) : new Set(["C", "D", "R", "T", "c", "g", "h", "p", "r", "t", "u"]);
+  const nonExecutingOptions = wrapper === "env" ? new Set(["0"]) : new Set(["K", "V", "e", "l", "v"]);
+
+  for (let index = 1; index < token.length; index += 1) {
+    const option = token[index] ?? "";
+    if (wrapper === "env" && option === "S") return "split-string";
+    if (nonExecutingOptions.has(option)) return "non-executing";
+    if (booleanOptions.has(option)) continue;
+    if (optionsWithValues.has(option)) return index + 1 < token.length ? "consumed" : "value-next";
+    return "unsupported";
+  }
+  return "consumed";
+}
+
+function shellCommandTokens(tokens: string[]): string[] | null {
+  let commandTokens = tokens;
+  while (commandTokens.length > 0) {
+    let index = 0;
+    while (isShellCommandPrefix(commandTokens[index] ?? "")) index += 1;
+    commandTokens = commandTokens.slice(index);
+    const wrapper = executableName(commandTokens[0] ?? "");
+    if (wrapper !== "command" && wrapper !== "env" && wrapper !== "sudo") return commandTokens;
+    const wrappedCommand = shellWrapperCommandTokens(commandTokens, wrapper);
+    if (wrappedCommand === null) return null;
+    commandTokens = wrappedCommand;
+  }
+  return null;
 }
 
 function executableName(token: string): string {
@@ -629,35 +811,35 @@ function nodeSourceCliEntrypointIndex(tokens: string[], start: number): number {
 }
 
 function skillSuitcaseLauncher(tokens: string[]): CliLauncher | null {
-  let index = 0;
-  while (isShellCommandPrefix(tokens[index] ?? "")) index += 1;
+  const commandTokens = shellCommandTokens(tokens);
+  if (commandTokens === null) return null;
 
-  const candidate = tokens[index];
+  const candidate = commandTokens[0];
   if (candidate === undefined) return null;
   if (isSkillSuitcaseExecutable(candidate)) {
-    return { executableIndex: index };
+    return { invocation: commandTokens };
   }
   if (isSourceCliEntrypoint(candidate)) {
-    return { executableIndex: index };
+    return { invocation: commandTokens };
   }
 
   const wrapper = executableName(candidate);
   if (wrapper === "npx" || wrapper === "bunx") {
-    const executable = packageRunnerExecutable(tokens, index + 1, wrapper);
+    const executable = packageRunnerExecutable(commandTokens, 1, wrapper);
     return executable === null
       ? null
-      : { executableIndex: executable.executableIndex };
+      : { invocation: commandTokens.slice(executable.executableIndex) };
   }
 
   if (wrapper === "node") {
-    const executableIndex = nodeSourceCliEntrypointIndex(tokens, index + 1);
-    return executableIndex < 0 ? null : { executableIndex };
+    const executableIndex = nodeSourceCliEntrypointIndex(commandTokens, 1);
+    return executableIndex < 0 ? null : { invocation: commandTokens.slice(executableIndex) };
   }
 
   if (wrapper === "npm" || wrapper === "pnpm" || wrapper === "yarn") {
-    const actionIndex = packageRunnerActionIndex(tokens, index + 1, wrapper);
+    const actionIndex = packageRunnerActionIndex(commandTokens, 1, wrapper);
     if (actionIndex < 0) return null;
-    const executable = packageRunnerExecutable(tokens, actionIndex + 1, wrapper);
+    const executable = packageRunnerExecutable(commandTokens, actionIndex + 1, wrapper);
     if (wrapper === "npm" && executable !== null) {
       assert.equal(
         executable.separatorBeforeExecutable,
@@ -667,7 +849,7 @@ function skillSuitcaseLauncher(tokens: string[]): CliLauncher | null {
     }
     return executable === null
       ? null
-      : { executableIndex: executable.executableIndex };
+      : { invocation: commandTokens.slice(executable.executableIndex) };
   }
 
   return null;
@@ -843,9 +1025,7 @@ function validateCliExamples(path: string, contents: string): number {
         if (launcher === null) continue;
 
         invocationCount += 1;
-        const launcherInvocation = tokens.slice(launcher.executableIndex);
-        const invocation = launcherInvocation
-          .map((token) => token.value)
+        const invocation = launcher.invocation
           .filter((token) => !OPTIONAL_INVOCATION_PLACEHOLDERS.has(token));
         const command = invocation[1] ?? "";
         const possibleSubcommand = invocation[2];
@@ -888,6 +1068,11 @@ function assertNoPrivateMachinePaths(path: string, contents: string): void {
     /(?:^|[^A-Za-z0-9._~/-])\/root(?=[^A-Za-z0-9_-]|$)/m,
     `${path} contains a Linux root user path`
   );
+  assert.doesNotMatch(
+    localPathContents,
+    /(?:^|[^A-Za-z0-9._~/-])\/(?:mnt\/)?[A-Z]\/Users\/[^/\\\s`"']+/im,
+    `${path} contains a Windows user path`
+  );
   assert.doesNotMatch(localPathContents, /[A-Z]:[\\/]Users[\\/][^\\/\s`"']+/i, `${path} contains a Windows user path`);
 }
 
@@ -911,6 +1096,8 @@ test("private machine path checks cover roots and Windows separators", () => {
     "path:/root/project",
     "C:/Users/alice/project",
     "C:\\Users\\alice",
+    "/mnt/c/Users/alice/project",
+    "/c/Users/alice/project",
     String.raw`{"path":"C:\\Users\\alice\\project"}`
   ]) {
     assert.throws(() => assertNoPrivateMachinePaths("fixture.md", privatePath), /contains a .* user path/);
@@ -1003,6 +1190,8 @@ test("CLI example parsing covers common shell fence forms", () => {
     "```\nskill-suitcase bogus --json\n```",
     "```terminal\nskill-suitcase bogus --json\n```",
     "```shellscript\nskill-suitcase bogus --json\n```",
+    "```text\nskill-suitcase bogus --json\n```",
+    "```output\n$ skill-suitcase bogus --json\n```",
     "```{bash}\nskill-suitcase bogus --json\n```",
     "```bash\r\nskill-suitcase bogus --json\r\n```",
     "```BASH\nskill-suitcase bogus --json\n````"
@@ -1013,6 +1202,17 @@ test("CLI example parsing covers common shell fence forms", () => {
   assert.equal(
     validateCliExamples("fixture.md", "````text\n```bash\nskill-suitcase bogus --json\n```\n````"),
     0
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "````text\nskill-suitcase status --source . --json\n```bash\nskill-suitcase bogus --json\n```\n````"
+    ),
+    1
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.md", "```text\n$ skill-suitcase\n```"),
+    /unknown command: /
   );
 });
 
@@ -1076,6 +1276,74 @@ test("CLI example parsing validates command substitutions and subshells", () => 
 });
 
 test("CLI example parsing recognizes wrappers and path-qualified executables", () => {
+  for (const command of [
+    "env -i skill-suitcase bogus --json",
+    "env --unset HOME skill-suitcase bogus --json",
+    "env --argv0 custom skill-suitcase bogus --json",
+    "env -a custom skill-suitcase bogus --json",
+    "env -uHOME skill-suitcase bogus --json",
+    "env -vi skill-suitcase bogus --json",
+    "sudo -E skill-suitcase bogus --json",
+    "sudo --non-interactive skill-suitcase bogus --json",
+    "sudo --preserve-env=HOME skill-suitcase bogus --json",
+    "sudo --command-timeout 5 skill-suitcase bogus --json",
+    "sudo --command-timeout=5 skill-suitcase bogus --json",
+    "sudo --user root skill-suitcase bogus --json",
+    "sudo -uroot skill-suitcase bogus --json",
+    "sudo -nE skill-suitcase bogus --json",
+    "sudo -E env -i command -- skill-suitcase bogus --json",
+    "command -- skill-suitcase bogus --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``),
+      /unknown command: bogus/
+    );
+  }
+
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```sh\nenv -i MODE=test sudo -E command -p skill-suitcase status --source . --json\n```"
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```sh\nenv MODE=test -u HOME skill-suitcase status --source . --json\n```"
+    ),
+    0
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\ncommand -v skill-suitcase bogus --json\n```"),
+    0
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", "```sh\nsudo -e -- skill-suitcase bogus\n```"),
+    0
+  );
+  for (const command of [
+    "env -0 skill-suitcase bogus --json",
+    "env --null skill-suitcase bogus --json"
+  ]) {
+    assert.equal(validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``), 0);
+  }
+  for (const command of [
+    "env -S 'skill-suitcase bogus --json'",
+    "env -S '-i skill-suitcase bogus --json'",
+    "env -S '-u HOME skill-suitcase bogus --json'",
+    "env -S'skill-suitcase bogus --json'",
+    "env -vS'skill-suitcase bogus --json'",
+    "env --split-string='skill-suitcase bogus --json'",
+    String.raw`env -S 'skill-suitcase\_bogus --json'`
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``),
+      /env split-string CLI launchers are unsupported/
+    );
+  }
+  assert.equal(validateCliExamples("fixture.md", "```sh\nenv -S 'echo ok'\n```"), 0);
+
   assert.throws(
     () => validateCliExamples("fixture.md", "```sh\nnpx skill-suitcase bogus --json\n```"),
     /unknown command: bogus/
