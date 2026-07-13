@@ -110,9 +110,9 @@ The CLI currently supports:
 | Refresh pinned upstream source | `upstream check`, `upstream fetch`, `upstream import` | Catalog-only; never a direct target installer |
 
 The modeled targets are `openclaw`, `codex`, `openclaw-codex`, `agents`,
-`claude`, `opencode`, `pi`, and `grok`. Target paths can be made portable with
-`--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`, and
-`--grok-skills`.
+`claude`, `hermes`, `opencode`, `pi`, and `grok`. Target paths can be made portable with
+`--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`,
+`--hermes-skills`, and `--grok-skills`.
 
 OpenCode and Pi are provider-backed compatibility targets.
 They are read-only even when the catalog declares a custom `assignmentPaths` entry.
@@ -349,7 +349,10 @@ git diff --check
 `build` removes `dist`, compiles the TypeScript sources, and marks `dist/src/cli.js` executable so stale generated output cannot survive a package build.
 `test` rebuilds first, verifies that the recursively discovered compiled test inventory exactly matches `tests/**/*.test.ts`, then runs every compiled test and every `scripts/**/*.test.mjs` test with Node's built-in test runner.
 `package:smoke` runs the supported local pack verification: npm invokes `prepack` to create a clean build and record build-input, source, and output hashes in the ignored `dist/.package-build.json`, then the smoke script parses `npm pack --json`, validates the pinned public metadata and exact allowed payload, installs the tarball into an empty temporary project, and runs the read-only `targets` command through the installed executable.
-`architecture:check` runs `scripts/check-architecture.mjs` to enforce the module boundaries described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+`architecture:check` runs `scripts/check-architecture.mjs` to enforce the
+recognized source layers, allowed imports, thin CLI and command limits,
+process-IO ownership, and renderer-mediated output described in
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 `docs:serve` previews the static docs site from `docs/` at `http://127.0.0.1:8080/`.
 The same pages are validated by `tests/docs-site.test.ts` inside `pnpm test` and deploy to GitHub Pages through `.github/workflows/pages.yml`.
 

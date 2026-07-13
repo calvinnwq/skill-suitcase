@@ -56,6 +56,7 @@ export function usageText(): string {
     "  --codex-home <dir>     Override codex codexHome; skillsPath defaults to <dir>/skills",
     "  --codex-skills <dir>   Override codex skillsPath",
     "  --claude-skills <dir>  Override claude path",
+    "  --hermes-skills <dir>  Override Hermes skills path",
     "  --agents-skills <dir>  Override shared agents skills path",
     "  --grok-skills <dir>    Override grok path"
   ].join("\n");

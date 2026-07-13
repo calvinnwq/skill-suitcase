@@ -54,6 +54,7 @@ export type ParsedCommandArgs = {
   codexHome?: string;
   codexSkills?: string;
   claudeSkills?: string;
+  hermesSkills?: string;
   grokSkills?: string;
   skill?: string[];
 };
@@ -72,6 +73,7 @@ export type ValueFlagName =
   | "codexHome"
   | "codexSkills"
   | "claudeSkills"
+  | "hermesSkills"
   | "grokSkills";
 
 export type CommandJsonResult =

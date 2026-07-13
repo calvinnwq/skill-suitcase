@@ -28,6 +28,9 @@ assignments:
   grok:
     suitcases:
       - core
+  hermes:
+    suitcases:
+      - core
 
 assignmentPaths:
   openclaw:
@@ -61,6 +64,11 @@ assignmentPaths:
     kind: grok-skills-root
     path: /tmp/grok/skills
     assignment: grok
+
+  hermes:
+    kind: hermes-skills-root
+    path: /tmp/hermes/skills
+    assignment: hermes
 
 groups:
   portable-core:
@@ -110,6 +118,7 @@ compatibility:
       - claude
       - agents
       - grok
+      - hermes
     variant: canonical
     evidence:
       - docs/install-smoke.md

@@ -45,11 +45,13 @@ Read the repository's
 [`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md)
 before changing a command or adding product behavior. The main boundaries are:
 
-- `src/cli.ts` is a thin process entrypoint.
+- `src/cli.ts` is a thin process entrypoint and owns direct access to
+  `process.argv`, `process.stdout`, and `process.stderr`.
 - `src/commands/` parses and validates command input.
 - `src/core/` owns durable product behavior.
 - `src/adapters/` owns filesystem and infrastructure boundaries.
-- `src/renderers/` owns JSON, usage, error, and exit-code rendering.
+- `src/renderers/` owns deterministic JSON, usage, and error rendering plus
+  exit-code mapping, without writing process streams directly.
 
 Keep machine-readable JSON on stdout deterministic. Structured command results,
 including findings, warnings, and `ok: false` errors, belong on stdout.
@@ -82,14 +84,24 @@ project, and runs its read-only `targets` command. `package:prepare` is the
 lower-level clean-build and hash-recording step used by `prepack`, while
 `package:validate` rechecks the recorded build without rebuilding it. `lint`
 currently aliases the TypeScript typecheck. `format:check` runs
-`git diff --check`, and `architecture:check` enforces the module boundaries
-documented in `ARCHITECTURE.md`.
+`git diff --check`, and `architecture:check` enforces the dependency,
+process-IO, recognized-layer, thin-CLI, and command-module contracts documented
+in `ARCHITECTURE.md`. The checker is intentionally syntactic rather than a
+whole-program alias or control-flow analyzer.
+The architecture contract tests run from
+`scripts/architecture-contract.test.mjs` as part of `pnpm test`.
 
-For a focused test, build first and run the compiled test file directly:
+For a focused compiled test, build first and run the test file directly:
 
 ```bash
 pnpm run build
 node --test dist/tests/commands.test.js
+```
+
+The architecture contract suite runs directly from its source file:
+
+```bash
+node --test scripts/architecture-contract.test.mjs
 ```
 
 When changing CLI output, test both the parsed JSON stdout and the stderr/exit

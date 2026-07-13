@@ -65,9 +65,12 @@ Target resolution uses this precedence:
 4. the vendored `skills.sh` compatibility snapshot.
 
 The currently modeled target IDs are `openclaw`, `codex`, `openclaw-codex`,
-`agents`, `claude`, `opencode`, `pi`, and `grok`. Supported path overrides are
-`--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`, and
-`--grok-skills`.
+`agents`, `claude`, `hermes`, `opencode`, `pi`, and `grok`.
+Supported path overrides are
+`--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`,
+`--hermes-skills`, and `--grok-skills`.
+The writable `hermes-skills-root` adapter uses the same direct install-root pattern as `openclaw-skills-root`.
+The default profile normally targets `$HOME/.hermes/skills`, while a named profile targets `$HOME/.hermes/profiles/<name>/skills`.
 
 OpenCode and Pi are provider-backed compatibility targets and are read-only.
 That policy follows the adapter kind even when a manifest supplies a custom
@@ -243,7 +246,8 @@ to stderr. They must not be mixed into machine-readable stdout. Exit status is
 derived separately from the structured result or fatal failure.
 
 This boundary is enforced by [renderer tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/renderers.test.ts),
-[CLI tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/cli.test.ts), and the architectural dependency guard in
+[CLI tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/cli.test.ts),
+[architecture contract tests](https://github.com/calvinnwq/skill-suitcase/blob/main/scripts/architecture-contract.test.mjs), and
 [architecture guardrail tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/architecture-guardrails.test.ts).
 
 ## Non-Goals
