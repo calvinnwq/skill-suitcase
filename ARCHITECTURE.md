@@ -554,15 +554,10 @@ Additional enforced rules:
   size limit.
 - New command behavior must not be added directly to `src/cli.ts`.
 
-`pnpm run architecture:check` enforces these rules with a deliberately
-syntactic TypeScript AST pass. It inspects static imports and exports,
-TypeScript import-equals declarations, direct `require()` calls, and dynamic
-imports with literal relative specifiers. It also detects direct process and
-console output access, direct process capability imports and destructuring,
-and renderer-mediated writes in `src/cli.ts` while ignoring comments, quoted
-examples, type-only references, and non-literal dynamic dependencies. Direct
-global-looking identifiers are matched syntactically; project code should not
-shadow names such as `process`, `console`, or `require`.
+`pnpm run architecture:check` enforces these rules with a deliberately syntactic TypeScript AST pass.
+It inspects static imports and exports, TypeScript import-equals declarations and import-type queries, direct `require()` calls, and dynamic imports with literal relative specifiers.
+It also detects direct process and console output access, direct process capability imports and destructuring, and renderer-mediated writes in `src/cli.ts` while ignoring comments, quoted examples, type-only process references, and non-literal dynamic dependencies.
+Direct global-looking identifiers are matched syntactically; project code should not shadow names such as `process`, `console`, or `require`.
 
 The checker is not a whole-program alias, constant-folding, or control-flow
 analyzer. Those concerns belong in a mature lint or dependency-analysis tool

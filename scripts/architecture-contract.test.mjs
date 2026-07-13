@@ -71,6 +71,7 @@ test("architecture contract recognizes supported TypeScript and ESM dependency s
   const root = await createFixture({
     "src/core/static-import.ts": 'import "../commands/plan.js";',
     "src/core/static-export.ts": 'export * from "../commands/plan.js";',
+    "src/core/import-type.ts": 'type Result = import("../commands/plan.js").Result;\nvoid (0 as unknown as Result);',
     "src/core/import-equals.ts": 'import command = require("../commands/plan.js");\nvoid command;',
     "src/core/dynamic-import.ts": 'export const load = () => import("../commands/plan.js");',
     "src/core/commonjs-require.ts": 'const command = require("../commands/plan.js");\nvoid command;',
@@ -84,6 +85,7 @@ test("architecture contract recognizes supported TypeScript and ESM dependency s
     "src/core/commonjs-require.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/dynamic-import.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/import-equals.ts imports forbidden commands boundary src/commands/plan.ts",
+    "src/core/import-type.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/parenthesized.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/static-export.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/static-import.ts imports forbidden commands boundary src/commands/plan.ts"
@@ -146,6 +148,29 @@ test("architecture contract keeps direct process and console output at the CLI b
       assert.equal(failures.some((failure) => failure.includes(evidence)), true, failures.join("\n"));
     });
   }
+});
+
+test("architecture contract rejects imported console object aliases", async () => {
+  const root = await createFixture({
+    "src/core/default-console.ts": [
+      'import systemConsole from "node:console";',
+      'systemConsole.log("result");'
+    ].join("\n"),
+    "src/core/namespace-console.ts": [
+      'import * as systemConsole from "console";',
+      'systemConsole["error"]("warning");'
+    ].join("\n"),
+    "src/core/shadowed-console.ts": [
+      'import systemConsole from "node:console";',
+      'function inspect(systemConsole) { systemConsole.log("local"); }',
+      "void inspect;"
+    ].join("\n")
+  });
+
+  assert.deepEqual(await checkArchitecture(root), [
+    "src/core/default-console.ts uses console.log; output must use renderer helpers at the CLI boundary",
+    "src/core/namespace-console.ts uses console.error; output must use renderer helpers at the CLI boundary"
+  ]);
 });
 
 test("architecture contract rejects runtime process capability re-exports", async () => {
@@ -321,6 +346,19 @@ test("architecture contract rejects renderer-shaped external imports", async (t)
       "src/cli.ts writes process.stdout without a renderer helper"
     ]);
   });
+
+  await t.test("local path traversal", async () => {
+    const root = await createFixture({
+      "src/cli.ts": [
+        'import { renderJson } from "./commands/../renderers/json.js";',
+        'process.stdout.write(renderJson({ ok: true }));'
+      ].join("\n"),
+      "src/renderers/json.ts": "export const renderJson = (value) => JSON.stringify(value);"
+    });
+    assert.deepEqual(await checkArchitecture(root), [
+      "src/cli.ts writes process.stdout without a renderer helper"
+    ]);
+  });
 });
 
 test("architecture contract accepts JSON and error renderer calls at the CLI write boundary", async () => {
@@ -348,6 +386,18 @@ test("architecture contract accepts local namespace renderer calls at the CLI wr
     ].join("\n"),
     "src/renderers/errors.ts": "export const renderCliError = (value) => String(value);",
     "src/renderers/json.ts": "export const renderJson = (value) => JSON.stringify(value);"
+  });
+
+  assert.deepEqual(await checkArchitecture(root), []);
+});
+
+test("architecture contract accepts nested local renderer modules", async () => {
+  const root = await createFixture({
+    "src/cli.ts": [
+      'import { renderCliError } from "./renderers/errors/cli.js";',
+      'process.stderr.write(renderCliError({ type: "fatal", message: "failure" }));'
+    ].join("\n"),
+    "src/renderers/errors/cli.ts": "export const renderCliError = (value) => String(value);"
   });
 
   assert.deepEqual(await checkArchitecture(root), []);

@@ -38,7 +38,7 @@ export async function checkArchitecture(repoRoot = defaultRepoRoot) {
   for (const filePath of sourceFiles) {
     const relative = toRepoRelative(resolvedRepoRoot, filePath);
     const text = await readFile(filePath, "utf8");
-    const analysis = analyzeSourceFile(filePath, text);
+    const analysis = analyzeSourceFile(resolvedRepoRoot, sourceFileSet, filePath, text);
     const sourceLayer = sourceLayerFor(relative);
 
     if (sourceLayer === null) {
@@ -81,7 +81,7 @@ export async function checkArchitecture(repoRoot = defaultRepoRoot) {
 
   const cliPath = path.join(srcRoot, "cli.ts");
   const cliText = await readFile(cliPath, "utf8");
-  const cliAnalysis = analyzeSourceFile(cliPath, cliText);
+  const cliAnalysis = analyzeSourceFile(resolvedRepoRoot, sourceFileSet, cliPath, cliText);
   const cliLines = nonEmptyLineCount(cliText);
   if (cliLines > CLI_MAX_LINES) {
     failures.push(`src/cli.ts has ${cliLines} non-empty lines; keep it as a thin entrypoint`);
@@ -106,7 +106,7 @@ export async function runArchitectureCheck(repoRoot = defaultRepoRoot, io = defa
   return 0;
 }
 
-function analyzeSourceFile(filePath, text) {
+function analyzeSourceFile(repoRoot, sourceFileSet, filePath, text) {
   const sourceFile = ts.createSourceFile(filePath, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const checker = createTypeChecker(filePath, sourceFile);
   const importSpecifiers = [];
@@ -115,15 +115,20 @@ function analyzeSourceFile(filePath, text) {
   const unrenderedCliWrites = new Set();
   const processObjectBindings = new Set();
   const processStreamBindings = new Map();
+  const consoleObjectBindings = new Set();
   const rendererBindings = new Map();
   let hasSwitchStatement = false;
 
   collectImportedBindings(
     sourceFile,
+    repoRoot,
+    sourceFileSet,
+    filePath,
     checker,
     processObjectBindings,
     processMembers,
     processStreamBindings,
+    consoleObjectBindings,
     rendererBindings
   );
 
@@ -160,7 +165,7 @@ function analyzeSourceFile(filePath, text) {
     }
 
     if (ts.isCallExpression(node)) {
-      const consoleMethod = directConsoleMethod(node);
+      const consoleMethod = directConsoleMethod(node, checker, consoleObjectBindings);
       if (consoleMethod !== null) {
         consoleMethods.add(consoleMethod);
       }
@@ -189,10 +194,14 @@ function analyzeSourceFile(filePath, text) {
 
 function collectImportedBindings(
   sourceFile,
+  repoRoot,
+  sourceFileSet,
+  filePath,
   checker,
   processObjectBindings,
   processMembers,
   processStreamBindings,
+  consoleObjectBindings,
   rendererBindings
 ) {
   for (const statement of sourceFile.statements) {
@@ -227,11 +236,30 @@ function collectImportedBindings(
         }
       }
 
-      if (isRendererSpecifier(specifier) && importClause.namedBindings !== undefined) {
+      if (isNodeConsoleSpecifier(specifier)) {
+        if (importClause.name !== undefined) {
+          addObjectBinding(importClause.name, checker, consoleObjectBindings);
+        }
+        if (importClause.namedBindings !== undefined) {
+          if (ts.isNamespaceImport(importClause.namedBindings)) {
+            addObjectBinding(importClause.namedBindings.name, checker, consoleObjectBindings);
+          } else {
+            for (const element of importClause.namedBindings.elements) {
+              if (!element.isTypeOnly
+                && (element.propertyName?.text ?? element.name.text) === "default") {
+                addObjectBinding(element.name, checker, consoleObjectBindings);
+              }
+            }
+          }
+        }
+      }
+
+      const rendererTarget = rendererTargetForImport(repoRoot, sourceFileSet, filePath, specifier);
+      if (rendererTarget !== null && importClause.namedBindings !== undefined) {
         if (ts.isNamespaceImport(importClause.namedBindings)) {
           const symbol = checker.getSymbolAtLocation(importClause.namedBindings.name);
           if (symbol !== undefined) {
-            rendererBindings.set(symbol, { importedName: null, specifier });
+            rendererBindings.set(symbol, { importedName: null, target: rendererTarget });
           }
         } else {
           for (const element of importClause.namedBindings.elements) {
@@ -242,7 +270,7 @@ function collectImportedBindings(
             if (symbol !== undefined) {
               rendererBindings.set(symbol, {
                 importedName: element.propertyName?.text ?? element.name.text,
-                specifier
+                target: rendererTarget
               });
             }
           }
@@ -252,9 +280,13 @@ function collectImportedBindings(
       && !statement.isTypeOnly
       && ts.isExternalModuleReference(statement.moduleReference)
       && statement.moduleReference.expression !== undefined
-      && ts.isStringLiteralLike(statement.moduleReference.expression)
-      && isNodeProcessSpecifier(statement.moduleReference.expression.text)) {
-      addProcessObjectBinding(statement.name, checker, processObjectBindings);
+      && ts.isStringLiteralLike(statement.moduleReference.expression)) {
+      const specifier = statement.moduleReference.expression.text;
+      if (isNodeProcessSpecifier(specifier)) {
+        addProcessObjectBinding(statement.name, checker, processObjectBindings);
+      } else if (isNodeConsoleSpecifier(specifier)) {
+        addObjectBinding(statement.name, checker, consoleObjectBindings);
+      }
     } else if (ts.isExportDeclaration(statement)
       && !statement.isTypeOnly
       && statement.moduleSpecifier !== undefined
@@ -299,6 +331,11 @@ function moduleSpecifierFromNode(node) {
     && node.moduleReference.expression !== undefined
     && ts.isStringLiteralLike(node.moduleReference.expression)) {
     return node.moduleReference.expression.text;
+  }
+  if (ts.isImportTypeNode(node)
+    && ts.isLiteralTypeNode(node.argument)
+    && ts.isStringLiteralLike(node.argument.literal)) {
+    return node.argument.literal.text;
   }
   if (ts.isCallExpression(node) && node.arguments.length >= 1) {
     const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
@@ -410,14 +447,14 @@ function isProcessOutputMethod(method, argumentCount) {
   return method === "write" || (method === "end" && argumentCount > 0);
 }
 
-function directConsoleMethod(node) {
+function directConsoleMethod(node, checker, consoleObjectBindings) {
   const callee = unwrapExpression(node.expression);
   if (ts.isPropertyAccessExpression(callee)
-    && isDirectConsoleObject(callee.expression)) {
+    && isDirectConsoleObject(callee.expression, checker, consoleObjectBindings)) {
     return callee.name.text;
   }
   if (ts.isElementAccessExpression(callee)
-    && isDirectConsoleObject(callee.expression)
+    && isDirectConsoleObject(callee.expression, checker, consoleObjectBindings)
     && callee.argumentExpression !== undefined
     && ts.isStringLiteralLike(unwrapExpression(callee.argumentExpression))) {
     return unwrapExpression(callee.argumentExpression).text;
@@ -425,21 +462,37 @@ function directConsoleMethod(node) {
   return null;
 }
 
-function isDirectConsoleObject(node) {
+function isDirectConsoleObject(node, checker, consoleObjectBindings) {
   const expression = unwrapExpression(node);
   if (ts.isIdentifier(expression)) {
-    return expression.text === "console";
+    if (expression.text === "console") {
+      return true;
+    }
+    const symbol = checker.getSymbolAtLocation(expression);
+    return symbol !== undefined && consoleObjectBindings.has(symbol);
   }
   if (ts.isPropertyAccessExpression(expression)) {
+    if (expression.name.text === "default"
+      && isDirectConsoleObject(expression.expression, checker, consoleObjectBindings)) {
+      return true;
+    }
     return expression.name.text === "console" && isGlobalObject(expression.expression);
   }
-  if (!ts.isElementAccessExpression(expression) || expression.argumentExpression === undefined) {
-    return false;
+  if (ts.isElementAccessExpression(expression) && expression.argumentExpression !== undefined) {
+    const argument = unwrapExpression(expression.argumentExpression);
+    if (!ts.isStringLiteralLike(argument)) {
+      return false;
+    }
+    if (argument.text === "default"
+      && isDirectConsoleObject(expression.expression, checker, consoleObjectBindings)) {
+      return true;
+    }
+    return argument.text === "console" && isGlobalObject(expression.expression);
   }
-  const argument = unwrapExpression(expression.argumentExpression);
-  return ts.isStringLiteralLike(argument)
-    && argument.text === "console"
-    && isGlobalObject(expression.expression);
+  if (ts.isAwaitExpression(expression)) {
+    return isDirectConsoleObject(expression.expression, checker, consoleObjectBindings);
+  }
+  return isDirectModuleLoader(expression, isNodeConsoleSpecifier);
 }
 
 function isApprovedRendererWrite(argument, stream, checker, rendererBindings) {
@@ -481,8 +534,8 @@ function isApprovedRendererWrite(argument, stream, checker, rendererBindings) {
     return false;
   }
   return stream === "stdout"
-    ? helper === "renderJson" && binding.specifier.endsWith("/renderers/json.js")
-    : binding.specifier.includes("/renderers/");
+    ? helper === "renderJson" && binding.target === "src/renderers/json.ts"
+    : true;
 }
 
 function collectGuardedBindingNames(pattern, checker, processMembers, processStreamBindings) {
@@ -537,9 +590,13 @@ function propertyNameText(name) {
 }
 
 function addProcessObjectBinding(identifier, checker, processObjectBindings) {
+  addObjectBinding(identifier, checker, processObjectBindings);
+}
+
+function addObjectBinding(identifier, checker, bindings) {
   const symbol = checker.getSymbolAtLocation(identifier);
   if (symbol !== undefined) {
-    processObjectBindings.add(symbol);
+    bindings.add(symbol);
   }
 }
 
@@ -560,6 +617,10 @@ function createTypeChecker(filePath, sourceFile) {
 }
 
 function isDirectProcessLoader(node) {
+  return isDirectModuleLoader(node, isNodeProcessSpecifier);
+}
+
+function isDirectModuleLoader(node, isModuleSpecifier) {
   if (!ts.isCallExpression(node) || node.arguments.length < 1) {
     return false;
   }
@@ -570,7 +631,7 @@ function isDirectProcessLoader(node) {
   const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
   const isRequire = ts.isIdentifier(node.expression)
     && node.expression.text === "require";
-  return (isDynamicImport || isRequire) && isNodeProcessSpecifier(argument.text);
+  return (isDynamicImport || isRequire) && isModuleSpecifier(argument.text);
 }
 
 function isGlobalObject(node) {
@@ -583,8 +644,20 @@ function isNodeProcessSpecifier(specifier) {
   return specifier === "node:process" || specifier === "process";
 }
 
-function isRendererSpecifier(specifier) {
-  return /^\.\/renderers\/[^/]+\.js$/.test(specifier);
+function isNodeConsoleSpecifier(specifier) {
+  return specifier === "node:console" || specifier === "console";
+}
+
+function rendererTargetForImport(repoRoot, sourceFileSet, filePath, specifier) {
+  if (!specifier.startsWith(".") || specifier.split(/[\\/]/).includes("..")) {
+    return null;
+  }
+  const resolved = resolveSourceSpecifier(filePath, specifier, sourceFileSet);
+  if (resolved === null) {
+    return null;
+  }
+  const target = toRepoRelative(repoRoot, resolved);
+  return target.startsWith("src/renderers/") ? target : null;
 }
 
 function unwrapExpression(node) {
