@@ -584,12 +584,19 @@ function collectGuardedAssignmentNames(pattern, checker, processMembers, process
       continue;
     }
     const key = propertyNameText(property.name);
+    if (key === null || !GUARDED_PROCESS_MEMBERS.has(key)) {
+      continue;
+    }
+    processMembers.add(key);
     const target = unwrapExpression(property.initializer);
-    if (key !== null
-      && GUARDED_PROCESS_MEMBERS.has(key)
-      && ts.isIdentifier(target)) {
-      processMembers.add(key);
+    if (ts.isIdentifier(target)) {
       setStreamBinding(target, key, checker, processStreamBindings);
+    } else if (ts.isBinaryExpression(target)
+      && target.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const defaultedTarget = unwrapExpression(target.left);
+      if (ts.isIdentifier(defaultedTarget)) {
+        setStreamBinding(defaultedTarget, key, checker, processStreamBindings);
+      }
     }
   }
 }

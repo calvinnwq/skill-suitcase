@@ -124,6 +124,12 @@ test("architecture contract keeps direct process and console output at the CLI b
     ["global process", "src/core/planning/index.ts", 'globalThis.process.stdout.write("result");', "process.stdout"],
     ["destructured stderr", "src/core/planning/index.ts", "const { stderr } = process;", "process.stderr"],
     [
+      "destructuring assignment property target",
+      "src/core/planning/index.ts",
+      "const holder = {};\n({ stdout: holder.output } = process);\nvoid holder;",
+      "process.stdout"
+    ],
+    [
       "computed destructured stdout",
       "src/core/planning/index.ts",
       'const { [("stdout")]: output } = process;\nvoid output;',
@@ -281,6 +287,15 @@ test("architecture contract rejects raw CLI writes through direct stream binding
   await t.test("destructuring assignment", async () => {
     const root = await createFixture({
       "src/cli.ts": 'let output;\n({ stdout: output } = process);\noutput.write("raw");'
+    });
+    assert.deepEqual(await checkArchitecture(root), [
+      "src/cli.ts writes process.stdout without a renderer helper"
+    ]);
+  });
+
+  await t.test("defaulted destructuring assignment", async () => {
+    const root = await createFixture({
+      "src/cli.ts": 'let output;\n({ stdout: output = undefined } = process);\noutput.write("raw");'
     });
     assert.deepEqual(await checkArchitecture(root), [
       "src/cli.ts writes process.stdout without a renderer helper"
