@@ -80,6 +80,11 @@ node "$CLI" targets --source "/path/to/skills-catalog" --json</code></pre>
               <code>skills/skill-suitcase</code> directory, not just
               <code>SKILL.md</code>.
             </p>
+            <p>
+              Choose the skill root for the agent runtime you are configuring.
+              Edit the one active assignment below when you are not installing
+              for Codex.
+            </p>
             <pre><code><span class="c"># use the source checkout when present, otherwise the global npm install</span>
 if test -d "$HOME/repos/skill-suitcase/skills/skill-suitcase"; then
   SKILL_SRC="$HOME/repos/skill-suitcase/skills/skill-suitcase"
@@ -88,6 +93,7 @@ else
 fi
 
 <span class="c"># choose one runtime root: Codex $HOME/.codex/skills, Claude $HOME/.claude/skills, shared agents root $HOME/.agents/skills, or Grok Build $HOME/.grok/skills</span>
+<span class="c"># Hermes roots: default profile $HOME/.hermes/skills or named profile $HOME/.hermes/profiles/&lt;name&gt;/skills</span>
 AGENT_SKILLS_DIR="$HOME/.codex/skills"
 
 <span class="c"># install into the selected root</span>
