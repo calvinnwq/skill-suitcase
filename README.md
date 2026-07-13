@@ -109,9 +109,9 @@ The CLI currently supports:
 | Refresh pinned upstream source | `upstream check`, `upstream fetch`, `upstream import` | Catalog-only; never a direct target installer |
 
 The modeled targets are `openclaw`, `codex`, `openclaw-codex`, `agents`,
-`claude`, `opencode`, `pi`, and `grok`. Target paths can be made portable with
-`--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`, and
-`--grok-skills`.
+`claude`, `hermes`, `opencode`, `pi`, and `grok`. Target paths can be made portable with
+`--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`,
+`--hermes-skills`, and `--grok-skills`.
 
 OpenCode and Pi are provider-backed compatibility targets.
 They are read-only even when the catalog declares a custom `assignmentPaths` entry.

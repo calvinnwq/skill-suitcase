@@ -354,6 +354,8 @@ test("parseCommandArgs supports local target override flags", () => {
     "/tmp/local-codex-skills",
     "--claude-skills",
     "/tmp/local-claude-skills",
+    "--hermes-skills",
+    "/tmp/local-hermes-skills",
     "--json"
   ]), {
     command: "status",
@@ -362,6 +364,7 @@ test("parseCommandArgs supports local target override flags", () => {
     codexHome: "/tmp/local-codex",
     codexSkills: "/tmp/local-codex-skills",
     claudeSkills: "/tmp/local-claude-skills",
+    hermesSkills: "/tmp/local-hermes-skills",
     dryRun: false,
     json: true
   });

@@ -180,6 +180,7 @@ function isValueArg(token: string): boolean {
   return token === "--source" || token === "--target" || token === "--target-skill" || token === "--output"
     || token === "--lock" || token === "--artifact" || token === "--mode" || token === "--receipt" || token === "--plan-id"
     || token === "--codex-home" || token === "--codex-skills" || token === "--claude-skills"
+    || token === "--hermes-skills"
     || token === "--agents-skills" || token === "--grok-skills";
 }
 
@@ -218,6 +219,8 @@ function valueFlagName(token: string): ValueFlagName {
       return "codexSkills";
     case "--claude-skills":
       return "claudeSkills";
+    case "--hermes-skills":
+      return "hermesSkills";
     case "--grok-skills":
       return "grokSkills";
     default:
@@ -256,6 +259,7 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--codex-home":
     case "--codex-skills":
     case "--claude-skills":
+    case "--hermes-skills":
     case "--grok-skills":
       return command === "diff" || command === "pack" || command === "targets" || command === "status"
         || command === "apply" || command === "track" || command === "reconcile" || command === "repair"

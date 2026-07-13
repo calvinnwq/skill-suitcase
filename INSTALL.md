@@ -83,6 +83,12 @@ AGENT_SKILLS_DIR="$HOME/.codex/skills"
 # Claude
 AGENT_SKILLS_DIR="$HOME/.claude/skills"
 
+# Hermes default profile
+AGENT_SKILLS_DIR="$HOME/.hermes/skills"
+
+# Hermes named profile
+AGENT_SKILLS_DIR="$HOME/.hermes/profiles/<name>/skills"
+
 # Shared agents root
 AGENT_SKILLS_DIR="$HOME/.agents/skills"
 
@@ -227,7 +233,7 @@ Review every fetched diff; Git declarations instead pin a tag or commit.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.
 
-Inspect local Codex, Claude, Agents, and Grok targets with overrides:
+Inspect local Codex, Claude, Hermes, Agents, and Grok targets with overrides:
 
 ```bash
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
@@ -235,6 +241,9 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
 
 skill-suitcase status --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
 skill-suitcase diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
+
+skill-suitcase status --source "$SRC" --target hermes --hermes-skills "$HOME/.hermes/skills" --json
+skill-suitcase diff --source "$SRC" --target hermes --hermes-skills "$HOME/.hermes/skills" --json
 
 skill-suitcase status --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
 skill-suitcase diff --source "$SRC" --target agents --agents-skills "$HOME/.agents/skills" --json
@@ -359,6 +368,15 @@ CLAUDE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-claude.XXXXXX")"
 skill-suitcase pack --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --output "$CLAUDE_TMP" --json
 CLAUDE_ARTIFACT="$(find "$CLAUDE_TMP" -name skill-suitcase-bundle.json -print -quit)"
 skill-suitcase apply --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --artifact "$CLAUDE_ARTIFACT" --json
+```
+
+For Hermes, use the default profile home or replace it with a named profile home:
+
+```bash
+HERMES_TMP="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-hermes.XXXXXX")"
+skill-suitcase pack --source "$SRC" --target hermes --hermes-skills "$HOME/.hermes/skills" --output "$HERMES_TMP" --json
+HERMES_ARTIFACT="$(find "$HERMES_TMP" -name skill-suitcase-bundle.json -print -quit)"
+skill-suitcase apply --source "$SRC" --target hermes --hermes-skills "$HOME/.hermes/skills" --artifact "$HERMES_ARTIFACT" --json
 ```
 
 For the shared agents root, use:

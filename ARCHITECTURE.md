@@ -202,7 +202,8 @@ they are reviewed with the catalog and can encode machine-specific intent.
 Provider priority:
 
 1. Local CLI overrides, such as `--agents-skills`, `--codex-home`,
-   `--codex-skills`, `--claude-skills`, and `--grok-skills`.
+   `--codex-skills`, `--claude-skills`, `--hermes-skills`, and
+   `--grok-skills`.
 2. Manifest-defined `assignmentPaths`.
 3. Native Skill Suitcase adapters for targets with richer semantics or local
    policy.

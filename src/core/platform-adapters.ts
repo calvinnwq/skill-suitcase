@@ -1,6 +1,6 @@
 export type PlatformPathField = "path" | "home" | "codexHome" | "skillsPath";
 
-export type PlatformAdapterId = "openclaw" | "codex" | "claude" | "agents" | "opencode" | "pi" | "grok";
+export type PlatformAdapterId = "openclaw" | "codex" | "claude" | "hermes" | "agents" | "opencode" | "pi" | "grok";
 
 export type PlatformAdapterKind =
   | "openclaw-skills-root"
@@ -8,6 +8,7 @@ export type PlatformAdapterKind =
   | "nested-home-codex"
   | "agents-skills-root"
   | "claude-skills-root"
+  | "hermes-skills-root"
   | "opencode-skills-root"
   | "pi-skills-root"
   | "grok-skills-root";
@@ -68,6 +69,14 @@ const PLATFORM_ADAPTERS: Record<PlatformAdapterKind, PlatformAdapter> = {
     installRootField: "path",
     requiredFields: ["path"],
     compatibilityNames: ["claude"],
+    metadata: {}
+  },
+  "hermes-skills-root": {
+    id: "hermes",
+    kind: "hermes-skills-root",
+    installRootField: "path",
+    requiredFields: ["path"],
+    compatibilityNames: ["hermes"],
     metadata: {}
   },
   "agents-skills-root": {
