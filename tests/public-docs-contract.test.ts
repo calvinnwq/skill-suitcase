@@ -310,12 +310,68 @@ function reusableTextCommandExamples(contents: string): CommandExample[] {
 function isReusableCommandPosition(line: string, start: number): boolean {
   const prefix = line.slice(0, start);
   if (/^\s*["'`]?\s*$/.test(prefix)) return true;
+  if (/^\s*-\s+["'`]?\s*$/.test(prefix)) {
+    return hasReusableCommandSyntax(line.slice(start));
+  }
+  if (/^\s*(?:[$#%]|[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s]*[$#%])\s+["'`]?\s*$/.test(prefix)) {
+    return true;
+  }
+  if (isReusableArrayPosition(prefix)) return hasReusableCommandSyntax(line.slice(start));
 
   const assignment = prefix.match(
     /(?:^|[,{;])\s*(?:(?:const|let|var)\s+)?["']?([-$A-Za-z_][-$A-Za-z0-9_]*)["']?\s*(?::|=)\s*["'`]?\s*$/
   );
   const name = assignment?.[1] ?? "";
   return /(?:^|[-_])(?:cmd|command|example|invocation|script)(?:$|[-_])/i.test(name);
+}
+
+function hasReusableCommandSyntax(command: string): boolean {
+  const normalized = command.replace(/(?:\\[nrt]|[\s"'`,;.)}\]])+$/g, "");
+  const tokens = shellInvocationTokens(normalized, "posix");
+  const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value));
+  if (launcher === null || launcher.invocation[1] === undefined) return false;
+
+  const invocation = launcher.invocation.slice(1);
+  if (invocation.some((token) => token.startsWith("-"))) return true;
+  if (!PUBLIC_COMMANDS.has(invocation[0] ?? "")) return invocation.length === 1;
+  try {
+    parseCommandArgs(invocation);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isReusableArrayPosition(prefix: string): boolean {
+  const source = prefix.replace(/["'`]\s*$/, "");
+  if (!/(?:\[|,)\s*$/.test(source)) return false;
+
+  let depth = 0;
+  let quote: "\"" | "'" | "`" | null = null;
+  let escaped = false;
+  for (const character of source) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== null) {
+      escaped = true;
+      continue;
+    }
+    if (quote !== null) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "\"" || character === "'" || character === "`") {
+      quote = character;
+    } else if (character === "[") {
+      depth += 1;
+    } else if (character === "]") {
+      depth = Math.max(0, depth - 1);
+    }
+  }
+
+  return depth > 0 && quote === null;
 }
 
 function shellSegments(line: string, dialect: ShellDialect): string[] {
@@ -1042,6 +1098,40 @@ function skillSuitcaseLauncher(tokens: string[], dialect: ShellDialect = "posix"
   return null;
 }
 
+function nestedCommandStringExample(
+  tokens: ShellToken[],
+  dialect: ShellDialect
+): CommandExample | null {
+  const dialectTokens = dialect === "powershell"
+    ? powershellCommandTokens(tokens.map((token) => token.value))
+    : tokens.map((token) => token.value);
+  const commandTokens = shellCommandTokens(dialectTokens);
+  if (commandTokens === null) return null;
+
+  const executable = executableName(commandTokens[0] ?? "").toLowerCase().replace(/\.exe$/, "");
+  if (["bash", "dash", "fish", "ksh", "sh", "zsh"].includes(executable)) {
+    const commandOptionIndex = commandTokens.findIndex(
+      (token, index) => index > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(token)
+    );
+    const command = commandTokens[commandOptionIndex + 1];
+    return commandOptionIndex < 0 || command === undefined
+      ? null
+      : { contents: command, dialect: "posix" };
+  }
+
+  if (executable === "powershell" || executable === "pwsh") {
+    const commandOptionIndex = commandTokens.findIndex(
+      (token, index) => index > 0 && /^(?:-c|-command)$/i.test(token)
+    );
+    const command = commandTokens.slice(commandOptionIndex + 1).join(" ");
+    return commandOptionIndex < 0 || command.length === 0
+      ? null
+      : { contents: command, dialect: "powershell" };
+  }
+
+  return null;
+}
+
 function withoutShellRedirections(tokens: ShellToken[]): ShellToken[] {
   const commandTokens: ShellToken[] = [];
   const standaloneOperator = /^(?:\d+|\*)?(?:>>>?|<<<|<<-?|<>|>\||>|<|>&|<&|&>>?)$/;
@@ -1129,33 +1219,30 @@ function shellInvocationTokens(
 }
 
 function logicalShellLines(example: CommandExample): string[] {
-  if (example.dialect === "powershell") {
-    const lines = example.contents.split(/\r?\n/);
-    const commandLines: string[] = [];
+  return example.dialect === "powershell"
+    ? logicalPowershellLines(example.contents)
+    : logicalPosixLines(example.contents);
+}
 
-    for (let index = 0; index < lines.length; index += 1) {
-      let line = lines[index] ?? "";
-      while (hasPowershellLineContinuation(line) && index + 1 < lines.length) {
-        index += 1;
-        line = `${line.slice(0, -1)} ${(lines[index] ?? "").replace(/^\s*/, "")}`;
-      }
-      commandLines.push(line);
-    }
-
-    return commandLines;
-  }
-
-  const lines = example.contents.split(/\r?\n/);
-
+function logicalPosixLines(contents: string): string[] {
+  const lines = contents.split(/\r?\n/);
   const commandLines: string[] = [];
+  let current = "";
+  let quote: "\"" | "'" | null = null;
+
   for (let index = 0; index < lines.length; index += 1) {
-    let line = lines[index] ?? "";
-    while (hasPosixLineContinuation(line) && index + 1 < lines.length) {
-      index += 1;
-      line = `${line.slice(0, -1)} ${(lines[index] ?? "").replace(/^\s*/, "")}`;
+    const line = lines[index] ?? "";
+    const state = posixLineState(line, quote);
+    current += state.continuation ? `${line.slice(0, -1)} ` : line;
+    quote = state.quote;
+    if (state.continuation) continue;
+    if (quote !== null) {
+      current += "\n";
+      continue;
     }
-    commandLines.push(line);
-    for (const heredoc of shellHeredocDelimiters(line)) {
+
+    commandLines.push(current);
+    for (const heredoc of shellHeredocDelimiters(current)) {
       let found = false;
       while (index + 1 < lines.length) {
         index += 1;
@@ -1169,18 +1256,90 @@ function logicalShellLines(example: CommandExample): string[] {
       }
       assert.ok(found, `shell here-document requires delimiter: ${heredoc.delimiter}`);
     }
+    current = "";
   }
+
+  if (current.length > 0) commandLines.push(current);
 
   return commandLines;
 }
 
-function hasPowershellLineContinuation(line: string): boolean {
-  const trailingBackticks = line.match(/`+$/)?.[0] ?? "";
-  if (trailingBackticks.length % 2 === 0) return false;
+function posixLineState(
+  line: string,
+  initialQuote: "\"" | "'" | null
+): { continuation: boolean; quote: "\"" | "'" | null } {
+  let quote = initialQuote;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? "";
+    if (quote === "'") {
+      if (character === "'") quote = null;
+      continue;
+    }
+    if (character === "\\") {
+      if (index === line.length - 1) return { continuation: true, quote };
+      index += 1;
+      continue;
+    }
+    if (quote === "\"") {
+      if (character === "\"") quote = null;
+      continue;
+    }
+    if (character === "#" && (index === 0 || /[\s;&|()]/.test(line[index - 1] ?? ""))) break;
+    if (character === "\"" || character === "'") quote = character;
+  }
 
+  return { continuation: false, quote };
+}
+
+function logicalPowershellLines(contents: string): string[] {
+  const lines = contents.split(/\r?\n/);
+  const commandLines: string[] = [];
+  let current = "";
   let quote: "\"" | "'" | null = null;
-  const continuationIndex = line.length - trailingBackticks.length;
-  for (let index = 0; index < continuationIndex; index += 1) {
+
+  for (let index = 0; index < lines.length; index += 1) {
+    let line = lines[index] ?? "";
+    const hereString = quote === null ? powershellHereStringOpening(line) : null;
+    if (hereString !== null) {
+      const body: string[] = [];
+      let found = false;
+      for (index += 1; index < lines.length; index += 1) {
+        const bodyLine = lines[index] ?? "";
+        if (bodyLine.trim() === `${hereString.quote}@`) {
+          found = true;
+          break;
+        }
+        body.push(bodyLine);
+      }
+      assert.ok(found, `PowerShell here-string requires delimiter: ${hereString.quote}@`);
+      line = `${line.slice(0, hereString.index)}''`;
+      if (hereString.quote === "\"") {
+        commandLines.push(...powershellHereStringExpansionSegments(body.join("\n")));
+      }
+    }
+
+    const state = powershellLineState(line, quote);
+    current += state.continuation ? `${line.slice(0, -1)} ` : line;
+    quote = state.quote;
+    if (state.continuation) continue;
+    if (quote !== null) {
+      current += "\n";
+      continue;
+    }
+    commandLines.push(current);
+    current = "";
+  }
+
+  if (current.length > 0) commandLines.push(current);
+  return commandLines;
+}
+
+function powershellLineState(
+  line: string,
+  initialQuote: "\"" | "'" | null
+): { continuation: boolean; quote: "\"" | "'" | null } {
+  let quote = initialQuote;
+  for (let index = 0; index < line.length; index += 1) {
     const character = line[index] ?? "";
     if (quote === "'") {
       if (character !== "'") continue;
@@ -1192,6 +1351,7 @@ function hasPowershellLineContinuation(line: string): boolean {
       continue;
     }
     if (character === "`") {
+      if (index === line.length - 1) return { continuation: true, quote };
       index += 1;
       continue;
     }
@@ -1199,35 +1359,36 @@ function hasPowershellLineContinuation(line: string): boolean {
       if (character === "\"") quote = null;
       continue;
     }
+    if (character === "#" && (index === 0 || /\s/.test(line[index - 1] ?? ""))) break;
     if (character === "\"" || character === "'") quote = character;
   }
 
-  return quote !== "'";
+  return { continuation: false, quote };
 }
 
-function hasPosixLineContinuation(line: string): boolean {
-  let quote: "\"" | "'" | null = null;
-  let escaped = false;
+function powershellHereStringOpening(line: string): { index: number; quote: "\"" | "'" } | null {
+  const match = line.match(/@(["'])\s*$/);
+  if (match === null || match.index === undefined) return null;
+  return powershellLineState(line.slice(0, match.index), null).quote === null
+    ? { index: match.index, quote: match[1] as "\"" | "'" }
+    : null;
+}
 
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index] ?? "";
-    if (escaped) {
-      escaped = false;
+function powershellHereStringExpansionSegments(contents: string): string[] {
+  const segments: string[] = [];
+
+  for (let index = 0; index < contents.length; index += 1) {
+    const character = contents[index] ?? "";
+    if (character === "`") {
+      index += 1;
       continue;
     }
-    if (character === "\\" && quote !== "'") {
-      if (index === line.length - 1) return true;
-      escaped = true;
-      continue;
-    }
-    if (quote === null && (character === "\"" || character === "'")) {
-      quote = character;
-    } else if (character === quote) {
-      quote = null;
+    if (character === "$" && contents[index + 1] === "(") {
+      index = collectShellSegments(contents, segments, "powershell", index + 2, ")");
     }
   }
 
-  return false;
+  return segments;
 }
 
 function shellHeredocDelimiters(line: string): Array<{ delimiter: string; quoted: boolean; stripTabs: boolean }> {
@@ -1300,40 +1461,51 @@ function validateCliExamples(path: string, contents: string): number {
   let invocationCount = 0;
 
   for (const example of commandExamples(path, contents)) {
-    for (const line of logicalShellLines(example)) {
-      for (const segment of shellSegments(line, example.dialect)) {
-        const tokens = shellInvocationTokens(segment, example.dialect, example.interactive);
-        const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value), example.dialect);
-        if (launcher === null) continue;
+    invocationCount += validateCommandExample(path, example);
+  }
 
-        invocationCount += 1;
-        const invocation = launcher.invocation
-          .filter((token) => !OPTIONAL_INVOCATION_PLACEHOLDERS.has(token));
-        const command = invocation[1] ?? "";
-        const possibleSubcommand = invocation[2];
-        assert.ok(PUBLIC_COMMANDS.has(command), `${path} documents unknown command: ${command}`);
-        if (command === "upstream") {
-          assert.ok(
-            isPublicUpstreamSubcommand(possibleSubcommand),
-            `${path} documents unknown upstream command: ${possibleSubcommand ?? "<missing>"}`
-          );
-        }
+  return invocationCount;
+}
+
+function validateCommandExample(path: string, example: CommandExample): number {
+  let invocationCount = 0;
+
+  for (const line of logicalShellLines(example)) {
+    for (const segment of shellSegments(line, example.dialect)) {
+      const tokens = shellInvocationTokens(segment, example.dialect, example.interactive);
+      const nestedExample = nestedCommandStringExample(tokens, example.dialect);
+      if (nestedExample !== null) invocationCount += validateCommandExample(path, nestedExample);
+
+      const launcher = skillSuitcaseLauncher(tokens.map((token) => token.value), example.dialect);
+      if (launcher === null) continue;
+
+      invocationCount += 1;
+      const invocation = launcher.invocation
+        .filter((token) => !OPTIONAL_INVOCATION_PLACEHOLDERS.has(token));
+      const command = invocation[1] ?? "";
+      const possibleSubcommand = invocation[2];
+      assert.ok(PUBLIC_COMMANDS.has(command), `${path} documents unknown command: ${command}`);
+      if (command === "upstream") {
         assert.ok(
-          invocation.includes("--json"),
-          `${path} has a CLI example without --json: ${invocation.join(" ")}`
-        );
-        let parsed: ReturnType<typeof parseCommandArgs>;
-        try {
-          parsed = parseCommandArgs(invocation.slice(1));
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          assert.fail(`${path} has an invalid CLI invocation: ${invocation.join(" ")} (${message})`);
-        }
-        assert.ok(
-          COMMAND_REGISTRY.find(parsed) !== null,
-          `${path} CLI does not accept invocation: ${invocation.join(" ")}`
+          isPublicUpstreamSubcommand(possibleSubcommand),
+          `${path} documents unknown upstream command: ${possibleSubcommand ?? "<missing>"}`
         );
       }
+      assert.ok(
+        invocation.includes("--json"),
+        `${path} has a CLI example without --json: ${invocation.join(" ")}`
+      );
+      let parsed: ReturnType<typeof parseCommandArgs>;
+      try {
+        parsed = parseCommandArgs(invocation.slice(1));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        assert.fail(`${path} has an invalid CLI invocation: ${invocation.join(" ")} (${message})`);
+      }
+      assert.ok(
+        COMMAND_REGISTRY.find(parsed) !== null,
+        `${path} CLI does not accept invocation: ${invocation.join(" ")}`
+      );
     }
   }
 
@@ -1946,10 +2118,15 @@ test("CLI example parsing applies PowerShell continuation and escaping", () => {
 test("CLI example parsing covers command strings in reusable text formats", () => {
   for (const [path, contents] of [
     ["fixture.yaml", "command: skill-suitcase bogus --json\n"],
+    ["fixture.yaml", "commands:\n  - skill-suitcase bogus --json\n"],
     ["fixture.json", '{"command":"skill-suitcase bogus --json"}\n'],
+    ["fixture.json", '{"commands":["skill-suitcase bogus --json"]}\n'],
     ["fixture.js", 'const command = "skill-suitcase bogus --json";\n'],
+    ["fixture.js", 'const commands = ["echo ok", "skill-suitcase bogus --json"];\n'],
     ["fixture.css", ':root { --example: "skill-suitcase bogus --json"; }\n'],
-    ["fixture.txt", "skill-suitcase bogus --json\n"]
+    ["fixture.txt", "skill-suitcase bogus --json\n"],
+    ["fixture.txt", "$ skill-suitcase bogus --json\n"],
+    ["fixture.txt", "alice@host:~$ skill-suitcase bogus --json\n"]
   ] as const) {
     assert.throws(
       () => validateCliExamples(path, contents),
@@ -1959,14 +2136,63 @@ test("CLI example parsing covers command strings in reusable text formats", () =
 
   for (const [path, contents] of [
     ["fixture.yaml", "description: skill-suitcase status reports target state.\n"],
+    ["fixture.yaml", "notes:\n  - skill-suitcase status reports target state.\n"],
     ["fixture.yaml", "default_prompt: Run skill-suitcase bogus --json\n"],
     ["fixture.json", '{"description":"Run skill-suitcase bogus --json"}\n'],
+    ["fixture.json", '{"notes":["skill-suitcase status reports target state."]}\n'],
     ["fixture.js", 'const description = "Run skill-suitcase bogus --json";\n'],
+    ["fixture.js", 'const notes = ["skill-suitcase status reports target state."];\n'],
     ["fixture.css", ':root { --description: "Run skill-suitcase bogus --json"; }\n'],
     ["fixture.txt", "Run skill-suitcase bogus --json\n"]
   ] as const) {
     assert.equal(validateCliExamples(path, contents), 0);
   }
+});
+
+test("CLI example parsing validates nested command strings", () => {
+  for (const command of [
+    "sh -c 'skill-suitcase bogus --json'",
+    "bash -lc 'skill-suitcase bogus --json'",
+    "zsh -c 'skill-suitcase bogus --json'",
+    "pwsh -Command 'skill-suitcase bogus --json'",
+    "powershell.exe -c 'skill-suitcase bogus --json'"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``),
+      /unknown command: bogus/
+    );
+  }
+});
+
+test("CLI example parsing preserves multiline string state", () => {
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```sh\nprintf '%s\\n' '\nskill-suitcase bogus --json\n'\n```"
+    ),
+    0
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      "```pwsh\n$value = @'\nskill-suitcase bogus --json\n'@\n```"
+    ),
+    0
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```sh\nprintf '%s\\n' \"\n$(skill-suitcase bogus --json)\n\"\n```"
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      "```pwsh\n$value = @\"\n$(skill-suitcase bogus --json)\n\"@\n```"
+    ),
+    /unknown command: bogus/
+  );
 });
 
 test("HTML command examples include visible cmdline elements", () => {
