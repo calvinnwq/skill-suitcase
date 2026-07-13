@@ -41,6 +41,7 @@ transactional copy and symlink apply, receipts and rollback, track/reconcile/
 repair/promote/import-target workflows, manifest logical groups and source
 policy, provider-backed read-only target boundaries, and pinned skills.sh or Git
 upstream source refresh into the catalog.
+The repository and npm package also include `examples/sample-catalog`, a public-safe offline fixture with a disposable lifecycle walkthrough.
 
 OpenCode and Pi remain provider-backed read-only compatibility targets. Upstream
 refresh remains catalog-only: it does not install directly into live agent
@@ -77,8 +78,8 @@ decision; it is not inferred from routine Release Please output.
 - Repository: `calvinnwq/skill-suitcase`
 
 `package.json` uses an explicit `files` whitelist.
-The public payload is approved through exact curated paths: npm's required `package.json`; `dist/src/**/*.js`; `skills/skill-suitcase/SKILL.md`; `skills/skill-suitcase/agents/openai.yaml`; `LICENSE`, `VISION.md`, `SPEC.md`, `README.md`, `INSTALL.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `DEVELOPING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, and `CLAUDE.md`; and `docs/command-reference.md`, `docs/install-smoke.md`, `docs/portability-matrix.md`, `docs/release-readiness.md`, and `docs/skills-sh-delegation.md`.
-Do not replace the exact documentation or operator-skill entries with broad directory globs because a newly added file must not become publish-approved without independent review.
+The public payload is approved through exact curated paths: npm's required `package.json`; `dist/src/**/*.js`; `skills/skill-suitcase/SKILL.md`; `skills/skill-suitcase/agents/openai.yaml`; `LICENSE`, `VISION.md`, `SPEC.md`, `README.md`, `INSTALL.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `DEVELOPING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, and `CLAUDE.md`; `docs/command-reference.md`, `docs/install-smoke.md`, `docs/portability-matrix.md`, `docs/release-readiness.md`, and `docs/skills-sh-delegation.md`; and the five files under `examples/sample-catalog` listed explicitly in `package.json`.
+Do not replace the exact documentation, operator-skill, or sample-catalog entries with broad directory globs because a newly added file must not become publish-approved without independent review.
 Tests, source TypeScript, local review artifacts, agent state, and workspace files are excluded from the npm payload.
 
 `scripts/package-validation.mjs` pins the MIT license, `Calvin Ng` author, repository/homepage/issues URLs, search keywords, Node `>=20` engine, pnpm `10.34.4` package-manager metadata, package name, and binary name.
@@ -177,6 +178,9 @@ artifacts, or workspace-only files.
 
 Public docs and release verification use portable paths:
 
+The packaged [`examples/sample-catalog`](../examples/sample-catalog/README.md) is the canonical offline lifecycle smoke fixture.
+Its manifest contains only a visible placeholder target, and its walkthrough overrides that path with a disposable temporary directory before mutation.
+
 ```bash
 pnpm run build
 
@@ -222,7 +226,7 @@ Before publishing, verify:
 - `INSTALL.md` covers packaged CLI and operator-skill setup.
 - `CONTRIBUTING.md` explains Release Please and Trusted Publishing boundaries.
 - Package validation checks the exact approved public payload, including the
-  documentation and packaged operator-skill paths.
+  documentation, packaged operator-skill paths, and public sample catalog.
 - The README links to contributor, development, support, security, and conduct
   guidance, and every linked community file ships in the npm package.
 - No doc implies `skills.sh` runtime delegation is a managed installer path.

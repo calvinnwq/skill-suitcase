@@ -1,0 +1,42 @@
+suitcases:
+  demo:
+    skills:
+      - hello-suitcase
+
+assignments:
+  agents:
+    suitcases:
+      - demo
+
+assignmentPaths:
+  agents:
+    kind: agents-skills-root
+    path: /path/to/disposable/agent-skills
+    assignment: agents
+
+groups:
+  portable-demo:
+    title: Portable Demo
+    description: Public-safe fixtures for disposable Skill Suitcase workflows.
+    suitcases:
+      - demo
+    assignments:
+      - agents
+    tags:
+      - demo
+      - portable
+
+sourcePolicy:
+  exclude:
+    - "**/.cache/**"
+    - "**/dist/**"
+  deny:
+    - "**/secrets/**"
+
+compatibility:
+  hello-suitcase:
+    agents:
+      - agents
+    variant: canonical
+    evidence:
+      - examples/sample-catalog/README.md

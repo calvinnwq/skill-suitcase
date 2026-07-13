@@ -35,7 +35,12 @@ const EXPECTED_FILES_ALLOWLIST = [
   "docs/install-smoke.md",
   "docs/portability-matrix.md",
   "docs/release-readiness.md",
-  "docs/skills-sh-delegation.md"
+  "docs/skills-sh-delegation.md",
+  "examples/sample-catalog/README.md",
+  "examples/sample-catalog/skill-suitcase.yaml",
+  "examples/sample-catalog/.skill-suitcase/upstream-lock.json",
+  "examples/sample-catalog/skills/hello-suitcase/SKILL.md",
+  "examples/sample-catalog/skills/hello-suitcase/references/greeting.md"
 ];
 const EXPECTED_KEYWORDS = [
   "agent-skills",

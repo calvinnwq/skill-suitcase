@@ -63,6 +63,12 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
 These commands do not create install roots, runtime homes, receipts, symlinks,
 or catalog files. Inspect their JSON before moving to staging or mutation.
 
+For a ready-made catalog that never assumes a real agent home, use the
+[`examples/sample-catalog`](examples/sample-catalog/README.md) fixture shipped
+in both the repository and npm package. Its
+walkthrough covers disposable plan, diff, status, pack, apply, repair, rollback,
+and upstream-policy checks.
+
 To stage an immutable bundle without touching an agent home:
 
 ```bash

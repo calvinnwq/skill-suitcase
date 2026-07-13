@@ -9,6 +9,9 @@ Build once:
 pnpm run build
 ```
 
+For a complete offline lifecycle against a public-safe catalog and disposable target, use the [`examples/sample-catalog`](../examples/sample-catalog/README.md) walkthrough.
+The focused checks below remain useful when testing a particular adapter or catalog policy.
+
 Run read-only discovery against a catalog:
 
 ```bash

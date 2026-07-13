@@ -28,7 +28,7 @@ Build and run the CLI from source:
 
 ```bash
 pnpm run build
-node dist/src/cli.js targets --source tests/fixtures/skills-catalog --json
+node dist/src/cli.js targets --source examples/sample-catalog --json
 ```
 
 Use disposable fixtures or temporary directories when exercising mutating
@@ -36,6 +36,7 @@ commands. Do not point `apply`, `rollback`, `track`, `reconcile --apply`,
 `repair --apply`, `promote --apply`, `import-target --apply`, `prune --apply`, or
 `upstream import --apply` at a real agent home or catalog unless that mutation
 is intentional and approved.
+The [`examples/sample-catalog`](examples/sample-catalog/README.md) walkthrough provides a public-safe disposable lifecycle for `plan`, `diff`, `status`, `pack`, `apply`, `repair`, `rollback`, and upstream-policy checks.
 
 ## Architecture
 
