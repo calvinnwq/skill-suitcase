@@ -8,8 +8,8 @@ import { test } from "node:test";
 import { createCommandRegistry, parseCommandArgs } from "../src/commands/index.js";
 
 const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
-const TEXT_DOCUMENT_EXTENSIONS = [".css", ".html", ".js", ".json", ".md", ".yaml", ".yml"];
-const REUSABLE_TEXT_COMMAND_EXTENSIONS = [".css", ".js", ".json", ".yaml", ".yml"];
+const TEXT_DOCUMENT_EXTENSIONS = [".css", ".html", ".js", ".json", ".md", ".txt", ".yaml", ".yml"];
+const REUSABLE_TEXT_COMMAND_EXTENSIONS = [".css", ".js", ".json", ".txt", ".yaml", ".yml"];
 const COMMAND_REGISTRY = createCommandRegistry();
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
 const SHELL_COMMAND_PREFIXES = new Set(["$", "!", "do", "elif", "else", "if", "then", "until", "while", "{"]);
@@ -729,10 +729,12 @@ function shellCommandTokens(tokens: string[]): string[] | null {
     commandTokens = commandTokens.slice(index);
     const wrapper = executableName(commandTokens[0] ?? "");
     if (wrapper !== "command" && wrapper !== "env" && wrapper !== "sudo"
-      && wrapper !== "exec" && wrapper !== "nice" && wrapper !== "nohup" && wrapper !== "time") {
+      && wrapper !== "exec" && wrapper !== "nice" && wrapper !== "nohup"
+      && wrapper !== "time" && wrapper !== "timeout") {
       return commandTokens;
     }
-    const wrappedCommand = wrapper === "exec" || wrapper === "nice" || wrapper === "nohup" || wrapper === "time"
+    const wrappedCommand = wrapper === "exec" || wrapper === "nice" || wrapper === "nohup"
+      || wrapper === "time" || wrapper === "timeout"
       ? shellExecutionPrefixTokens(commandTokens, wrapper)
       : shellWrapperCommandTokens(commandTokens, wrapper);
     if (wrappedCommand === null) return null;
@@ -741,10 +743,17 @@ function shellCommandTokens(tokens: string[]): string[] | null {
   return null;
 }
 
-function shellExecutionPrefixTokens(tokens: string[], wrapper: "exec" | "nice" | "nohup" | "time"): string[] | null {
+function shellExecutionPrefixTokens(
+  tokens: string[],
+  wrapper: "exec" | "nice" | "nohup" | "time" | "timeout"
+): string[] | null {
   for (let index = 1; index < tokens.length; index += 1) {
     const token = tokens[index] ?? "";
-    if (token === "--") return tokens.slice(index + 1);
+    if (token === "--") {
+      return wrapper === "timeout"
+        ? (tokens[index + 2] === undefined ? null : tokens.slice(index + 2))
+        : tokens.slice(index + 1);
+    }
     if (wrapper === "exec") {
       if (token === "-a") {
         index += 1;
@@ -760,8 +769,21 @@ function shellExecutionPrefixTokens(tokens: string[], wrapper: "exec" | "nice" |
       if (token === "--help" || token === "--version") return null;
     } else if (wrapper === "nohup") {
       if (token === "--help" || token === "--version") return null;
-    } else if (token === "-p") {
+    } else if (wrapper === "time" && token === "-p") {
       continue;
+    } else if (wrapper === "timeout") {
+      if (token === "--help" || token === "--version") return null;
+      if (token === "-k" || token === "--kill-after" || token === "-s" || token === "--signal") {
+        index += 1;
+        continue;
+      }
+      if (token === "--foreground" || token === "--preserve-status" || token === "--verbose"
+        || /^(?:--kill-after|--signal)=/.test(token)) {
+        continue;
+      }
+      if (!token.startsWith("-")) {
+        return tokens[index + 1] === undefined ? null : tokens.slice(index + 1);
+      }
     }
     if (token.startsWith("-")) return null;
     return tokens.slice(index);
@@ -774,8 +796,17 @@ function executableName(token: string): string {
   return token.replaceAll("\\", "/").split("/").at(-1) ?? token;
 }
 
-function isSkillSuitcaseExecutable(token: string, allowPackageVersion = false): boolean {
-  const name = executableName(token).replace(/\.(?:cmd|ps1)$/i, "");
+function executableNameForDialect(token: string, dialect: ShellDialect): string {
+  const name = executableName(token);
+  return dialect === "powershell" ? name.toLowerCase() : name;
+}
+
+function isSkillSuitcaseExecutable(
+  token: string,
+  allowPackageVersion = false,
+  dialect: ShellDialect = "posix"
+): boolean {
+  const name = executableNameForDialect(token, dialect).replace(/\.(?:cmd|ps1)$/i, "");
   return name === "skill-suitcase"
     || (allowPackageVersion && /^skill-suitcase@[^/]+$/.test(name));
 }
@@ -783,7 +814,8 @@ function isSkillSuitcaseExecutable(token: string, allowPackageVersion = false): 
 function packageRunnerExecutable(
   tokens: string[],
   start: number,
-  runner: "bunx" | "npm" | "npx" | "pnpm" | "yarn"
+  runner: "bunx" | "npm" | "npx" | "pnpm" | "yarn",
+  dialect: ShellDialect
 ): PackageRunnerExecutable | null {
   const booleanOptions = new Set(["--quiet", "--shell-mode", "--silent", "--yes", "-q", "-y"]);
   if (runner === "npm") booleanOptions.add("-p");
@@ -807,7 +839,7 @@ function packageRunnerExecutable(
   for (let index = start; index < tokens.length; index += 1) {
     const token = tokens[index] ?? "";
     if (token === "--") {
-      return isSkillSuitcaseExecutable(tokens[index + 1] ?? "", true)
+      return isSkillSuitcaseExecutable(tokens[index + 1] ?? "", true, dialect)
         ? { executableIndex: index + 1, separatorBeforeExecutable: true }
         : null;
     }
@@ -821,7 +853,7 @@ function packageRunnerExecutable(
     }
     if (booleanOptions.has(token) || /^--[^=]+=/.test(token)) continue;
     if (token.startsWith("-")) return null;
-    return isSkillSuitcaseExecutable(token, true)
+    return isSkillSuitcaseExecutable(token, true, dialect)
       ? { executableIndex: index, separatorBeforeExecutable: false }
       : null;
   }
@@ -866,23 +898,43 @@ function packageRunnerActionIndex(
   return -1;
 }
 
-function isSourceCliEntrypoint(token: string): boolean {
-  const normalized = token.replaceAll("\\", "/");
-  return token === "$CLI" || token === "${CLI}" || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
+function isSourceCliEntrypoint(token: string, dialect: ShellDialect = "posix"): boolean {
+  const normalized = dialect === "powershell"
+    ? token.replaceAll("\\", "/").toLowerCase()
+    : token.replaceAll("\\", "/");
+  return normalized === (dialect === "powershell" ? "$cli" : "$CLI")
+    || normalized === (dialect === "powershell" ? "${cli}" : "${CLI}")
+    || /(?:^|\/)dist\/src\/cli\.js$/.test(normalized);
 }
 
 function powershellCommandTokens(tokens: string[]): string[] {
   const commandTokens = withoutPowershellPrompt(tokens.map((value) => ({ value })))
     .map((token) => token.value);
+  const compactAssignment = commandTokens[0]?.match(
+    /^\$(?:[A-Za-z_][A-Za-z0-9_]*:)?[A-Za-z_][A-Za-z0-9_]*=(.*)$/
+  );
 
-  if (/^\$(?:[A-Za-z_][A-Za-z0-9_]*:)?[A-Za-z_][A-Za-z0-9_]*$/.test(commandTokens[0] ?? "")
-    && commandTokens[1] === "=") {
-    return commandTokens.slice(2);
+  if (compactAssignment !== undefined && compactAssignment !== null) {
+    const firstCommandToken = compactAssignment[1] ?? "";
+    return firstCommandToken.length > 0
+      ? [firstCommandToken, ...commandTokens.slice(1)]
+      : commandTokens.slice(1);
+  }
+
+  if (/^\$(?:[A-Za-z_][A-Za-z0-9_]*:)?[A-Za-z_][A-Za-z0-9_]*$/.test(commandTokens[0] ?? "")) {
+    const assignment = commandTokens[1] ?? "";
+    if (assignment === "=") return commandTokens.slice(2);
+    if (assignment.startsWith("=")) {
+      const firstCommandToken = assignment.slice(1);
+      return firstCommandToken.length > 0
+        ? [firstCommandToken, ...commandTokens.slice(2)]
+        : commandTokens.slice(2);
+    }
   }
   return commandTokens;
 }
 
-function nodeSourceCliEntrypointIndex(tokens: string[], start: number): number {
+function nodeSourceCliEntrypointIndex(tokens: string[], start: number, dialect: ShellDialect): number {
   const fileLaunchOptions = new Set(["--watch", "--watch-preserve-output"]);
   const nonScriptOptions = new Set([
     "--check",
@@ -904,7 +956,7 @@ function nodeSourceCliEntrypointIndex(tokens: string[], start: number): number {
 
   for (let index = start; index < tokens.length; index += 1) {
     const token = tokens[index] ?? "";
-    if (token === "--") return isSourceCliEntrypoint(tokens[index + 1] ?? "") ? index + 1 : -1;
+    if (token === "--") return isSourceCliEntrypoint(tokens[index + 1] ?? "", dialect) ? index + 1 : -1;
     if (nonScriptOptions.has(token)
       || /^(?:--eval|--input-type|--print|--run|-e|-p)=?./.test(token)) {
       return -1;
@@ -920,7 +972,7 @@ function nodeSourceCliEntrypointIndex(tokens: string[], start: number): number {
       continue;
     }
     if (token.startsWith("-")) return -1;
-    return isSourceCliEntrypoint(token) ? index : -1;
+    return isSourceCliEntrypoint(token, dialect) ? index : -1;
   }
 
   return -1;
@@ -933,30 +985,30 @@ function skillSuitcaseLauncher(tokens: string[], dialect: ShellDialect = "posix"
 
   const candidate = commandTokens[0];
   if (candidate === undefined) return null;
-  if (isSkillSuitcaseExecutable(candidate)) {
+  if (isSkillSuitcaseExecutable(candidate, false, dialect)) {
     return { invocation: commandTokens };
   }
-  if (isSourceCliEntrypoint(candidate)) {
+  if (isSourceCliEntrypoint(candidate, dialect)) {
     return { invocation: commandTokens };
   }
 
-  const wrapper = executableName(candidate);
+  const wrapper = executableNameForDialect(candidate, dialect);
   if (wrapper === "npx" || wrapper === "bunx") {
-    const executable = packageRunnerExecutable(commandTokens, 1, wrapper);
+    const executable = packageRunnerExecutable(commandTokens, 1, wrapper, dialect);
     return executable === null
       ? null
       : { invocation: commandTokens.slice(executable.executableIndex) };
   }
 
   if (wrapper === "node") {
-    const executableIndex = nodeSourceCliEntrypointIndex(commandTokens, 1);
+    const executableIndex = nodeSourceCliEntrypointIndex(commandTokens, 1, dialect);
     return executableIndex < 0 ? null : { invocation: commandTokens.slice(executableIndex) };
   }
 
   if (wrapper === "npm" || wrapper === "pnpm" || wrapper === "yarn") {
     const actionIndex = packageRunnerActionIndex(commandTokens, 1, wrapper);
     if (actionIndex < 0) return null;
-    const executable = packageRunnerExecutable(commandTokens, actionIndex + 1, wrapper);
+    const executable = packageRunnerExecutable(commandTokens, actionIndex + 1, wrapper, dialect);
     if (wrapper === "npm" && executable !== null) {
       assert.equal(
         executable.separatorBeforeExecutable,
@@ -1719,7 +1771,8 @@ test("CLI example parsing recognizes wrappers and path-qualified executables", (
     "time skill-suitcase bogus --json",
     "exec skill-suitcase bogus --json",
     "nohup skill-suitcase bogus --json",
-    "nice -n 5 skill-suitcase bogus --json"
+    "nice -n 5 skill-suitcase bogus --json",
+    "timeout 30 skill-suitcase bogus --json"
   ]) {
     assert.throws(
       () => validateCliExamples("fixture.md", `\`\`\`sh\n${command}\n\`\`\``),
@@ -1834,8 +1887,12 @@ test("CLI example parsing applies PowerShell continuation and escaping", () => {
   for (const command of [
     "PS> skill-suitcase bogus --json",
     "$result = skill-suitcase bogus --json",
+    "$result=skill-suitcase bogus --json",
     String.raw`.\skill-suitcase.cmd bogus --json`,
-    String.raw`C:\tools\skill-suitcase.ps1 bogus --json`
+    String.raw`C:\tools\skill-suitcase.ps1 bogus --json`,
+    String.raw`C:\tools\Skill-Suitcase.cmd bogus --json`,
+    "NPX Skill-Suitcase bogus --json",
+    "NPM exec -- Skill-Suitcase bogus --json"
   ]) {
     assert.throws(
       () => validateCliExamples("fixture.md", `\`\`\`pwsh\n${command}\n\`\`\``),
@@ -1856,7 +1913,8 @@ test("CLI example parsing covers command strings in reusable text formats", () =
     ["fixture.yaml", "default_prompt: Run skill-suitcase bogus --json\n"],
     ["fixture.json", '{"command":"skill-suitcase bogus --json"}\n'],
     ["fixture.js", 'const command = "skill-suitcase bogus --json";\n'],
-    ["fixture.css", ':root { --example: "skill-suitcase bogus --json"; }\n']
+    ["fixture.css", ':root { --example: "skill-suitcase bogus --json"; }\n'],
+    ["fixture.txt", "Run skill-suitcase bogus --json\n"]
   ] as const) {
     assert.throws(
       () => validateCliExamples(path, contents),
