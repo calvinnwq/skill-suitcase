@@ -28,6 +28,47 @@ function read(path: string): string {
   return readFileSync(path, "utf8");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function navigationEntries(source: string): Array<{ number: string | undefined; title: string; href: string }> {
+  const declaration = "var NAV = ";
+  const navigationStart = source.indexOf(declaration);
+  const navigationEnd = source.indexOf("var ORDER = []", navigationStart);
+  assert.ok(navigationStart >= 0 && navigationEnd > navigationStart, "site script must declare NAV before ORDER");
+  const expression = source
+    .slice(navigationStart + declaration.length, navigationEnd)
+    .trim()
+    .replace(/;$/, "");
+  const navigation: unknown = new Function(`return (${expression});`)();
+  assert.ok(Array.isArray(navigation), "NAV must be an array");
+
+  const entries: Array<{ number: string | undefined; title: string; href: string }> = [];
+  function appendItem(value: unknown): void {
+    assert.ok(isRecord(value), "navigation items must be objects");
+    const title = value.t;
+    const href = value.h;
+    if (typeof title !== "string") assert.fail("navigation items must have titles");
+    if (typeof href !== "string") assert.fail("navigation items must have hrefs");
+    if (value.ext === true) return;
+    const number = value.n;
+    if (number !== undefined && typeof number !== "string") {
+      assert.fail("navigation item numbers must be strings");
+    }
+    entries.push({ number, title, href });
+    if (value.children === undefined) return;
+    assert.ok(Array.isArray(value.children), "navigation item children must be arrays");
+    value.children.forEach(appendItem);
+  }
+
+  for (const group of navigation) {
+    assert.ok(isRecord(group) && Array.isArray(group.items), "navigation groups must contain item arrays");
+    group.items.forEach(appendItem);
+  }
+  return entries;
+}
+
 test("docs site pages share the expected chrome", () => {
   for (const page of DOC_PAGES) {
     const html = read(page);
@@ -55,27 +96,25 @@ test("docs site pages share the expected chrome", () => {
 
 test("navigation manifest covers every page in numbered reading order", () => {
   const js = read("docs/site.js");
-  const navigationEntries = [...js.matchAll(
-    /\{ n: "(\d{2})", t: "([^"]+)", h: "([^"]+\.html)" \}/g
-  )].map((match) => ({ number: match[1], title: match[2], href: match[3] }));
+  const entries = navigationEntries(js);
   const sitePages = readdirSync("docs")
     .filter((path) => path.endsWith(".html"))
     .map((path) => `docs/${path}`)
     .sort();
 
   assert.deepEqual(
-    navigationEntries.map((entry) => entry.href),
+    entries.map((entry) => entry.href),
     DOC_PAGES.map((page) => page.replace("docs/", "")),
     "the navigation manifest must list every page exactly once in reading order"
   );
   assert.deepEqual(
-    navigationEntries.map((entry) => entry.number),
+    entries.map((entry) => entry.number),
     ["01", "02", "03", "04", "05", "06", "07", "08"],
     "numbered navigation must stay contiguous"
   );
   assert.equal(
-    new Set(navigationEntries.map((entry) => entry.title)).size,
-    navigationEntries.length,
+    new Set(entries.map((entry) => entry.title)).size,
+    entries.length,
     "navigation labels must stay unique"
   );
   assert.deepEqual(sitePages, [...DOC_PAGES].sort(), "every HTML page must be reachable from navigation");
@@ -83,6 +122,23 @@ test("navigation manifest covers every page in numbered reading order", () => {
   assert.match(js, /THEME_KEY = "skill-suitcase-docs-theme"/);
   assert.match(js, /skill-suitcase-docs-index-v2/);
   assert.doesNotMatch(js, /artshelf/i, "the docs chrome must use Skill Suitcase identifiers");
+});
+
+test("navigation extraction includes unnumbered internal entries", () => {
+  const entries = navigationEntries(`
+    var NAV = [{ items: [
+      { t: "Overview copy", h: "index.html", children: [
+        { n: "02", t: "Install", h: "install.html" }
+      ] },
+      { t: "GitHub", h: "https://example.com", ext: true }
+    ] }];
+    var ORDER = [];
+  `);
+
+  assert.deepEqual(entries, [
+    { number: undefined, title: "Overview copy", href: "index.html" },
+    { number: "02", title: "Install", href: "install.html" }
+  ]);
 });
 
 test("table of contents preserves canonical fragment owners", () => {
