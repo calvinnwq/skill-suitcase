@@ -16,6 +16,7 @@ const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
 const TEXT_DOCUMENT_EXTENSIONS = new Set([".css", ".html", ".js", ".json", ".md", ".txt", ".yaml", ".yml"]);
 const COMMAND_VALUE_KEYS = new Set(["command", "commands", "example", "examples", "run", "runs", "script", "scripts"]);
 const ARGV_VALUE_KEYS = new Set(["command", "example", "run", "script"]);
+const COMMAND_CONTAINER_KEYS = new Set(["commands", "examples", "runs", "scripts"]);
 const COMMAND_REGISTRY = createCommandRegistry();
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
 const OPTIONAL_INVOCATION_PLACEHOLDERS = new Set(["<local-overrides>"]);
@@ -294,6 +295,21 @@ function javascriptCommandExamples(path: string, contents: string): CommandExamp
         return;
       }
       for (const element of node.elements) collectStrings(element, ownerKey);
+    } else if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (!ts.isPropertyAssignment(property)) continue;
+        const name = propertyName(property.name);
+        if (name !== null && COMMAND_VALUE_KEYS.has(name)) {
+          collectStrings(property.initializer, name);
+        } else if (
+          COMMAND_CONTAINER_KEYS.has(ownerKey)
+          && (ts.isStringLiteral(property.initializer)
+            || ts.isNoSubstitutionTemplateLiteral(property.initializer)
+            || ts.isArrayLiteralExpression(property.initializer))
+        ) {
+          collectStrings(property.initializer, ownerKey);
+        }
+      }
     }
   }
 
@@ -430,8 +446,16 @@ function normalizePowershellStatement(statement: string): string {
     ? `${assignment[1] ?? ""}${assignment[3] ?? ""}`
     : statement;
   return command.replace(
-    /^(\s*)&\s+(?=(?:[A-Za-z]:[\\/]|\.?[\\/]|"\$\{?CLI\}?"|\$\{?CLI\}?|skill-suitcase))/i,
-    `$1${POWERSHELL_CALL_WRAPPER} `
+    /^(\s*)&\s+("(?:`.|[^"])*"|'(?:''|[^'])*'|[^\s;&|]+)/,
+    (match, indent: string, launcher: string) => {
+      const quote = launcher[0];
+      const value = (quote === "\"" || quote === "'") && launcher.at(-1) === quote
+        ? launcher.slice(1, -1)
+        : launcher;
+      return isCliExecutable(value, "powershell") || isSourceEntrypoint(value, "powershell")
+        ? `${indent}${POWERSHELL_CALL_WRAPPER} ${launcher}`
+        : match;
+    }
   );
 }
 
@@ -955,6 +979,7 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     ["fixture.json", "{\"command\":[\"skill-suitcase\",\"bogus\",\"--json\"]}"],
     ["fixture.json", "{\"commands\":{\"smoke\":\"skill-suitcase bogus --json\"}}"],
     ["fixture.js", "const commands = ['echo ok', 'skill-suitcase bogus --json'];"],
+    ["fixture.js", "const commands = { smoke: 'skill-suitcase bogus --json' };"],
     ["fixture.js", "const command = ['skill-suitcase', 'bogus', '--json'];"],
     ["fixture.css", ":root { --example: 'skill-suitcase bogus --json'; }"],
     ["fixture.txt", "skill-suitcase bogus --json"]
@@ -971,6 +996,13 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
   );
   assert.equal(validateCliExamples("fixture.json", "{\"description\":\"Run skill-suitcase bogus --json\"}"), 0);
   assert.equal(validateCliExamples("fixture.js", "const description = 'Run skill-suitcase bogus --json';"), 0);
+  assert.equal(
+    validateCliExamples(
+      "fixture.js",
+      "const commands = { smoke: { description: 'Run skill-suitcase bogus --json' } };"
+    ),
+    0
+  );
   assert.equal(validateCliExamples("fixture.css", ":root { --description: 'Run skill-suitcase bogus --json'; }"), 0);
   assert.equal(validateCliExamples("fixture.yaml", "command: >\n  skill-suitcase status --source .\n  --json"), 1);
   assert.equal(validateCliExamples(
@@ -1174,6 +1206,20 @@ test("dialect normalization validates PowerShell and Fish examples", () => {
     validateCliExamples(
       "fixture.md",
       markdownFixture('& "$CLI" status --source . --json', "powershell")
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture('& "skill-suitcase" status --source . --json', "powershell")
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture(String.raw`& "C:\Program Files\skill-suitcase.cmd" status --source . --json`, "powershell")
     ),
     1
   );
