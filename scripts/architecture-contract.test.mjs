@@ -75,6 +75,7 @@ test("architecture contract recognizes supported TypeScript and ESM dependency s
     "src/core/import-equals.ts": 'import command = require("../commands/plan.js");\nvoid command;',
     "src/core/dynamic-import.ts": 'export const load = () => import("../commands/plan.js");',
     "src/core/commonjs-require.ts": 'const command = require("../commands/plan.js");\nvoid command;',
+    "src/core/parenthesized-callee.ts": '(require)("../commands/plan.js");',
     "src/core/parenthesized.ts": [
       'import(("../commands/plan.js"));',
       'require(("../commands/plan.js"));'
@@ -86,6 +87,7 @@ test("architecture contract recognizes supported TypeScript and ESM dependency s
     "src/core/dynamic-import.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/import-equals.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/import-type.ts imports forbidden commands boundary src/commands/plan.ts",
+    "src/core/parenthesized-callee.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/parenthesized.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/static-export.ts imports forbidden commands boundary src/commands/plan.ts",
     "src/core/static-import.ts imports forbidden commands boundary src/commands/plan.ts"
@@ -160,6 +162,15 @@ test("architecture contract rejects imported console object aliases", async () =
       'import * as systemConsole from "console";',
       'systemConsole["error"]("warning");'
     ].join("\n"),
+    "src/core/named-console.ts": [
+      'import { log as emit } from "node:console";',
+      'emit("result");'
+    ].join("\n"),
+    "src/core/shadowed-named-console.ts": [
+      'import { error as emit } from "console";',
+      'function inspect(emit) { emit("local"); }',
+      "void inspect;"
+    ].join("\n"),
     "src/core/shadowed-console.ts": [
       'import systemConsole from "node:console";',
       'function inspect(systemConsole) { systemConsole.log("local"); }',
@@ -169,6 +180,7 @@ test("architecture contract rejects imported console object aliases", async () =
 
   assert.deepEqual(await checkArchitecture(root), [
     "src/core/default-console.ts uses console.log; output must use renderer helpers at the CLI boundary",
+    "src/core/named-console.ts uses console.log; output must use renderer helpers at the CLI boundary",
     "src/core/namespace-console.ts uses console.error; output must use renderer helpers at the CLI boundary"
   ]);
 });
@@ -226,13 +238,15 @@ test("architecture contract normalizes parentheses in direct capability syntax",
     "src/core/computed-console.ts": 'console[("log")]("raw");',
     "src/core/global-console.ts": 'globalThis[("console")].log("raw");',
     "src/core/imported-process.ts": '(await import(("node:process"))).stderr.write("raw");',
+    "src/core/required-process.ts": '(require)("node:process").stderr.write("raw");',
     "src/cli.ts": 'process[("stdout")].write("raw");'
   });
   assert.deepEqual(await checkArchitecture(root), [
     "src/cli.ts writes process.stdout without a renderer helper",
     "src/core/computed-console.ts uses console.log; output must use renderer helpers at the CLI boundary",
     "src/core/global-console.ts uses console.log; output must use renderer helpers at the CLI boundary",
-    "src/core/imported-process.ts uses process.stderr outside the CLI boundary"
+    "src/core/imported-process.ts uses process.stderr outside the CLI boundary",
+    "src/core/required-process.ts uses process.stderr outside the CLI boundary"
   ]);
 });
 

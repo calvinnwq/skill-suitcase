@@ -116,6 +116,7 @@ function analyzeSourceFile(repoRoot, sourceFileSet, filePath, text) {
   const processObjectBindings = new Set();
   const processStreamBindings = new Map();
   const consoleObjectBindings = new Set();
+  const consoleMethodBindings = new Map();
   const rendererBindings = new Map();
   let hasSwitchStatement = false;
 
@@ -129,6 +130,7 @@ function analyzeSourceFile(repoRoot, sourceFileSet, filePath, text) {
     processMembers,
     processStreamBindings,
     consoleObjectBindings,
+    consoleMethodBindings,
     rendererBindings
   );
 
@@ -165,7 +167,7 @@ function analyzeSourceFile(repoRoot, sourceFileSet, filePath, text) {
     }
 
     if (ts.isCallExpression(node)) {
-      const consoleMethod = directConsoleMethod(node, checker, consoleObjectBindings);
+      const consoleMethod = directConsoleMethod(node, checker, consoleObjectBindings, consoleMethodBindings);
       if (consoleMethod !== null) {
         consoleMethods.add(consoleMethod);
       }
@@ -202,6 +204,7 @@ function collectImportedBindings(
   processMembers,
   processStreamBindings,
   consoleObjectBindings,
+  consoleMethodBindings,
   rendererBindings
 ) {
   for (const statement of sourceFile.statements) {
@@ -245,9 +248,14 @@ function collectImportedBindings(
             addObjectBinding(importClause.namedBindings.name, checker, consoleObjectBindings);
           } else {
             for (const element of importClause.namedBindings.elements) {
-              if (!element.isTypeOnly
-                && (element.propertyName?.text ?? element.name.text) === "default") {
+              if (element.isTypeOnly) {
+                continue;
+              }
+              const importedName = element.propertyName?.text ?? element.name.text;
+              if (importedName === "default") {
                 addObjectBinding(element.name, checker, consoleObjectBindings);
+              } else {
+                setMethodBinding(element.name, importedName, checker, consoleMethodBindings);
               }
             }
           }
@@ -338,9 +346,10 @@ function moduleSpecifierFromNode(node) {
     return node.argument.literal.text;
   }
   if (ts.isCallExpression(node) && node.arguments.length >= 1) {
-    const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
-    const isRequire = ts.isIdentifier(node.expression)
-      && node.expression.text === "require";
+    const callee = unwrapExpression(node.expression);
+    const isDynamicImport = callee.kind === ts.SyntaxKind.ImportKeyword;
+    const isRequire = ts.isIdentifier(callee)
+      && callee.text === "require";
     const argument = unwrapExpression(node.arguments[0]);
     if ((isDynamicImport || isRequire) && ts.isStringLiteralLike(argument)) {
       return argument.text;
@@ -447,8 +456,15 @@ function isProcessOutputMethod(method, argumentCount) {
   return method === "write" || (method === "end" && argumentCount > 0);
 }
 
-function directConsoleMethod(node, checker, consoleObjectBindings) {
+function directConsoleMethod(node, checker, consoleObjectBindings, consoleMethodBindings) {
   const callee = unwrapExpression(node.expression);
+  if (ts.isIdentifier(callee)) {
+    const symbol = checker.getSymbolAtLocation(callee);
+    const importedMethod = symbol === undefined ? undefined : consoleMethodBindings.get(symbol);
+    if (importedMethod !== undefined) {
+      return importedMethod;
+    }
+  }
   if (ts.isPropertyAccessExpression(callee)
     && isDirectConsoleObject(callee.expression, checker, consoleObjectBindings)) {
     return callee.name.text;
@@ -600,6 +616,13 @@ function addObjectBinding(identifier, checker, bindings) {
   }
 }
 
+function setMethodBinding(identifier, method, checker, bindings) {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (symbol !== undefined) {
+    bindings.set(symbol, method);
+  }
+}
+
 function setStreamBinding(identifier, stream, checker, processStreamBindings) {
   const symbol = checker.getSymbolAtLocation(identifier);
   if (symbol !== undefined) {
@@ -628,9 +651,10 @@ function isDirectModuleLoader(node, isModuleSpecifier) {
   if (!ts.isStringLiteralLike(argument)) {
     return false;
   }
-  const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
-  const isRequire = ts.isIdentifier(node.expression)
-    && node.expression.text === "require";
+  const callee = unwrapExpression(node.expression);
+  const isDynamicImport = callee.kind === ts.SyntaxKind.ImportKeyword;
+  const isRequire = ts.isIdentifier(callee)
+    && callee.text === "require";
   return (isDynamicImport || isRequire) && isModuleSpecifier(argument.text);
 }
 
