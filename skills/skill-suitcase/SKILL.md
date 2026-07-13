@@ -1,6 +1,6 @@
 ---
 name: skill-suitcase
-description: Use when asked to install, audit, sync, track, reconcile, repair, prune, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import, obsolete-install pruning, and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, shared agents roots, Grok, or another machine using a skills catalog.
+description: Use when asked to install, audit, sync, track, reconcile, repair, prune, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import, obsolete-install pruning, and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, Hermes, shared agents roots, Grok, or another machine using a skills catalog.
 ---
 
 # Skill Suitcase
@@ -189,6 +189,7 @@ same model; do not rewrite the workflow around provider-specific prose.
 | OpenClaw Codex home | `openclaw-codex` | `targets --json` | target-specific Codex home if needed | live only after approval |
 | Generic agent skills root | `agents` | `targets --json` | `--agents-skills` | live only after approval |
 | Claude skills root | `claude` | `targets --json` | `--claude-skills` | live only after approval |
+| Hermes skills root | `hermes` | `targets --json` | `--hermes-skills` | live only after approval |
 | Grok Build skills root | `grok` | `targets --json` | `--grok-skills` | live only after approval |
 | Provider-managed skills | provider-specific | provider/plugin docs | none in Suitcase | read-only or skip; `pack`/mutation commands refuse even custom manifest assignment paths |
 | Future provider | manifest target id | `targets --json` | provider adapter override if supported | read-only until proven |
@@ -212,6 +213,9 @@ Use local overrides on machines whose homes differ from the catalog defaults:
 
 "$CLI" status --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
 "$CLI" diff --source "$SRC" --target claude --claude-skills "$HOME/.claude/skills" --json
+
+"$CLI" status --source "$SRC" --target hermes --hermes-skills "$HOME/.hermes/skills" --json
+"$CLI" diff --source "$SRC" --target hermes --hermes-skills "$HOME/.hermes/skills" --json
 
 "$CLI" status --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json
 "$CLI" diff --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json

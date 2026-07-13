@@ -57,7 +57,10 @@ Available overrides are:
 - `--codex-home <dir>`
 - `--codex-skills <dir>`
 - `--claude-skills <dir>`
+- `--hermes-skills <dir>`
 - `--grok-skills <dir>`
+
+For Hermes, use `--hermes-skills "$HOME/.hermes/skills"` for the default profile or point it at `$HOME/.hermes/profiles/<name>/skills` for a named profile.
 
 ### `plan`
 

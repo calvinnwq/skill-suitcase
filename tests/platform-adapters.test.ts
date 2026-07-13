@@ -17,6 +17,7 @@ test("resolves explicit platform adapters for declared assignment path kinds", (
   const codex = resolvePlatformAdapter("codex-home");
   const nestedCodex = resolvePlatformAdapter("nested-home-codex");
   const claude = resolvePlatformAdapter("claude-skills-root");
+  const hermes = resolvePlatformAdapter("hermes-skills-root");
   const agents = resolvePlatformAdapter("agents-skills-root");
   const grok = resolvePlatformAdapter("grok-skills-root");
 
@@ -41,6 +42,11 @@ test("resolves explicit platform adapters for declared assignment path kinds", (
   assert.equal(claude?.installRootField, "path");
   assert.deepEqual(claude?.requiredFields, ["path"]);
   assert.deepEqual(claude?.compatibilityNames, ["claude"]);
+
+  assert.equal(hermes?.id, "hermes");
+  assert.equal(hermes?.installRootField, "path");
+  assert.deepEqual(hermes?.requiredFields, ["path"]);
+  assert.deepEqual(hermes?.compatibilityNames, ["hermes"]);
 
   assert.equal(agents?.id, "agents");
   assert.equal(agents?.installRootField, "path");
@@ -82,6 +88,17 @@ test("resolves install roots and missing required adapter fields deterministical
   assert.equal(missing.adapter?.id, "codex");
   assert.equal(missing.installRoot, "/tmp/workspace/.codex/skills");
   assert.deepEqual(missing.missingFields, ["home"]);
+
+  const hermesResolved = resolvePlatformInstallRoot({
+    kind: "hermes-skills-root",
+    assignmentPath: {
+      path: "/tmp/hermes/skills"
+    }
+  });
+
+  assert.equal(hermesResolved.ok, true);
+  assert.equal(hermesResolved.adapter?.id, "hermes");
+  assert.equal(hermesResolved.installRoot, "/tmp/hermes/skills");
 });
 
 test("derives compatibility aliases from explicit platform adapter metadata", () => {
@@ -105,6 +122,13 @@ test("derives compatibility aliases from explicit platform adapter metadata", ()
       kind: "grok-skills-root"
     }),
     ["grok-build", "grok"]
+  );
+  assert.deepEqual(
+    platformCompatibilityNames({
+      assignment: "research-profile",
+      kind: "hermes-skills-root"
+    }),
+    ["research-profile", "hermes"]
   );
   assert.deepEqual(
     platformCompatibilityNames({

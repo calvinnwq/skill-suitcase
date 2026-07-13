@@ -36,7 +36,7 @@ Current durable release facts:
 
 The current shipped CLI includes catalog import and validation, strict Skillify
 validation policy, target discovery and local path overrides (including shared
-agents and Grok roots), plans/diffs/status, immutable bundles and plan locks,
+agents, Hermes, and Grok roots), plans/diffs/status, immutable bundles and plan locks,
 transactional copy and symlink apply, receipts and rollback, track/reconcile/
 repair/promote/import-target workflows, manifest logical groups and source
 policy, provider-backed read-only target boundaries, and pinned skills.sh or Git
@@ -237,7 +237,7 @@ Before publishing, verify:
 - Manifest groups are reporting metadata only.
 - `sourcePolicy` and strict-validation skips do not imply broader target write
   or ownership authority.
-- Shared agents, Codex, Claude, and Grok target overrides are documented.
+- Shared agents, Codex, Claude, Hermes, and Grok target overrides are documented.
 - Release verification confirms that the newest non-prerelease GitHub release
   matches npm `latest`.
 

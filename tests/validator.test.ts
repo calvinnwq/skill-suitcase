@@ -12,8 +12,8 @@ test("validates the skills repo fixture", async () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.summary.suitcases, 2);
-  assert.equal(result.summary.assignments, 6);
-  assert.equal(result.summary.assignmentPaths, 6);
+  assert.equal(result.summary.assignments, 7);
+  assert.equal(result.summary.assignmentPaths, 7);
   assert.equal(result.summary.groups, 3);
   assert.equal(result.summary.upstreamDeclarations, 0);
   assert.equal(result.summary.referencedSkills, 3);
