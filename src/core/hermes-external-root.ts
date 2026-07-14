@@ -82,13 +82,23 @@ export async function validateHermesExternalRoot({
     });
   }
 
+  const managedRootCaseInsensitive = await isCaseInsensitiveFilesystem(normalizedRoot);
+  const managedDestinationKey = (value: string) => normalizeFilesystemComparisonPath(
+    path.resolve(value),
+    managedRootCaseInsensitive
+  );
   const plannedDestinations = new Map(
-    plannedIdentities.map((item) => [path.resolve(normalizedRoot, item.destination), {
+    plannedIdentities.map((item) => [managedDestinationKey(path.resolve(normalizedRoot, item.destination)), {
       identity: item.identity,
       sourcePath: item.sourcePath ?? null
     }])
   );
-  const managedShadows = await findSkillShadows(normalizedRoot, plannedSkills, plannedDestinations);
+  const managedShadows = await findSkillShadows(
+    normalizedRoot,
+    plannedSkills,
+    plannedDestinations,
+    managedDestinationKey
+  );
   findings.push(...shadowTraversalFindings(managedShadows.directorySymlinks));
   for (const skill of managedShadows.skills) {
     findings.push({
@@ -269,7 +279,8 @@ async function canonicalizePath(value: string): Promise<string> {
 async function findSkillShadows(
   root: string,
   skills: Set<string>,
-  plannedDestinations: ReadonlyMap<string, { identity: string; sourcePath: string | null }> = new Map()
+  plannedDestinations: ReadonlyMap<string, { identity: string; sourcePath: string | null }> = new Map(),
+  plannedDestinationKey: (value: string) => string = path.resolve
 ): Promise<{ skills: string[]; directorySymlinks: string[] }> {
   const found = new Set<string>();
   const directorySymlinks = new Set<string>();
@@ -288,7 +299,7 @@ async function findSkillShadows(
       continue;
     }
     const identity = await readLocalSkillIdentity(current, path.basename(current));
-    const plannedDestination = plannedDestinations.get(path.resolve(current));
+    const plannedDestination = plannedDestinations.get(plannedDestinationKey(current));
     if (identity !== null && skills.has(identity) && identity !== plannedDestination?.identity) found.add(identity);
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
@@ -296,7 +307,7 @@ async function findSkillShadows(
       if (identity !== null && HERMES_SKILL_SUPPORT_DIRECTORIES.has(entry.name)) continue;
       const child = path.join(current, entry.name);
       if (entry.isSymbolicLink()) {
-        const plannedChild = plannedDestinations.get(path.resolve(child));
+        const plannedChild = plannedDestinations.get(plannedDestinationKey(child));
         if (plannedChild !== undefined && await isExpectedPlannedSkillSymlink(child, plannedChild)) {
           pending.push(child);
           continue;
@@ -383,7 +394,11 @@ function isInsideOrEqual(candidate: string, root: string): boolean {
 }
 
 async function filesystemComparisonPath(value: string): Promise<string> {
-  return await isCaseInsensitiveFilesystem(value) ? value.toLocaleLowerCase("en-US") : value;
+  return normalizeFilesystemComparisonPath(value, await isCaseInsensitiveFilesystem(value));
+}
+
+function normalizeFilesystemComparisonPath(value: string, caseInsensitive: boolean): string {
+  return caseInsensitive ? value.toLocaleLowerCase("en-US") : value;
 }
 
 async function isCaseInsensitiveFilesystem(value: string): Promise<boolean> {

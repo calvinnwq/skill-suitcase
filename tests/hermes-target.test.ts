@@ -1009,6 +1009,38 @@ test("categorized Hermes symlink materialization remains valid for apply, status
   assert.equal(shadowed.stdout.errors.some((error) => error.code === "hermes_shadow_directory_symlink"), true);
 });
 
+test("categorized Hermes status and diff match planned destinations across category casing", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  const result = await apply({
+    source: fixture.source,
+    target: "hermes",
+    artifact: fixture.artifactPath
+  });
+  assert.equal(result.ok, true);
+
+  const mixedCaseCategory = path.join(fixture.externalRoot, "Productivity");
+  try {
+    await realpath(mixedCaseCategory);
+  } catch {
+    t.skip("requires a case-insensitive filesystem");
+    return;
+  }
+  await rename(fixture.category, mixedCaseCategory);
+
+  const targetArgs = ["--source", fixture.source, "--target", "hermes", "--json"];
+  const settled = runCli<{ ok: boolean; summary: { current: number } }>([
+    "status", ...targetArgs
+  ]);
+  assert.equal(settled.ok, true);
+  assert.equal(settled.summary.current, 1);
+
+  const unchanged = runCli<{ ok: boolean; summary: { unchanged: number } }>([
+    "diff", ...targetArgs
+  ]);
+  assert.equal(unchanged.ok, true);
+  assert.equal(unchanged.summary.unchanged, 1);
+});
+
 test("categorized Hermes symlink apply cleanup refuses a replaced category", async (t) => {
   const fixture = await createCategorizedRecoveryFixture(t);
   const retainedCategory = path.join(fixture.sandbox, "retained-symlink-category");
