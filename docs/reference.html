@@ -234,8 +234,8 @@ skill-suitcase pack \
                 participates in the artifact ID. It does not touch the live target.
               </p>
               <p>
-                Pack refuses output beneath an absolute manifest-declared install
-                root, selected untracked non-ignored source files,
+                Pack refuses output beneath an absolute resolved install root,
+                including CLI target overrides, selected untracked non-ignored source files,
                 <code>sourcePolicy.deny</code> matches, and provider-managed
                 read-only targets. Always stage into a temporary directory outside
                 both the catalog and every resolved target root; old artifact

@@ -2,7 +2,10 @@ import { realpath } from "node:fs/promises";
 import path from "node:path";
 
 export function normalizeFilesystemComparisonPath(value: string, caseInsensitive: boolean): string {
-  return caseInsensitive ? value.toLocaleLowerCase("en-US") : value;
+  const canonicallyNormalized = value.normalize("NFC");
+  return caseInsensitive
+    ? canonicallyNormalized.toLocaleLowerCase("en-US").normalize("NFC")
+    : canonicallyNormalized;
 }
 
 export async function filesystemComparisonPath(value: string): Promise<string> {

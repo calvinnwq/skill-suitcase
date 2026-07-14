@@ -965,6 +965,42 @@ test("categorized Hermes rejects planned destinations that alias on the target f
     caseConflict.some((finding) => finding.code === "hermes_planned_destination_conflict"),
     await isCaseInsensitiveFilesystem(installRoot)
   );
+
+  const unicodeConflict = await validateHermesExternalRoot({
+    home: hermesHome,
+    installRoot,
+    planned: [
+      { skill: "cafe-nfc", destination: path.join("productivity", "caf\u00e9") },
+      { skill: "cafe-nfd", destination: path.join("productivity", "cafe\u0301") }
+    ]
+  });
+  assert.equal(
+    unicodeConflict.some((finding) => finding.code === "hermes_planned_destination_conflict"),
+    true
+  );
+});
+
+test("categorized Hermes fails closed for non-string external directory entries", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-non-string-root-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const hermesHome = path.join(sandbox, "hermes");
+  const installRoot = path.join(sandbox, "external");
+  await mkdir(installRoot, { recursive: true });
+  await mkdir(hermesHome, { recursive: true });
+  await writeFile(
+    path.join(hermesHome, "config.yaml"),
+    `skills:\n  external_dirs:\n    - 123\n    - ${installRoot}\n`
+  );
+
+  const findings = await validateHermesExternalRoot({
+    home: hermesHome,
+    installRoot,
+    planned: [{ skill: "hello-hermes", destination: path.join("productivity", "hello-hermes") }]
+  });
+  assert.equal(
+    findings.some((finding) => finding.code === "hermes_external_root_unregistered"),
+    true
+  );
 });
 
 test("categorized Hermes copy apply retains and reports an unsafe rollback backup", async (t) => {

@@ -265,7 +265,12 @@ function parseExternalDirs(text: string): string[] {
   const value = (skills as Record<string, unknown>)["external_dirs"];
   if (typeof value === "string") return [value];
   if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
+  return value.map((entry) => {
+    if (typeof entry !== "string") {
+      throw new Error(`skills.external_dirs entry ${JSON.stringify(entry)} must be a string.`);
+    }
+    return entry;
+  });
 }
 
 function normalizeConfiguredPath(value: string, hermesHome: string): string | null {
