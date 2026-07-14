@@ -900,6 +900,56 @@ test("categorized Hermes apply refuses an unowned exact planned destination", as
   assert.equal(await readFile(path.join(fixture.targetSkill, "SKILL.md"), "utf8"), "unowned target\n");
 });
 
+test("categorized Hermes symlink materialization remains valid for apply, status, and diff", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+
+  const result = await apply({
+    source: fixture.source,
+    target: "hermes",
+    artifact: fixture.artifactPath,
+    mode: "symlink"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(await readlink(fixture.targetSkill), fixture.sourceSkill);
+  assert.equal(result.postApplyStatus?.ok, true);
+  assert.equal(result.postApplyStatus?.summary.current, 1);
+
+  const targetArgs = ["--source", fixture.source, "--target", "hermes", "--json"];
+  const settled = runCli<{ ok: boolean; summary: { current: number } }>([
+    "status", ...targetArgs
+  ]);
+  assert.equal(settled.ok, true);
+  assert.equal(settled.summary.current, 1);
+
+  const unchanged = runCli<{ ok: boolean; summary: { unchanged: number } }>([
+    "diff", ...targetArgs
+  ]);
+  assert.equal(unchanged.ok, true);
+  assert.equal(unchanged.summary.unchanged, 1);
+
+  const nestedDirectory = path.join(fixture.sandbox, "nested-symlink-directory");
+  await mkdir(nestedDirectory);
+  await symlink(nestedDirectory, path.join(fixture.sourceSkill, "linked-directory"), "dir");
+  const nestedShadow = runCliResult<{ errors: Array<{ code: string }> }>([
+    "status", ...targetArgs
+  ]);
+  assert.notEqual(nestedShadow.status, 0);
+  assert.equal(nestedShadow.stdout.errors.some((error) => error.code === "hermes_shadow_directory_symlink"), true);
+  await rm(path.join(fixture.sourceSkill, "linked-directory"));
+
+  const unexpectedSource = path.join(fixture.sandbox, "unexpected-symlink-source");
+  await mkdir(unexpectedSource);
+  await writeFile(path.join(unexpectedSource, "SKILL.md"), "---\nname: hello-hermes\n---\n# Unexpected\n");
+  await rm(fixture.targetSkill);
+  await symlink(unexpectedSource, fixture.targetSkill, "dir");
+  const shadowed = runCliResult<{ errors: Array<{ code: string }> }>([
+    "status", ...targetArgs
+  ]);
+  assert.notEqual(shadowed.status, 0);
+  assert.equal(shadowed.stdout.errors.some((error) => error.code === "hermes_shadow_directory_symlink"), true);
+});
+
 test("categorized Hermes symlink apply cleanup refuses a replaced category", async (t) => {
   const fixture = await createCategorizedRecoveryFixture(t);
   const retainedCategory = path.join(fixture.sandbox, "retained-symlink-category");

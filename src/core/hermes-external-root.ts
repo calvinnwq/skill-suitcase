@@ -6,6 +6,7 @@ import {
   HERMES_EXCLUDED_SKILL_DIRECTORIES,
   HERMES_SKILL_SUPPORT_DIRECTORIES
 } from "./hermes-categories.js";
+import { classifySymlinkInstall } from "./install-modes.js";
 
 export type HermesExternalRootFinding = {
   code: string;
@@ -82,7 +83,10 @@ export async function validateHermesExternalRoot({
   }
 
   const plannedDestinations = new Map(
-    plannedIdentities.map((item) => [path.resolve(normalizedRoot, item.destination), item.identity])
+    plannedIdentities.map((item) => [path.resolve(normalizedRoot, item.destination), {
+      identity: item.identity,
+      sourcePath: item.sourcePath ?? null
+    }])
   );
   const managedShadows = await findSkillShadows(normalizedRoot, plannedSkills, plannedDestinations);
   findings.push(...shadowTraversalFindings(managedShadows.directorySymlinks));
@@ -265,7 +269,7 @@ async function canonicalizePath(value: string): Promise<string> {
 async function findSkillShadows(
   root: string,
   skills: Set<string>,
-  plannedDestinations: ReadonlyMap<string, string> = new Map()
+  plannedDestinations: ReadonlyMap<string, { identity: string; sourcePath: string | null }> = new Map()
 ): Promise<{ skills: string[]; directorySymlinks: string[] }> {
   const found = new Set<string>();
   const directorySymlinks = new Set<string>();
@@ -284,14 +288,19 @@ async function findSkillShadows(
       continue;
     }
     const identity = await readLocalSkillIdentity(current, path.basename(current));
-    const plannedSkill = plannedDestinations.get(path.resolve(current));
-    if (identity !== null && skills.has(identity) && identity !== plannedSkill) found.add(identity);
+    const plannedDestination = plannedDestinations.get(path.resolve(current));
+    if (identity !== null && skills.has(identity) && identity !== plannedDestination?.identity) found.add(identity);
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       if (HERMES_EXCLUDED_SKILL_DIRECTORIES.has(entry.name)) continue;
       if (identity !== null && HERMES_SKILL_SUPPORT_DIRECTORIES.has(entry.name)) continue;
       const child = path.join(current, entry.name);
       if (entry.isSymbolicLink()) {
+        const plannedChild = plannedDestinations.get(path.resolve(child));
+        if (plannedChild !== undefined && await isExpectedPlannedSkillSymlink(child, plannedChild)) {
+          pending.push(child);
+          continue;
+        }
         if (await isDirectory(await canonicalizePath(child))) directorySymlinks.add(child);
         continue;
       }
@@ -304,6 +313,19 @@ async function findSkillShadows(
     skills: [...found].sort((left, right) => left.localeCompare(right)),
     directorySymlinks: [...directorySymlinks].sort((left, right) => left.localeCompare(right))
   };
+}
+
+async function isExpectedPlannedSkillSymlink(
+  targetPath: string,
+  planned: { identity: string; sourcePath: string | null }
+): Promise<boolean> {
+  if (planned.sourcePath === null) return false;
+  const classification = await classifySymlinkInstall({
+    targetPath,
+    expectedSourcePath: planned.sourcePath
+  });
+  if (classification.state !== "correct") return false;
+  return await readLocalSkillIdentity(targetPath, path.basename(targetPath)) === planned.identity;
 }
 
 function shadowTraversalFindings(directorySymlinks: string[]): HermesExternalRootFinding[] {
