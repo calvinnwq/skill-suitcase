@@ -739,6 +739,14 @@ function wrapperCommandIndex(executable: string, words: Word[]): number | null {
   return index < words.length ? index : null;
 }
 
+function wrappedCommandWords(executable: string, words: Word[]): Word[] | null {
+  if (!EXECUTION_WRAPPERS.has(executable)) return null;
+  if (executable === "command" && words.some((word) => word.value === "-v" || word.value === "-V")) return null;
+  if (executable === "sudo" && words.some((word) => word.value === "-e" || word.value === "--edit")) return null;
+  const commandIndex = wrapperCommandIndex(executable, words);
+  return commandIndex === null ? null : words.slice(commandIndex);
+}
+
 function invocationFromWords(
   words: Word[],
   dialect: ShellDialect,
@@ -771,27 +779,23 @@ function invocationFromWords(
   const packageInvocation = packageRunnerInvocation(words, dialect);
   if (packageInvocation !== null) return packageInvocation;
 
-  if (!EXECUTION_WRAPPERS.has(executable)) return null;
-  if (executable === "command" && words.some((word) => word.value === "-v" || word.value === "-V")) return null;
-  if (executable === "sudo" && words.some((word) => word.value === "-e" || word.value === "--edit")) return null;
-
-  const commandIndex = wrapperCommandIndex(executable, words);
-  return commandIndex === null
+  const wrappedWords = wrappedCommandWords(executable, words);
+  return wrappedWords === null
     ? null
-    : invocationFromWords(words.slice(commandIndex), dialect, dialect === "powershell");
+    : invocationFromWords(wrappedWords, dialect, dialect === "powershell");
 }
 
-function nestedCommandExample(command: Command, inheritedLanguage?: string): CommandExample | null {
+function nestedCommandExampleFromWords(words: Word[], inheritedLanguage?: string): CommandExample | null {
   const dialect = shellDialect(inheritedLanguage);
-  const name = executableName(command.name?.value ?? "", dialect);
-  const words = command.suffix;
+  const name = executableName(words[0]?.value ?? "", dialect);
+  const suffix = words.slice(1);
 
   if (SHELL_EXECUTORS.has(name)) {
     const powershell = name === "powershell" || name === "powershell.exe" || name === "pwsh" || name === "pwsh.exe";
-    const option = words.findIndex((word) => powershell
+    const option = suffix.findIndex((word) => powershell
       ? /^-(?:c|command)$/i.test(word.value)
       : /^-[a-z]*c[a-z]*$/i.test(word.value));
-    const contents = option >= 0 ? words[option + 1]?.value : undefined;
+    const contents = option >= 0 ? suffix[option + 1]?.value : undefined;
     if (contents === undefined) return null;
     const language = name === "fish"
       ? "fish"
@@ -802,21 +806,36 @@ function nestedCommandExample(command: Command, inheritedLanguage?: string): Com
   }
 
   if (name === "cmd" || name === "cmd.exe") {
-    const option = words.findIndex((word) => /(?:^|\/)c$/i.test(word.value));
+    const option = suffix.findIndex((word) => /(?:^|\/)c$/i.test(word.value));
     return option >= 0
-      ? { block: true, contents: words.slice(option + 1).map((word) => word.value).join(" ") }
+      ? { block: true, contents: suffix.slice(option + 1).map((word) => word.value).join(" ") }
       : null;
   }
 
   if (name === "env") {
-    const option = words.findIndex((word) => word.value === "-S" || word.value === "--split-string");
-    const contents = option >= 0 ? words[option + 1]?.value : undefined;
-    return contents === undefined
-      ? null
-      : { block: true, contents, ...(inheritedLanguage === undefined ? {} : { language: inheritedLanguage }) };
+    const option = suffix.findIndex((word) => word.value === "-S" || word.value === "--split-string");
+    const contents = option >= 0 ? suffix[option + 1]?.value : undefined;
+    if (contents !== undefined) {
+      return { block: true, contents, ...(inheritedLanguage === undefined ? {} : { language: inheritedLanguage }) };
+    }
   }
 
-  return null;
+  if (name === "eval" && dialect !== "powershell" && suffix.length > 0) {
+    return {
+      block: true,
+      contents: suffix.map((word) => word.value).join(" "),
+      ...(inheritedLanguage === undefined ? {} : { language: inheritedLanguage })
+    };
+  }
+
+  const wrappedWords = wrappedCommandWords(name, words);
+  return wrappedWords === null
+    ? null
+    : nestedCommandExampleFromWords(wrappedWords, inheritedLanguage);
+}
+
+function nestedCommandExample(command: Command, inheritedLanguage?: string): CommandExample | null {
+  return nestedCommandExampleFromWords(commandWords(command), inheritedLanguage);
 }
 
 function commandWords(command: Command): Word[] {
@@ -1112,6 +1131,8 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "pnpm dlx skill-suitcase@latest bogus --json",
     "yarn dlx skill-suitcase@latest bogus --json",
     "sh -c 'skill-suitcase bogus --json'",
+    "eval 'skill-suitcase bogus --json'",
+    "exec sh -c 'skill-suitcase bogus --json'",
     "cmd /c skill-suitcase bogus --json",
     "not skill-suitcase bogus --json"
   ];
@@ -1124,6 +1145,20 @@ test("launcher normalization covers wrappers, runners, paths, and command string
   }
 
   assert.equal(validateCliExamples("fixture.md", markdownFixture("node \"$CLI\" status --source . --json")), 1);
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("exec sh -c 'skill-suitcase status --source . --json'")
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("eval 'skill-suitcase status --source . --json'")
+    ),
+    1
+  );
   for (const source of [
     "node --check dist/src/cli.js status --source . --json",
     "node -e dist/src/cli.js status --source . --json",
