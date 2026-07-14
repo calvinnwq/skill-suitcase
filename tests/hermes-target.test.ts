@@ -201,6 +201,65 @@ compatibility:
   assert.equal(settled.summary.current, 1);
 });
 
+test("Hermes path override applies to a named categorized target", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-named-override-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+
+  const source = path.join(sandbox, "catalog");
+  const sourceSkill = path.join(source, "skills", "hello-hermes");
+  const hermesHome = path.join(sandbox, "hermes");
+  const manifestRoot = path.join(sandbox, "manifest-external");
+  const overrideRoot = path.join(sandbox, "override-external");
+  const artifactRoot = path.join(sandbox, "pack");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(path.join(hermesHome, "skills"), { recursive: true });
+  await mkdir(overrideRoot, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: hello-hermes\n---\n# Hello\n");
+  await writeFile(path.join(hermesHome, "config.yaml"), `skills:\n  external_dirs: ${overrideRoot}\n`);
+  await writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - hello-hermes
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      hello-hermes: productivity
+assignmentPaths:
+  hermes-external:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: ${hermesHome}
+    path: ${manifestRoot}
+compatibility:
+  hello-hermes:
+    agents:
+      - hermes
+`);
+
+  const targetArgs = [
+    "--source", source,
+    "--target", "hermes-external",
+    "--hermes-skills", overrideRoot,
+    "--json"
+  ];
+  const packed = runCli<{ bundle: { artifactPath: string } }>([
+    "pack", ...targetArgs, "--output", artifactRoot
+  ]);
+  const applied = runCli<{ ok: boolean; applied: { skills: string[] } }>([
+    "apply", ...targetArgs, "--artifact", packed.bundle.artifactPath
+  ]);
+
+  assert.equal(applied.ok, true);
+  assert.deepEqual(applied.applied.skills, ["hello-hermes"]);
+  assert.equal(
+    await readFile(path.join(overrideRoot, "productivity", "hello-hermes", "SKILL.md"), "utf8"),
+    "---\nname: hello-hermes\n---\n# Hello\n"
+  );
+  await assert.rejects(readFile(path.join(manifestRoot, "productivity", "hello-hermes", "SKILL.md"), "utf8"));
+});
+
 test("categorized Hermes external root preserves one receipt through plan, pack, apply, status, diff, repair, and prune", async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-external-"));
   t.after(() => rm(sandbox, { recursive: true, force: true }));
