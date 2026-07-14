@@ -109,19 +109,21 @@ const NO_WRAPPER_FLAG_OPTIONS = new Set<string>();
 const NO_WRAPPER_OPTIONAL_VALUE_OPTIONS = new Map<string, RegExp>();
 const NO_WRAPPER_VALUE_OPTIONS = new Set<string>();
 const WRAPPER_FLAG_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
-  command: new Set(["-p"]),
+  command: new Set(["-p", "-v", "-V"]),
   env: new Set(["-i", "-v", "--debug", "--ignore-environment"]),
   exec: new Set(["-c", "-l"]),
   sudo: new Set([
     "-A",
     "-b",
     "-E",
+    "-e",
     "-H",
     "-n",
     "-P",
     "-S",
     "--askpass",
     "--background",
+    "--edit",
     "--non-interactive",
     "--set-home",
     "--stdin"
@@ -169,7 +171,7 @@ const WRAPPER_OPTIONAL_VALUE_OPTIONS: Readonly<Record<string, ReadonlyMap<string
   ])
 };
 const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
-  env: new Set(["-a", "-C", "-u", "--argv0", "--chdir", "--unset"]),
+  env: new Set(["-a", "-C", "-P", "-S", "-u", "--argv0", "--chdir", "--split-string", "--unset"]),
   exec: new Set(["-a"]),
   nice: new Set(["-n", "--adjustment"]),
   sudo: new Set([
@@ -1029,18 +1031,114 @@ function wrapperCommandIndex(executable: string, words: Word[]): number | null {
     index += valueMode === "separate" ? 2 : 1;
   }
 
-  if (executable === "env") {
+  if (executable === "env" || executable === "sudo") {
     while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]?.value ?? "")) index += 1;
   }
   if (executable === "timeout") index += 1;
   return index < words.length ? index : null;
 }
 
+function wrapperPrefixHasOption(
+  executable: string,
+  words: Word[],
+  commandIndex: number | null,
+  option: string
+): boolean {
+  const optionalValueOptions = WRAPPER_OPTIONAL_VALUE_OPTIONS[executable] ?? NO_WRAPPER_OPTIONAL_VALUE_OPTIONS;
+  const valueOptions = WRAPPER_VALUE_OPTIONS[executable] ?? NO_WRAPPER_VALUE_OPTIONS;
+  const prefixEnd = commandIndex ?? words.length;
+
+  for (let index = 1; index < prefixEnd; index += 1) {
+    const token = words[index]?.value ?? "";
+    if (option.startsWith("--")) {
+      if (token === option) return true;
+    } else if (/^-[^-]/.test(token)) {
+      for (let character = 1; character < token.length; character += 1) {
+        const shortOption = `-${token[character] ?? ""}`;
+        if (shortOption === option) return true;
+        if (optionalValueOptions.has(shortOption) || valueOptions.has(shortOption)) break;
+      }
+    }
+    if (wrapperOptionValueMode(token, valueOptions) === "separate") index += 1;
+  }
+  return false;
+}
+
+function envSplitStringWords(contents: string): string[] {
+  assert.doesNotMatch(contents, /[\\$`|&;<>()\r\n]/, "unsupported env -S split string syntax");
+  if (contents.trim() === "") return [];
+  const commands = parseCommandExample("env -S split string", { block: true, contents });
+  assert.equal(commands.length, 1, "env -S split string must contain one argument vector");
+  return commandWords(commands[0] ?? assert.fail("env -S split string is empty")).map((word) => word.value);
+}
+
+function expandedEnvSplitWords(words: Word[]): string[] | null {
+  const flagOptions = WRAPPER_FLAG_OPTIONS.env ?? NO_WRAPPER_FLAG_OPTIONS;
+  const optionalValueOptions = WRAPPER_OPTIONAL_VALUE_OPTIONS.env ?? NO_WRAPPER_OPTIONAL_VALUE_OPTIONS;
+  const valueOptions = WRAPPER_VALUE_OPTIONS.env ?? NO_WRAPPER_VALUE_OPTIONS;
+
+  for (let index = 1; index < words.length; index += 1) {
+    const token = words[index]?.value ?? "";
+    if (token === "--" || !token.startsWith("-") || token === "-") return null;
+    assert.ok(
+      isSupportedWrapperOption(token, flagOptions, optionalValueOptions, valueOptions),
+      `unsupported env wrapper option: ${token}`
+    );
+    if (token === "-S" || token === "--split-string") {
+      const contents = words[index + 1]?.value;
+      return contents === undefined
+        ? null
+        : [
+          ...words.slice(0, index).map((word) => word.value),
+          ...envSplitStringWords(contents),
+          ...words.slice(index + 2).map((word) => word.value)
+        ];
+    }
+    if (token.startsWith("--split-string=")) {
+      return [
+        ...words.slice(0, index).map((word) => word.value),
+        ...envSplitStringWords(token.slice("--split-string=".length)),
+        ...words.slice(index + 1).map((word) => word.value)
+      ];
+    }
+    if (/^-[^-]/.test(token)) {
+      for (let character = 1; character < token.length; character += 1) {
+        const option = `-${token[character] ?? ""}`;
+        if (option === "-S") {
+          const attachedValue = token.slice(character + 1);
+          const contents = attachedValue === "" ? words[index + 1]?.value : attachedValue;
+          if (contents === undefined) return null;
+          const retainedOptions = token.slice(0, character);
+          const trailingIndex = attachedValue === "" ? index + 2 : index + 1;
+          return [
+            ...words.slice(0, index).map((word) => word.value),
+            ...(retainedOptions === "-" ? [] : [retainedOptions]),
+            ...envSplitStringWords(contents),
+            ...words.slice(trailingIndex).map((word) => word.value)
+          ];
+        }
+        if (valueOptions.has(option)) break;
+      }
+    }
+    if (wrapperOptionValueMode(token, valueOptions) === "separate") index += 1;
+  }
+  return null;
+}
+
 function wrappedCommandWords(executable: string, words: Word[]): Word[] | null {
   if (!EXECUTION_WRAPPERS.has(executable)) return null;
-  if (executable === "command" && words.some((word) => word.value === "-v" || word.value === "-V")) return null;
-  if (executable === "sudo" && words.some((word) => word.value === "-e" || word.value === "--edit")) return null;
+  if (executable === "env" && expandedEnvSplitWords(words) !== null) return null;
   const commandIndex = wrapperCommandIndex(executable, words);
+  if (
+    executable === "command"
+    && (wrapperPrefixHasOption(executable, words, commandIndex, "-v")
+      || wrapperPrefixHasOption(executable, words, commandIndex, "-V"))
+  ) return null;
+  if (
+    executable === "sudo"
+    && (wrapperPrefixHasOption(executable, words, commandIndex, "-e")
+      || wrapperPrefixHasOption(executable, words, commandIndex, "--edit"))
+  ) return null;
   return commandIndex === null ? null : words.slice(commandIndex);
 }
 
@@ -1215,10 +1313,13 @@ function nestedCommandExamplesFromWords(words: Word[], inheritedLanguage?: strin
   }
 
   if (name === "env") {
-    const option = suffix.findIndex((word) => word.value === "-S" || word.value === "--split-string");
-    const contents = option >= 0 ? suffix[option + 1]?.value : undefined;
-    if (contents !== undefined) {
-      return [{ block: true, contents, ...(inheritedLanguage === undefined ? {} : { language: inheritedLanguage }) }];
+    const expandedWords = expandedEnvSplitWords(words);
+    if (expandedWords !== null) {
+      return [{
+        block: true,
+        contents: renderArgv(expandedWords),
+        ...(inheritedLanguage === undefined ? {} : { language: inheritedLanguage })
+      }];
     }
   }
 
@@ -1576,8 +1677,17 @@ test("launcher normalization covers wrappers, runners, paths, and command string
   const invalidLaunchers = [
     "./dist/src/cli.js bogus --json",
     "env -i skill-suitcase bogus --json",
+    "env -S 'skill-suitcase bogus --json'",
+    "env --split-string='skill-suitcase bogus --json'",
+    "env -vS'skill-suitcase bogus --json'",
+    "env -vS 'skill-suitcase bogus --json'",
+    "env -vS'-i skill-suitcase bogus --json'",
+    "env --split-string='skill-suitcase bogus' --json",
+    "env -S 'HOME=/tmp skill-suitcase bogus --json'",
     "sudo -Eu root skill-suitcase bogus --json",
+    "sudo HOME=/tmp skill-suitcase bogus --json",
     "sudo -E command -- skill-suitcase bogus --json",
+    "command -p skill-suitcase bogus --json -v",
     "nohup skill-suitcase bogus --json",
     "nice -n 5 skill-suitcase bogus --json",
     "timeout -sTERM 30 skill-suitcase bogus --json",
@@ -1626,12 +1736,42 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     ),
     /unsupported env wrapper option: --definitely-invalid/
   );
+  for (const option of ["-0", "--null"]) {
+    assert.throws(
+      () => validateCliExamples(
+        "fixture.md",
+        markdownFixture(`env ${option} skill-suitcase status --source . --json`)
+      ),
+      new RegExp(`unsupported env wrapper option: ${option}`)
+    );
+  }
   assert.throws(
     () => validateCliExamples(
       "fixture.md",
-      markdownFixture("env -0 skill-suitcase status --source . --json")
+      markdownFixture("env -S 'skill-suitcase\\_bogus --json'")
     ),
-    /unsupported env wrapper option: -0/
+    /unsupported env -S split string syntax/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("env -S 'skill-suitcase status --source . --json >out'")
+    ),
+    /unsupported env -S split string syntax/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("command --definitely-invalid -v skill-suitcase")
+    ),
+    /unsupported command wrapper option: --definitely-invalid/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("sudo --definitely-invalid -e skill-suitcase")
+    ),
+    /unsupported sudo wrapper option: --definitely-invalid/
   );
   assert.equal(
     validateCliExamples(
@@ -1641,6 +1781,12 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     1
   );
   for (const source of [
+    "env -P /tmp skill-suitcase status --source . --json",
+    "env --split-string 'skill-suitcase status --source . --json'",
+    "env --split-string='skill-suitcase status --source . --json'",
+    "env -vS'skill-suitcase status --source . --json'",
+    "env -vS 'skill-suitcase status --source . --json'",
+    "env --split-string='skill-suitcase status' --source . --json",
     "sudo --preserve-env=HOME,PATH skill-suitcase status --source . --json",
     "timeout -f -p 5 skill-suitcase status --source . --json",
     "timeout -v 5 skill-suitcase status --source . --json",
@@ -1725,6 +1871,13 @@ test("launcher normalization covers wrappers, runners, paths, and command string
   );
   assert.equal(validateCliExamples("fixture.md", markdownFixture("xargs -n1 echo skill-suitcase bogus --json")), 0);
   assert.equal(validateCliExamples("fixture.md", markdownFixture("command -v skill-suitcase || true")), 0);
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("env -S='skill-suitcase status --source . --json'")
+    ),
+    0
+  );
   assert.equal(validateCliExamples("fixture.md", markdownFixture("printf '%s\\n' 'skill-suitcase bogus --json'")), 0);
   assert.throws(
     () => validateCliExamples("fixture.md", markdownFixture("npm exec skill-suitcase bogus --json")),
