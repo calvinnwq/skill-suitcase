@@ -241,7 +241,9 @@ export async function apply({
     });
   }
 
-  const diffResult = await diff({ source, target, targetOverrides }) as DiffForApply;
+  const resolutionTarget = context.assignmentPath ?? target;
+  const resolvedDiffResult = await diff({ source, target: resolutionTarget, targetOverrides });
+  const diffResult = { ...resolvedDiffResult, target } as DiffForApply;
   if (diffResult.readOnly === true) {
     return failure({
       source: diffResult.source,
@@ -327,7 +329,7 @@ export async function apply({
     return await withReceiptLock({ installRoot }, async (receiptLock) => {
     const preStatus = await status({
     source: diffResult.source,
-    target,
+    target: resolutionTarget,
     targetOverrides
   });
   const receipt = await readReceipt({ installRoot }).catch((): Receipt => ({}));
@@ -435,6 +437,7 @@ export async function apply({
       preApplySummary,
       targetOverrides,
       target,
+      statusTarget: resolutionTarget,
       sourcePolicy: manifest.sourcePolicy,
       receiptLock,
       __test
@@ -707,7 +710,7 @@ export async function apply({
   try {
     postApplyStatus = await status({
       source: diffResult.source,
-      target,
+      target: resolutionTarget,
       targetOverrides
     });
   } catch {
@@ -833,6 +836,7 @@ async function applySymlinkInstalls({
   preApplySummary,
   targetOverrides,
   target,
+  statusTarget,
   sourcePolicy,
   receiptLock,
   __test
@@ -845,6 +849,7 @@ async function applySymlinkInstalls({
   preApplySummary: ApplyStatusSummary;
   targetOverrides: TargetOverrides | undefined;
   target: string;
+  statusTarget: string;
   sourcePolicy: SourcePolicy | undefined;
   receiptLock: import("../receipts/index.js").ReceiptLock;
   __test: ApplyInput["__test"];
@@ -1047,7 +1052,7 @@ async function applySymlinkInstalls({
 
   let postApplyStatus: StatusResult | null = null;
   try {
-    postApplyStatus = await status({ source: sourceRoot, target, targetOverrides });
+    postApplyStatus = await status({ source: sourceRoot, target: statusTarget, targetOverrides });
   } catch {
     postApplyStatus = null;
   }
@@ -1178,6 +1183,7 @@ type ApprovalContext = {
   input: string;
   sourceCommit: string;
   approvedSkills: string[];
+  assignmentPath?: string | undefined;
   approvedDestinations?: Map<string, string>;
   approvedFileHashes: Map<string, Map<string, string>> | null;
   errors: ApplyFinding[];
@@ -1264,6 +1270,7 @@ async function resolveLockContext({ lockPath, source, target }: {
     input: resolved,
     sourceCommit: lock.source.commit ?? "",
     approvedSkills: lock.selectedSkills,
+    assignmentPath: lock.assignmentPath ?? target,
     approvedFileHashes: fileHashesToMap(lock.fileHashes),
     errors: []
   };
