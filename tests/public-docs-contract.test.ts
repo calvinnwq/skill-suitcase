@@ -59,6 +59,7 @@ const CLI_VALUE_FLAGS = new Set([
   "--target-skill"
 ]);
 const POWERSHELL_CALL_WRAPPER = "__powershell_call__";
+const CMD_FLAG_OPTIONS = new Set(["/?", "/a", "/d", "/q", "/s", "/u"]);
 const EXECUTION_WRAPPERS = new Set([
   "and",
   "command",
@@ -451,7 +452,7 @@ interface HtmlNode {
 
 function publicDocumentPaths(): string[] {
   const paths = readdirSync(".", { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "CHANGELOG.md")
     .map((entry) => entry.name);
 
   function visit(directory: string): void {
@@ -548,8 +549,70 @@ function markdownCommandExamples(contents: string): CommandExample[] {
   const root = fromMarkdown(contents) as unknown as MarkdownNode;
   const examples: CommandExample[] = [];
 
-  function visit(node: MarkdownNode): void {
-    if ((node.type === "code" || node.type === "inlineCode") && node.value !== undefined && hasCliReference(node.value)) {
+  function inlineChunks(
+    node: MarkdownNode,
+    formatted = false
+  ): Array<{ formatted: boolean; inlineCode: boolean; text: string }> {
+    if (node.type === "text" || node.type === "inlineCode") {
+      return [{
+        formatted: formatted || node.type === "inlineCode",
+        inlineCode: node.type === "inlineCode",
+        text: node.value ?? ""
+      }];
+    }
+    const prose = node.type === "heading" || node.type === "paragraph" || node.type === "tableCell";
+    return (node.children ?? []).flatMap((child) => inlineChunks(child, formatted || !prose));
+  }
+
+  function proseExamples(node: MarkdownNode): CommandExample[] {
+    const chunks = inlineChunks(node);
+    const text = chunks.map((chunk) => chunk.text).join("");
+    const spans = chunks.map((chunk, index) => ({
+      chunk,
+      end: chunks.slice(0, index + 1).reduce((length, item) => length + item.text.length, 0)
+    }));
+    const launchers = [...text.matchAll(
+      /(?<![A-Za-z0-9._~/-])(?:skill-suitcase|\$\{?CLI\}?|dist[\\/]src[\\/]cli\.js)(?=\s|$)/gi
+    )];
+    const extracted: CommandExample[] = [];
+
+    for (let index = 0; index < launchers.length; index += 1) {
+      const launcher = launchers[index];
+      if (launcher === undefined) continue;
+      const start = launcher.index;
+      if (start === undefined) continue;
+      const span = spans.find((item) => item.end > start);
+      if (span === undefined || !span.chunk.formatted) continue;
+      if (span.chunk.inlineCode && span.chunk.text.trim() !== launcher[0]) continue;
+
+      const nextLauncher = launchers[index + 1]?.index ?? text.length;
+      const tail = text.slice(start, nextLauncher);
+      const sentence = tail.match(/\S[.!?](?:\s|$)/);
+      const sentenceEnd = sentence?.index === undefined ? tail.length : sentence.index + 1;
+      const command = tail.slice(0, sentenceEnd).trim();
+      const commandName = command.match(/^\S+\s+(\S+)/)?.[1] ?? "";
+      const prefix = text.slice(0, start);
+      const commandCue = /(?:^|[\s:])(?:execute|invoke|run|try)\s*$/i.test(prefix);
+      if (!PUBLIC_COMMANDS.has(commandName) && !commandCue && !command.includes("--json")) continue;
+      extracted.push(...textCommandExamples(command));
+    }
+
+    return extracted;
+  }
+
+  function visit(node: MarkdownNode, proseContents = new Set<string>()): void {
+    const prose = node.type === "heading" || node.type === "paragraph" || node.type === "tableCell";
+    const extractedProse = prose ? proseExamples(node) : [];
+    examples.push(...extractedProse);
+    const capturedContents = prose
+      ? new Set(extractedProse.map((example) => example.contents))
+      : proseContents;
+    if (
+      (node.type === "code" || node.type === "inlineCode")
+      && node.value !== undefined
+      && hasCliReference(node.value)
+      && !(node.type === "inlineCode" && capturedContents.has(node.value))
+    ) {
       const language = node.lang?.toLowerCase();
       const structuredExamples = node.type === "code"
         ? structuredFenceCommandExamples(node.value, language)
@@ -563,10 +626,15 @@ function markdownCommandExamples(contents: string): CommandExample[] {
     if (node.type === "html" && node.value !== undefined && hasCliReference(node.value)) {
       examples.push(...htmlCommandExamples(node.value, true));
     }
-    if (node.type === "text" && node.value !== undefined && hasCliReference(node.value)) {
+    if (
+      node.type === "text"
+      && node.value !== undefined
+      && hasCliReference(node.value)
+      && !capturedContents.has(node.value)
+    ) {
       examples.push(...textCommandExamples(node.value));
     }
-    for (const child of node.children ?? []) visit(child);
+    for (const child of node.children ?? []) visit(child, capturedContents);
   }
 
   visit(root);
@@ -722,7 +790,12 @@ function javascriptCommandExamples(path: string, contents: string): CommandExamp
         .split(/\s+/)
         .at(-1)
         ?.replace(/=$/, "") ?? "";
-      if (!CLI_VALUE_FLAGS.has(precedingToken)) return null;
+      const assignment = /(?:^|[\s;&|])(?:[A-Za-z_][A-Za-z0-9_]*)=[^\s;&|]*$/.test(value.trimEnd());
+      if (!CLI_VALUE_FLAGS.has(precedingToken) && !assignment) {
+        const literalText = `${node.head.text}${node.templateSpans.map((item) => item.literal.text).join("")}`;
+        assert.ok(!hasCliReference(literalText), "unsupported interpolation in CLI command template");
+        return null;
+      }
       value += `value${span.literal.text}`;
     }
     return value;
@@ -1130,18 +1203,22 @@ function packageRunnerActionIndex(
   flagOptions: ReadonlySet<string>,
   valueOptions: ReadonlySet<string>
 ): number | null {
-  const action = words.findIndex((word, index) => index > 0 && (word.value === "dlx" || word.value === "exec"));
-  if (action < 0) return null;
-  for (let index = 1; index < action; index += 1) {
+  for (let index = 1; index < words.length; index += 1) {
     const token = words[index]?.value ?? "";
-    if (token === "--" || !token.startsWith("-")) return null;
+    if (token === "--") return null;
+    if (!token.startsWith("-") || token === "-") {
+      return token === "dlx" || token === "exec" ? index : null;
+    }
     assert.ok(
       isSupportedWrapperOption(token, flagOptions, NO_WRAPPER_OPTIONAL_VALUE_OPTIONS, valueOptions),
       `unsupported ${runner} package-runner option: ${token}`
     );
-    if (wrapperOptionValueMode(token, valueOptions) === "separate") index += 1;
+    if (wrapperOptionValueMode(token, valueOptions) === "separate") {
+      assert.ok(words[index + 1] !== undefined, `${runner} package-runner option requires a value: ${token}`);
+      index += 1;
+    }
   }
-  return action;
+  return null;
 }
 
 function npmActionIndex(words: Word[]): number | null {
@@ -1703,10 +1780,31 @@ function posixShellCommandString(name: string, suffix: Word[]): string | undefin
   return undefined;
 }
 
+function cmdCommandIndex(suffix: Word[]): number | null {
+  for (let index = 0; index < suffix.length; index += 1) {
+    const token = suffix[index]?.value ?? "";
+    if (!token.startsWith("/")) return null;
+    const options = token.split("/").filter(Boolean).map((option) => `/${option.toLowerCase()}`);
+    for (let optionIndex = 0; optionIndex < options.length; optionIndex += 1) {
+      const option = options[optionIndex] ?? "";
+      if (option === "/c" || option === "/k") {
+        assert.equal(optionIndex, options.length - 1, `unsupported cmd shell option: ${token}`);
+        return index;
+      }
+      assert.ok(
+        CMD_FLAG_OPTIONS.has(option) || /^\/[efv]:(?:on|off)$/.test(option),
+        `unsupported cmd shell option: ${token}`
+      );
+    }
+  }
+  return null;
+}
+
 function nestedCommandExamplesFromWords(words: Word[], inheritedLanguage?: string): CommandExample[] {
   const dialect = shellDialect(inheritedLanguage);
   const name = executableName(words[0]?.value ?? "", dialect);
   const suffix = words.slice(1);
+  if (!words.some((word) => hasCliReference(word.value))) return [];
 
   if (dialect === "powershell" && name === "start-process") {
     return powershellStartProcessExample(words);
@@ -1727,8 +1825,8 @@ function nestedCommandExamplesFromWords(words: Word[], inheritedLanguage?: strin
   }
 
   if (name === "cmd" || name === "cmd.exe") {
-    const option = suffix.findIndex((word) => /(?:^|\/)c$/i.test(word.value));
-    return option >= 0
+    const option = cmdCommandIndex(suffix);
+    return option !== null
       ? [{ block: true, contents: suffix.slice(option + 1).map((word) => word.value).join(" ") }]
       : [];
   }
@@ -1751,7 +1849,13 @@ function nestedCommandExamplesFromWords(words: Word[], inheritedLanguage?: strin
   }
 
   if (name === "pnpm") {
-    const action = suffix.findIndex((word) => word.value === "dlx" || word.value === "exec");
+    const actionIndex = packageRunnerActionIndex(
+      words,
+      name,
+      PNPM_RUNNER_FLAG_OPTIONS,
+      PNPM_RUNNER_VALUE_OPTIONS
+    );
+    const action = actionIndex === null ? -1 : actionIndex - 1;
     const leadingShellMode = action < 0
       ? -1
       : suffix.slice(0, action).findIndex((word) => word.value === "-c" || word.value === "--shell-mode");
@@ -1795,7 +1899,8 @@ function nestedCommandExamplesFromWords(words: Word[], inheritedLanguage?: strin
       const option = searchFrom + relativeOption;
       const relativeTerminator = suffix.slice(option + 1)
         .findIndex((word) => word.value === ";" || word.value === "+");
-      const terminator = relativeTerminator < 0 ? suffix.length : option + 1 + relativeTerminator;
+      assert.ok(relativeTerminator >= 0, "find -exec requires a terminator");
+      const terminator = option + 1 + relativeTerminator;
       const executionWords = suffix.slice(option + 1, terminator);
       if (executionWords.length > 0) {
         examples.push({
@@ -1977,6 +2082,12 @@ test("public and reusable docs contain no contributor-specific machine paths", (
   for (const path of documents) assertNoPrivateMachinePaths(path, readFileSync(path, "utf8"));
 });
 
+test("generated changelog is excluded from current documentation contracts", () => {
+  const documents = publicDocumentPaths();
+  assert.ok(documents.includes("README.md"));
+  assert.ok(!documents.includes("CHANGELOG.md"));
+});
+
 test("private machine path checks cover portable and private forms", () => {
   for (const privatePath of [
     "`/Users/alice`",
@@ -2111,6 +2222,10 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     "const command = `skill-suitcase upstream fetch --source ${root} --skill ${skill} --dry-run --json`;"
   ), 1);
   assert.equal(validateCliExamples(
+    "fixture.js",
+    "const command = `ROOT=\"${root}\" skill-suitcase status --source . --json`;"
+  ), 1);
+  assert.equal(validateCliExamples(
     "fixture.yaml",
     "commands: { smoke: [skill-suitcase, status, --source, ., --json] }"
   ), 1);
@@ -2136,6 +2251,67 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     );
   }
   assert.equal(validateCliExamples("fixture.yaml", "command: [echo, $CLI]"), 0);
+});
+
+test("documentation parsers reject fragmented and malformed CLI launches", async (t) => {
+  await t.test("formatted Markdown launcher", () => {
+    for (const source of [
+      "Run **skill-suitcase** bogus",
+      "Run **skill-suitcase** bogus --json",
+      "Run **skill-suitcase** bogus --source . --json"
+    ]) {
+      assert.throws(
+        () => validateCliExamples("fixture.md", source),
+        /unknown command: bogus/
+      );
+    }
+  });
+
+  await t.test("inline Markdown command count", () => {
+    for (const source of [
+      "`skill-suitcase status --source . --json`",
+      "Use **skill-suitcase** to run commands such as `skill-suitcase status --source . --json`."
+    ]) {
+      assert.equal(validateCliExamples("fixture.md", source), 1, source);
+    }
+  });
+
+  await t.test("JavaScript template assignment", () => {
+    assert.throws(
+      () => validateCliExamples("fixture.js", "const command = `ROOT=${root} skill-suitcase bogus --json`;"),
+      /unknown command: bogus/
+    );
+  });
+
+  await t.test("pnpm option value", () => {
+    assert.throws(
+      () => validateCliExamples(
+        "fixture.md",
+        markdownFixture("pnpm --reporter exec dlx skill-suitcase bogus --json")
+      ),
+      /unknown command: bogus/
+    );
+  });
+
+  await t.test("cmd option prefix", () => {
+    assert.throws(
+      () => validateCliExamples(
+        "fixture.md",
+        markdownFixture("cmd /not-a-real-switch /c skill-suitcase status --source . --json")
+      ),
+      /unsupported cmd shell option: \/not-a-real-switch/
+    );
+  });
+
+  await t.test("find exec terminator", () => {
+    assert.throws(
+      () => validateCliExamples(
+        "fixture.md",
+        markdownFixture("find . -exec skill-suitcase status --source . --json")
+      ),
+      /find -exec requires a terminator/
+    );
+  });
 });
 
 test("console prompt normalization validates root prompt commands", () => {
@@ -2332,7 +2508,8 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "timeout 0.5s skill-suitcase status --source . --json",
     "timeout -v 5 skill-suitcase status --source . --json",
     "watch -d1 skill-suitcase status --source . --json",
-    "watch --differences=permanent skill-suitcase status --source . --json"
+    "watch --differences=permanent skill-suitcase status --source . --json",
+    "cmd /d /s /c skill-suitcase status --source . --json"
   ]) {
     assert.equal(validateCliExamples("fixture.md", markdownFixture(source)), 1, source);
   }
