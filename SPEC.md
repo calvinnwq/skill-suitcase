@@ -89,8 +89,8 @@ assignmentPaths:
   hermes:
     kind: hermes-external-skills-root
     assignment: hermes
-    home: $HOME/.hermes
-    path: $HOME/.hermes/skill-suitcase/skills
+    home: ~/.hermes
+    path: ~/.hermes/skill-suitcase/skills
 ```
 
 Before materialization, the operator creates the external root and registers its

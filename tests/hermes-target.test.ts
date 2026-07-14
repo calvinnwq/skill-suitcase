@@ -7,10 +7,12 @@ import { test } from "node:test";
 import { expandHermesHomePrefix, validateHermesExternalRoot } from "../src/core/hermes-external-root.js";
 import { computePackArtifactId } from "../src/core/packing/artifact-id.js";
 import { apply } from "../src/apply.js";
+import { importTarget } from "../src/import-target.js";
 import { reconcile } from "../src/reconcile.js";
 import { repair } from "../src/repair.js";
 import { prune } from "../src/prune.js";
 import { rollback } from "../src/rollback.js";
+import { track } from "../src/track.js";
 
 const cliPath = path.join(process.cwd(), "dist", "src", "cli.js");
 
@@ -474,6 +476,100 @@ ${skills.map((skill) => `  ${skill.name}:\n    agents:\n      - hermes\n    vari
   await assert.rejects(readFile(path.join(externalRoot, "autonomous-ai-agents", "agent-swarm", "SKILL.md"), "utf8"));
   assert.equal(await readFile(localSentinel, "utf8"), "keep\n");
   assert.match(await readFile(path.join(hermesHome, "config.yaml"), "utf8"), /external_dirs/);
+});
+
+test("categorized Hermes import-target refuses a category swapped before target reads", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  await mkdir(fixture.targetSkill, { recursive: true });
+  await writeFile(path.join(fixture.targetSkill, "SKILL.md"), "---\nname: hello-hermes\n---\n# Catalog\n");
+  const tracked = await track({
+    source: fixture.source,
+    target: "hermes",
+    skills: ["hello-hermes"]
+  });
+  assert.equal(tracked.ok, true);
+  await writeFile(path.join(fixture.targetSkill, "SKILL.md"), "local edit\n");
+  const receiptPath = path.join(fixture.externalRoot, ".skill-suitcase-receipt.json");
+  const receiptBefore = await readFile(receiptPath, "utf8");
+  const retainedCategory = path.join(fixture.sandbox, "retained-import-category");
+  const attackedCategory = path.join(fixture.sandbox, "attacked-import-category");
+  await mkdir(path.join(attackedCategory, "hello-hermes"), { recursive: true });
+  await writeFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "outside victim\n");
+
+  const result = await importTarget({
+    source: fixture.source,
+    target: "hermes",
+    skills: ["hello-hermes"],
+    apply: true,
+    __test: {
+      beforeTargetReadForSkill: async () => {
+        await rename(fixture.category, retainedCategory);
+        await symlink(attackedCategory, fixture.category);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "import_write_failed"), true);
+  assert.equal(await readFile(path.join(fixture.sourceSkill, "SKILL.md"), "utf8"), "---\nname: hello-hermes\n---\n# Catalog\n");
+  assert.equal(await readFile(path.join(retainedCategory, "hello-hermes", "SKILL.md"), "utf8"), "local edit\n");
+  assert.equal(await readFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "utf8"), "outside victim\n");
+  assert.equal(await readFile(receiptPath, "utf8"), receiptBefore);
+});
+
+test("categorized Hermes track refuses a category swapped before inspection", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  await mkdir(fixture.targetSkill, { recursive: true });
+  await writeFile(path.join(fixture.targetSkill, "SKILL.md"), "---\nname: hello-hermes\n---\n# Catalog\n");
+  const retainedCategory = path.join(fixture.sandbox, "retained-track-inspection-category");
+  const attackedCategory = path.join(fixture.sandbox, "attacked-track-inspection-category");
+  await mkdir(path.join(attackedCategory, "hello-hermes"), { recursive: true });
+  await writeFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "---\nname: hello-hermes\n---\n# Catalog\n");
+
+  const result = await track({
+    source: fixture.source,
+    target: "hermes",
+    skills: ["hello-hermes"],
+    __test: {
+      beforeTargetInspectionForSkill: async () => {
+        await rename(fixture.category, retainedCategory);
+        await symlink(attackedCategory, fixture.category);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "unsafe_target_path"), true);
+  await assert.rejects(readFile(path.join(fixture.externalRoot, ".skill-suitcase-receipt.json"), "utf8"), /ENOENT/);
+  assert.equal(await readFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "utf8"), "---\nname: hello-hermes\n---\n# Catalog\n");
+});
+
+test("categorized Hermes track refuses a category swapped before receipt adoption", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  await mkdir(fixture.targetSkill, { recursive: true });
+  await writeFile(path.join(fixture.targetSkill, "SKILL.md"), "---\nname: hello-hermes\n---\n# Catalog\n");
+  const retainedCategory = path.join(fixture.sandbox, "retained-track-receipt-category");
+  const attackedCategory = path.join(fixture.sandbox, "attacked-track-receipt-category");
+  await mkdir(path.join(attackedCategory, "hello-hermes"), { recursive: true });
+  await writeFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "---\nname: hello-hermes\n---\n# Catalog\n");
+
+  const result = await track({
+    source: fixture.source,
+    target: "hermes",
+    skills: ["hello-hermes"],
+    __test: {
+      beforeReceiptWriteForSkill: async () => {
+        await rename(fixture.category, retainedCategory);
+        await symlink(attackedCategory, fixture.category);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "unsafe_target_path"), true);
+  await assert.rejects(readFile(path.join(fixture.externalRoot, ".skill-suitcase-receipt.json"), "utf8"), /ENOENT/);
+  assert.equal(await readFile(path.join(retainedCategory, "hello-hermes", "SKILL.md"), "utf8"), "---\nname: hello-hermes\n---\n# Catalog\n");
+  assert.equal(await readFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "utf8"), "---\nname: hello-hermes\n---\n# Catalog\n");
 });
 
 test("categorized Hermes external root fails closed for registration, local shadowing, and unsafe categories", async (t) => {

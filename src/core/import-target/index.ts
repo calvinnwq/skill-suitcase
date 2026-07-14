@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
@@ -32,6 +32,7 @@ export type ImportTargetInput = {
     failAfterBackup?: boolean;
     failDuringCopy?: boolean;
     failPostStatus?: boolean;
+    beforeTargetReadForSkill?: (skill: string) => Promise<void> | void;
   };
 };
 
@@ -274,8 +275,11 @@ async function executeImportLocked(
     let installed = false;
 
     try {
+      await input.__test?.beforeTargetReadForSkill?.(candidate.skill);
+      await assertCategorizedTargetParentInsideInstallRoot(targetPath, installRoot);
       copied = true;
       await copyTree(targetPath, tmpPath, { failAfterCreate: input.__test?.failDuringCopy === true });
+      await assertCategorizedTargetParentInsideInstallRoot(targetPath, installRoot);
       if (!(await treesMatch(targetPath, tmpPath))) {
         throw new Error(`Staged catalog copy for ${candidate.skill} does not match the live target.`);
       }
@@ -287,10 +291,12 @@ async function executeImportLocked(
       await rename(tmpPath, catalogPath);
       installed = true;
       copied = false;
+      await assertCategorizedTargetParentInsideInstallRoot(targetPath, installRoot);
       if (!(await treesMatch(catalogPath, targetPath))) {
         throw new Error(`Imported catalog tree for ${candidate.skill} does not match the live target.`);
       }
 
+      await assertCategorizedTargetParentInsideInstallRoot(targetPath, installRoot);
       const installedFiles = await buildInstalledFiles(targetPath);
       const sourceHash = await hashDirectory(catalogPath);
       const priorState: Record<string, unknown> = {
@@ -1398,6 +1404,38 @@ function isPlainPathSegment(value: string): boolean {
 function isSameOrInsidePath(candidatePath: string, rootPath: string): boolean {
   const relativePath = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
   return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+async function assertCategorizedTargetParentInsideInstallRoot(targetPath: string, installRoot: string): Promise<void> {
+  const lexicalRoot = path.resolve(installRoot);
+  const lexicalParent = path.resolve(path.dirname(targetPath));
+  const relativeParent = path.relative(lexicalRoot, lexicalParent);
+  if (relativeParent === "") {
+    return;
+  }
+  if (relativeParent.startsWith("..") || path.isAbsolute(relativeParent)) {
+    throw new Error(`Target parent ${lexicalParent} escapes install root ${lexicalRoot}.`);
+  }
+
+  let current = lexicalRoot;
+  for (const part of relativeParent.split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    const info = await lstat(current);
+    if (info.isSymbolicLink()) {
+      throw new Error(`Target parent component ${current} is a symlink.`);
+    }
+    if (!info.isDirectory()) {
+      throw new Error(`Target parent component ${current} is not a directory.`);
+    }
+  }
+
+  const [resolvedRoot, resolvedParent] = await Promise.all([
+    realpath(lexicalRoot),
+    realpath(lexicalParent)
+  ]);
+  if (!isSameOrInsidePath(resolvedParent, resolvedRoot)) {
+    throw new Error(`Target parent ${lexicalParent} resolves outside install root ${lexicalRoot}.`);
+  }
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
