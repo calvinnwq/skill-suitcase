@@ -37,7 +37,7 @@ const HTML_PROSE_ELEMENTS = new Set([
 const COMMAND_VALUE_KEYS = new Set(["command", "commands", "example", "examples", "run", "runs", "script", "scripts"]);
 const ARGV_VALUE_KEYS = new Set(["command", "example", "run", "script"]);
 const COMMAND_CONTAINER_KEYS = new Set(["commands", "examples", "runs", "scripts"]);
-const CLI_REFERENCE_DATA_COMMANDS = new Set(["cd", "echo", "gh", "git", "printf"]);
+const CLI_REFERENCE_DATA_COMMANDS = new Set(["[", "cd", "echo", "export", "gh", "git", "printf", "test"]);
 const COMMAND_REGISTRY = createCommandRegistry();
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
 const OPTIONAL_INVOCATION_PLACEHOLDERS = new Set(["<local-overrides>"]);
@@ -311,6 +311,11 @@ const START_PROCESS_VALUE_PARAMETERS = new Set([
 const NO_WRAPPER_FLAG_OPTIONS = new Set<string>();
 const NO_WRAPPER_OPTIONAL_VALUE_OPTIONS = new Map<string, RegExp>();
 const NO_WRAPPER_VALUE_OPTIONS = new Set<string>();
+const NONEMPTY_WRAPPER_VALUE_PATTERN = /^[\s\S]+$/;
+const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SUDO_TIMEOUT_PATTERN = /^(?:(?:\d+[dD])?(?:\d+[hH])?(?:\d+[mM])?(?:\d+[sS])?|\d+)$/;
+const WATCH_INTERVAL_PATTERN = /^(?:\d+(?:[.,]\d*)?|[.,]\d+)$/;
+const XARGS_DELIMITER_PATTERN = /^(?:[\s\S]|\\(?:[abfnrtv\\]|[0-7]{1,3}|x[0-9A-Fa-f]{1,2}))$/u;
 const WRAPPER_FLAG_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   command: new Set(["-p", "-v", "-V"]),
   env: new Set(["-i", "-v", "--debug", "--ignore-environment"]),
@@ -432,6 +437,20 @@ const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   ])
 };
 const WRAPPER_VALUE_PATTERNS: Readonly<Record<string, Readonly<Record<string, RegExp>>>> = {
+  env: {
+    "-a": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-C": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-P": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-S": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-u": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--argv0": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--chdir": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--split-string": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--unset": NONEMPTY_WRAPPER_VALUE_PATTERN
+  },
+  exec: {
+    "-a": NONEMPTY_WRAPPER_VALUE_PATTERN
+  },
   nice: {
     "-n": /^[+-]?\d+$/,
     "--adjustment": /^[+-]?\d+$/
@@ -444,22 +463,61 @@ const WRAPPER_VALUE_PATTERNS: Readonly<Record<string, Readonly<Record<string, Re
     "--input": /^\d+(?:[KMGTPEZYRQ](?:i?B)?)?$/i,
     "--output": /^(?:L|\d+(?:[KMGTPEZYRQ](?:i?B)?)?)$/i
   },
+  sudo: {
+    "-C": /^(?:[3-9]|[1-9]\d+)$/,
+    "-D": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-g": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-h": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-p": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-R": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-r": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-T": SUDO_TIMEOUT_PATTERN,
+    "-t": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-u": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--chdir": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--chroot": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--command-timeout": SUDO_TIMEOUT_PATTERN,
+    "--group": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--host": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--prompt": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--role": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--type": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--user": NONEMPTY_WRAPPER_VALUE_PATTERN
+  },
   timeout: {
     "-k": TIMEOUT_DURATION_PATTERN,
     "-s": TIMEOUT_SIGNAL_PATTERN,
     "--kill-after": TIMEOUT_DURATION_PATTERN,
     "--signal": TIMEOUT_SIGNAL_PATTERN
   },
+  time: {
+    "-f": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-o": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--format": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--output": NONEMPTY_WRAPPER_VALUE_PATTERN
+  },
+  watch: {
+    "-n": WATCH_INTERVAL_PATTERN,
+    "--interval": WATCH_INTERVAL_PATTERN
+  },
   xargs: {
+    "-E": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-I": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-J": NONEMPTY_WRAPPER_VALUE_PATTERN,
     "-L": /^[1-9]\d*$/,
     "-n": /^[1-9]\d*$/,
     "-P": /^\d+$/,
-    "-R": /^[1-9]\d*$/,
+    "-R": /^-?\d+$/,
     "-S": /^[1-9]\d*$/,
+    "-a": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "-d": XARGS_DELIMITER_PATTERN,
     "-s": /^[1-9]\d*$/,
+    "--arg-file": NONEMPTY_WRAPPER_VALUE_PATTERN,
+    "--delimiter": XARGS_DELIMITER_PATTERN,
     "--max-args": /^[1-9]\d*$/,
     "--max-chars": /^[1-9]\d*$/,
-    "--max-procs": /^\d+$/
+    "--max-procs": /^\d+$/,
+    "--process-slot-var": ENVIRONMENT_VARIABLE_NAME_PATTERN
   }
 };
 
@@ -520,6 +578,11 @@ function publicDocumentPaths(): string[] {
 
 function hasCliReference(contents: string): boolean {
   return /(?:skill-suitcase|\$\{?CLI\}?|dist[\\/]src[\\/]cli\.js)/i.test(contents);
+}
+
+function hasCliLaunch(contents: string): boolean {
+  return /(?:^|[\s;&|()])(?:[^\s;&|()]+[\\/])?(?:skill-suitcase(?:\.(?:cmd|exe|ps1))?(?:@[^\s;&|()]+)?|\$\{?CLI\}?|dist[\\/]src[\\/]cli\.js)(?=$|[\s"';&|()])/i
+    .test(contents);
 }
 
 function htmlText(node: HtmlNode): string {
@@ -1487,7 +1550,11 @@ function wrapperOptionValue(token: string, valueOptions: ReadonlySet<string>): W
   if (valueOptions.has(option)) {
     return equalsIndex < 0
       ? { mode: "separate", option }
-      : { mode: "attached", option, value: token.slice(equalsIndex + 1) };
+      : {
+        mode: "attached",
+        option,
+        value: option.startsWith("--") ? token.slice(equalsIndex + 1) : token.slice(equalsIndex)
+      };
   }
   if (!/^-[^-]/.test(token)) return null;
   for (let index = 1; index < token.length; index += 1) {
@@ -1496,7 +1563,7 @@ function wrapperOptionValue(token: string, valueOptions: ReadonlySet<string>): W
     const attachedValue = token.slice(index + 1);
     return attachedValue === ""
       ? { mode: "separate", option: shortOption }
-      : { mode: "attached", option: shortOption, value: attachedValue.replace(/^=/, "") };
+      : { mode: "attached", option: shortOption, value: attachedValue };
   }
   return null;
 }
@@ -1512,8 +1579,9 @@ function assertWrapperOptionValue(
 ): void {
   const value = optionValue.mode === "attached" ? optionValue.value : separateValue;
   const pattern = WRAPPER_VALUE_PATTERNS[executable]?.[optionValue.option];
+  assert.ok(pattern !== undefined, `missing ${executable} wrapper option value contract: ${optionValue.option}`);
   assert.ok(
-    value !== undefined && value !== "" && (pattern === undefined || pattern.test(value)),
+    value !== undefined && value !== "" && pattern.test(value),
     `invalid ${executable} wrapper option value: ${optionValue.option}`
   );
 }
@@ -1540,7 +1608,7 @@ function isSupportedWrapperOption(
     const optionalValue = optionalValueOptions.get(shortOption);
     if (optionalValue !== undefined) {
       if (index === token.length - 1) return true;
-      return optionalValue.test(token.slice(index + 1).replace(/^=/, ""));
+      return optionalValue.test(token.slice(index + 1));
     }
     if (valueOptions.has(shortOption)) return true;
     if (!flagOptions.has(shortOption)) return false;
@@ -1797,6 +1865,7 @@ function invocationFromWords(
 
 function powershellStartProcessExample(words: Word[]): CommandExample[] {
   const suffix = words.slice(1);
+  const seenParameters = new Set<string>();
   let launcherIndex: number | null = null;
   let argumentListOption: number | null = null;
   let positionalArgumentStart: number | null = null;
@@ -1805,6 +1874,8 @@ function powershellStartProcessExample(words: Word[]): CommandExample[] {
     const token = suffix[index]?.value ?? "";
     const parameter = token.toLowerCase();
     if (parameter === "-filepath") {
+      assert.ok(!seenParameters.has(parameter), "Start-Process defines FilePath more than once");
+      seenParameters.add(parameter);
       assert.ok(suffix[index + 1] !== undefined, "Start-Process -FilePath requires a value");
       assert.equal(launcherIndex, null, "Start-Process defines FilePath more than once");
       launcherIndex = index + 1;
@@ -1812,6 +1883,8 @@ function powershellStartProcessExample(words: Word[]): CommandExample[] {
       continue;
     }
     if (parameter === "-argumentlist" || parameter === "-args") {
+      assert.ok(!seenParameters.has("-argumentlist"), "Start-Process defines ArgumentList more than once");
+      seenParameters.add("-argumentlist");
       argumentListOption = index;
       while (
         index + 1 < suffix.length
@@ -1819,8 +1892,14 @@ function powershellStartProcessExample(words: Word[]): CommandExample[] {
       ) index += 1;
       continue;
     }
-    if (START_PROCESS_FLAG_PARAMETERS.has(parameter)) continue;
+    if (START_PROCESS_FLAG_PARAMETERS.has(parameter)) {
+      assert.ok(!seenParameters.has(parameter), `Start-Process defines ${token} more than once`);
+      seenParameters.add(parameter);
+      continue;
+    }
     if (START_PROCESS_VALUE_PARAMETERS.has(parameter)) {
+      assert.ok(!seenParameters.has(parameter), `Start-Process defines ${token} more than once`);
+      seenParameters.add(parameter);
       assert.ok(suffix[index + 1] !== undefined, `Start-Process parameter requires a value: ${token}`);
       index += 1;
       continue;
@@ -2158,11 +2237,11 @@ function validateCommandExample(path: string, example: CommandExample): number {
     const unsupportedNodeLaunch = (executable === "node" || executable === "node.exe")
       && words.some((word) => hasCliReference(word.value));
     assert.ok(!unsupportedNodeLaunch, `${path} has an unsupported Node CLI launch form`);
-    const launcherArgument = words.slice(1).findIndex((word) => isCliLauncherReference(word.value));
     const unsupportedWrapper = words[1]?.value !== "="
       && !isClassifiedCliReferenceContext(executable, dialect)
-      && launcherArgument >= 0
-      && launcherArgument + 2 < words.length;
+      && words.slice(1).some((word, index) =>
+        hasCliLaunch(word.value) && (index + 2 < words.length || /\s/.test(word.value))
+      );
     assert.ok(!unsupportedWrapper, `${path} has unsupported execution wrapper: ${executable}`);
   }
 
@@ -2541,6 +2620,16 @@ test("Bash AST traversal validates controls, substitutions, pipelines, and redir
   assert.equal(validateCliExamples("fixture.md", markdownFixture("ps aux > skill-suitcase")), 0);
 });
 
+test("wrapper required values define validation contracts", () => {
+  for (const [executable, options] of Object.entries(WRAPPER_VALUE_OPTIONS)) {
+    assert.deepEqual(
+      Object.keys(WRAPPER_VALUE_PATTERNS[executable] ?? {}).sort(),
+      [...options].sort(),
+      executable
+    );
+  }
+});
+
 test("launcher normalization covers wrappers, runners, paths, and command strings", () => {
   const invalidLaunchers = [
     "./dist/src/cli.js bogus --json",
@@ -2612,6 +2701,27 @@ test("launcher normalization covers wrappers, runners, paths, and command string
       markdownFixture("xargs --max-args= skill-suitcase status --source . --json")
     ),
     /invalid xargs wrapper option value: --max-args/
+  );
+  for (const source of [
+    "sudo -C 2 skill-suitcase status --source . --json",
+    "sudo -T 0.5 skill-suitcase status --source . --json",
+    "watch -n nope skill-suitcase status --source . --json",
+    "watch --interval=soon skill-suitcase status --source . --json",
+    "xargs -d separator skill-suitcase status --source . --json",
+    "xargs --process-slot-var=1INVALID skill-suitcase status --source . --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", markdownFixture(source)),
+      /invalid (?:sudo|watch|xargs) wrapper option value/,
+      source
+    );
+  }
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("xargs -n=1 skill-suitcase status --source . --json")
+    ),
+    /invalid xargs wrapper option value: -n/
   );
   assert.throws(
     () => validateCliExamples(
@@ -2692,7 +2802,8 @@ test("launcher normalization covers wrappers, runners, paths, and command string
   }
   for (const source of [
     "setsid skill-suitcase bogus --json",
-    "setsid \"skill-suitcase\" bogus --json"
+    "setsid \"skill-suitcase\" bogus --json",
+    "setsid sh -c 'skill-suitcase bogus --json'"
   ]) {
     assert.throws(
       () => validateCliExamples("fixture.md", markdownFixture(source)),
@@ -2732,18 +2843,25 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "env -vS 'skill-suitcase status --source . --json'",
     "env --split-string='skill-suitcase status' --source . --json",
     "sudo --preserve-env=HOME,PATH skill-suitcase status --source . --json",
+    "sudo -C 10 -T 1h30m skill-suitcase status --source . --json",
+    "sudo --command-timeout=3600 skill-suitcase status --source . --json",
     "timeout -f -p 5 skill-suitcase status --source . --json",
     "timeout 0.5s skill-suitcase status --source . --json",
     "timeout -v 5 skill-suitcase status --source . --json",
     "timeout -k 1s -s TERM 5 skill-suitcase status --source . --json",
     "timeout --kill-after=1m --signal=9 5 skill-suitcase status --source . --json",
     "watch -d1 skill-suitcase status --source . --json",
+    "watch -n 0.5 skill-suitcase status --source . --json",
+    "watch --interval=1,5 skill-suitcase status --source . --json",
     "watch --differences=permanent skill-suitcase status --source . --json",
+    "xargs -d, skill-suitcase status --source . --json",
+    "xargs -I= skill-suitcase status --source . --json",
     "xargs -n 1 skill-suitcase status --source . --json",
     "xargs -tn1 skill-suitcase status --source . --json",
     "xargs -l1 skill-suitcase status --source . --json",
     "xargs --max-lines skill-suitcase status --source . --json",
     "xargs --max-lines=1 skill-suitcase status --source . --json",
+    "xargs --process-slot-var=SLOT skill-suitcase status --source . --json",
     "stdbuf -oL skill-suitcase status --source . --json",
     "stdbuf --output=L skill-suitcase status --source . --json",
     "stdbuf --output=1MiB skill-suitcase status --source . --json",
@@ -2996,6 +3114,16 @@ test("dialect normalization validates PowerShell and Fish examples", () => {
       )
     ),
     1
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture(
+        "Start-Process skill-suitcase -ArgumentList 'bogus --json' -ArgumentList 'status --source . --json'",
+        "powershell"
+      )
+    ),
+    /Start-Process defines ArgumentList more than once/
   );
   assert.throws(
     () => validateCliExamples(
