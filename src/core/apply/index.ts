@@ -1020,6 +1020,13 @@ async function applySymlinkInstalls({
         }
         await __test?.afterSymlinkCleanupClassification?.(createdLink.targetPath);
         await assertSafeMutationParent(createdLink.targetPath, installRoot, false);
+        const finalClassification = await classifySymlinkInstall({
+          targetPath: createdLink.targetPath,
+          expectedSourcePath: createdLink.sourcePath
+        });
+        if (finalClassification.state !== "correct") {
+          throw new Error(`created link is now ${finalClassification.state}`);
+        }
         await unlink(createdLink.targetPath);
       } catch (cleanupError) {
         cleanupErrors.push({

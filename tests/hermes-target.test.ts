@@ -858,6 +858,29 @@ test("categorized Hermes symlink cleanup revalidates its parent after classifica
   assert.equal(await readlink(path.join(retainedCategory, "hello-hermes")), fixture.sourceSkill);
 });
 
+test("categorized Hermes symlink cleanup refuses a replaced link after classification", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  const replacement = "replacement data\n";
+
+  const result = await apply({
+    source: fixture.source,
+    target: "hermes",
+    artifact: fixture.artifactPath,
+    mode: "symlink",
+    __test: {
+      failAfterSuccessfulWrites: 1,
+      afterSymlinkCleanupClassification: async (targetPath) => {
+        await rm(targetPath);
+        await writeFile(targetPath, replacement);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "symlink_cleanup_failed"), true);
+  assert.equal(await readFile(fixture.targetSkill, "utf8"), replacement);
+});
+
 test("categorized Hermes copy apply reports a retained final backup", async (t) => {
   const fixture = await createCategorizedRecoveryFixture(t);
   const initial = await apply({ source: fixture.source, target: "hermes", artifact: fixture.artifactPath });
@@ -1026,6 +1049,32 @@ test("categorized Hermes copy rollback refuses an in-root category symlink", asy
   assert.equal(await readFile(path.join(redirectedCategory, "hello-hermes", "SKILL.md"), "utf8"), "---\nname: hello-hermes\n---\n# Updated catalog\n");
 });
 
+test("categorized Hermes symlink rollback refuses a replaced link after classification", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  const applied = await apply({
+    source: fixture.source,
+    target: "hermes",
+    artifact: fixture.artifactPath,
+    mode: "symlink"
+  });
+  assert.equal(applied.ok, true);
+  const replacement = "replacement data\n";
+
+  const result = await rollback({
+    receipt: path.join(fixture.externalRoot, ".skill-suitcase-receipt.json"),
+    __test: {
+      afterAppliedSymlinkClassification: async (targetPath) => {
+        await rm(targetPath);
+        await writeFile(targetPath, replacement);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "target_drift"), true);
+  assert.equal(await readFile(fixture.targetSkill, "utf8"), replacement);
+});
+
 test("categorized Hermes copy rollback revalidates before restoring a file", async (t) => {
   const fixture = await createCategorizedRecoveryFixture(t);
   const initial = await apply({ source: fixture.source, target: "hermes", artifact: fixture.artifactPath });
@@ -1121,6 +1170,57 @@ test("categorized Hermes copy rollback accepts an already removed category", asy
   await assert.rejects(readFile(path.join(fixture.targetSkill, "SKILL.md"), "utf8"), /ENOENT/);
 });
 
+test("categorized Hermes copy rollback rejects a symlinked parent before a missing file", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  const initial = await apply({ source: fixture.source, target: "hermes", artifact: fixture.artifactPath });
+  assert.equal(initial.ok, true);
+  const retainedCategory = path.join(fixture.sandbox, "retained-missing-file-category");
+  const attackedCategory = path.join(fixture.sandbox, "attacked-missing-file-category");
+  let swapped = false;
+
+  const result = await rollback({
+    receipt: path.join(fixture.externalRoot, ".skill-suitcase-receipt.json"),
+    __test: {
+      beforeFileMutation: async () => {
+        if (swapped) return;
+        swapped = true;
+        await rename(fixture.category, retainedCategory);
+        await mkdir(attackedCategory, { recursive: true });
+        await symlink(attackedCategory, fixture.category);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "rollback_remove_failed"), true);
+  assert.equal(await readFile(path.join(retainedCategory, "hello-hermes", "SKILL.md"), "utf8"), "---\nname: hello-hermes\n---\n# Catalog\n");
+  await assert.rejects(readFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "utf8"), /ENOENT/);
+});
+
+test("categorized Hermes copy rollback rejects a symlinked parent before removing an empty target", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  const initial = await apply({ source: fixture.source, target: "hermes", artifact: fixture.artifactPath });
+  assert.equal(initial.ok, true);
+  const retainedCategory = path.join(fixture.sandbox, "retained-missing-target-category");
+  const attackedCategory = path.join(fixture.sandbox, "attacked-missing-target-category");
+
+  const result = await rollback({
+    receipt: path.join(fixture.externalRoot, ".skill-suitcase-receipt.json"),
+    __test: {
+      beforeMissingInstallTargetRemoval: async () => {
+        await rename(fixture.category, retainedCategory);
+        await mkdir(attackedCategory, { recursive: true });
+        await symlink(attackedCategory, fixture.category);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "rollback_remove_failed"), true);
+  assert.deepEqual(await readdir(path.join(retainedCategory, "hello-hermes")), []);
+  await assert.rejects(readFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "utf8"), /ENOENT/);
+});
+
 test("categorized Hermes reconcile rollback preserves a backup under a replaced archive", async (t) => {
   const fixture = await createCategorizedRecoveryFixture(t);
   await mkdir(fixture.targetSkill, { recursive: true });
@@ -1181,6 +1281,39 @@ test("categorized Hermes reconcile rollback accepts an already removed archive",
   assert.equal(await readFile(path.join(fixture.targetSkill, "SKILL.md"), "utf8"), "old unmanaged target\n");
 });
 
+test("categorized Hermes reconcile rollback rejects a symlinked archive before a missing backup", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  await mkdir(fixture.targetSkill, { recursive: true });
+  await writeFile(path.join(fixture.targetSkill, "SKILL.md"), "old unmanaged target\n");
+  const reconciled = await reconcile({
+    source: fixture.source,
+    target: "hermes",
+    skills: ["hello-hermes"],
+    apply: true
+  });
+  assert.equal(reconciled.ok, true);
+  const backupPath = reconciled.reconciled.backups[0]!.backupPath;
+  const archivePath = path.join(fixture.externalRoot, ".archive");
+  const retainedArchive = path.join(fixture.sandbox, "retained-missing-backup-archive");
+  const attackedArchive = path.join(fixture.sandbox, "attacked-missing-backup-archive");
+
+  const result = await rollback({
+    receipt: path.join(fixture.externalRoot, ".skill-suitcase-receipt.json"),
+    __test: {
+      beforeReconcileBackupRemoval: async () => {
+        await rename(archivePath, retainedArchive);
+        await mkdir(attackedArchive, { recursive: true });
+        await symlink(attackedArchive, archivePath);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "rollback_remove_failed"), true);
+  assert.equal(await readFile(path.join(retainedArchive, path.basename(backupPath), "SKILL.md"), "utf8"), "old unmanaged target\n");
+  await assert.rejects(readFile(path.join(attackedArchive, path.basename(backupPath), "SKILL.md"), "utf8"), /ENOENT/);
+});
+
 test("categorized Hermes prune retains quarantine when rollback parent is replaced", async (t) => {
   const fixture = await createCategorizedRecoveryFixture(t);
   const initial = await apply({ source: fixture.source, target: "hermes", artifact: fixture.artifactPath });
@@ -1220,6 +1353,43 @@ test("categorized Hermes prune retains quarantine when rollback parent is replac
   assert.equal(result.transactionPath !== null, true);
   assert.equal(result.receiptBackupPath !== null, true);
   assert.equal((await readdir(path.join(planned.plan.quarantineRoot, "quarantine"))).includes("hello-hermes"), true);
+});
+
+test("categorized Hermes prune revalidates its parent after candidate inspection", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  const initial = await apply({ source: fixture.source, target: "hermes", artifact: fixture.artifactPath });
+  assert.equal(initial.ok, true);
+  await fixture.writeManifest(false);
+  const planned = await prune({
+    source: fixture.source,
+    target: "hermes",
+    skills: ["hello-hermes"],
+    dryRun: true
+  });
+  assert.ok(planned.plan.id);
+  const retainedCategory = path.join(fixture.sandbox, "retained-revalidated-prune-category");
+  const attackedCategory = path.join(fixture.sandbox, "attacked-revalidated-prune-category");
+  await mkdir(path.join(attackedCategory, "hello-hermes"), { recursive: true });
+  await writeFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "outside victim\n");
+
+  const result = await prune({
+    source: fixture.source,
+    target: "hermes",
+    skills: ["hello-hermes"],
+    planId: planned.plan.id,
+    apply: true,
+    __test: {
+      afterCandidateRevalidation: async () => {
+        await rename(fixture.category, retainedCategory);
+        await symlink(attackedCategory, fixture.category);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "prune_apply_failed"), true);
+  assert.equal(await readFile(path.join(retainedCategory, "hello-hermes", "SKILL.md"), "utf8"), "---\nname: hello-hermes\n---\n# Catalog\n");
+  assert.equal(await readFile(path.join(attackedCategory, "hello-hermes", "SKILL.md"), "utf8"), "outside victim\n");
 });
 
 test("categorized Hermes reconcile refuses a replaced category parent", async (t) => {

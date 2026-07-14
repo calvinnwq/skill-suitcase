@@ -26,6 +26,9 @@ type RollbackInput = {
   __test?: {
     beforeFileMutation?: (targetPath: string) => Promise<void> | void;
     beforeReconcileBackupRemoval?: (backupPath: string) => Promise<void> | void;
+    afterAppliedSymlinkClassification?: (targetPath: string) => Promise<void> | void;
+    beforeMissingInstallTargetRemoval?: (targetPath: string) => Promise<void> | void;
+    beforeFileOwnershipChange?: (targetPath: string) => Promise<void> | void;
   };
 };
 
@@ -214,7 +217,11 @@ export async function rollback({ receipt, __test }: RollbackInput): Promise<Roll
       // a safe no-op that leaves the link and its source untouched.
       const appliedSymlink = parseAppliedSymlinkRollback(record, installRoot, receiptDirectory);
       if (appliedSymlink.kind === "apply-created") {
-        const removal = await removeAppliedSymlink(appliedSymlink, installRoot);
+        const removal = await removeAppliedSymlink(
+          appliedSymlink,
+          installRoot,
+          __test?.afterAppliedSymlinkClassification
+        );
         if (removal.kind === "removed") {
           result.summary.removed += 1;
           removeReceiptInstallRecord(installs, skill, record);
@@ -388,7 +395,12 @@ export async function rollback({ receipt, __test }: RollbackInput): Promise<Roll
     };
 
     for (const file of rollbackState.files) {
-      const restored = await restoreRollbackFile(file, installRoot, __test?.beforeFileMutation);
+      const restored = await restoreRollbackFile(
+        file,
+        installRoot,
+        __test?.beforeFileMutation,
+        __test?.beforeFileOwnershipChange
+      );
       if (restored.status === "restored") {
         item.restored += 1;
         result.summary.restored += 1;
@@ -414,6 +426,7 @@ export async function rollback({ receipt, __test }: RollbackInput): Promise<Roll
       result.ok = false;
     } else {
       if (installWasPreviouslyMissing(record)) {
+        await __test?.beforeMissingInstallTargetRemoval?.(targetPath);
         const removedTarget = await removeMissingInstallTarget(targetPath, installRoot);
         if (removedTarget.status === "failed") {
           item.failed += 1;
@@ -666,7 +679,8 @@ function symlinkRecordSourcePath(record: ReceiptInstallRecord): string | null {
  */
 async function removeAppliedSymlink(
   rollback: { targetPath: string; expectedSourcePath: string },
-  installRoot: string
+  installRoot: string,
+  afterClassification?: ((targetPath: string) => Promise<void> | void) | undefined
 ): Promise<
   | { kind: "removed" }
   | { kind: "refused"; message: string }
@@ -688,10 +702,21 @@ async function removeAppliedSymlink(
       message: `Refusing to remove ${rollback.targetPath}: expected a symlink to ${rollback.expectedSourcePath} but found ${classification.state}.`
     };
   }
+  await afterClassification?.(rollback.targetPath);
   if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, rollback.targetPath))) {
     return {
       kind: "refused",
       message: `Refusing to remove ${rollback.targetPath}: its parent is not a real directory under ${installRoot}.`
+    };
+  }
+  const finalClassification = await classifySymlinkInstall({
+    targetPath: rollback.targetPath,
+    expectedSourcePath: rollback.expectedSourcePath
+  });
+  if (finalClassification.state !== "correct") {
+    return {
+      kind: "refused",
+      message: `Refusing to remove ${rollback.targetPath}: expected a symlink to ${rollback.expectedSourcePath} but found ${finalClassification.state}.`
     };
   }
   try {
@@ -1035,13 +1060,16 @@ async function removeMissingInstallTarget(targetPath: string, installRoot: strin
   | { status: "failed"; code: string; message: string }
 > {
   try {
+    if (!(await rollbackMutationParentIsSafe(installRoot, targetPath, true))) {
+      throw new Error(`Refusing to remove ${targetPath}: its parent is not safely contained under ${installRoot}.`);
+    }
     if (await rollbackTargetIsMissing(targetPath)) {
+      if (!(await rollbackMutationParentIsSafe(installRoot, targetPath, true))) {
+        throw new Error(`Refusing to accept missing target ${targetPath}: its parent is not safely contained under ${installRoot}.`);
+      }
       return { status: "removed" };
     }
     if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, targetPath))) {
-      if (await rollbackTargetIsMissing(targetPath)) {
-        return { status: "removed" };
-      }
       throw new Error(`Refusing to remove ${targetPath}: its parent is not a real directory under ${installRoot}.`);
     }
     await rm(targetPath, { recursive: true, force: true });
@@ -1085,13 +1113,16 @@ async function removeReconcileBackup({
   }
   try {
     await beforeRemoval?.(backupPath);
+    if (!(await rollbackMutationParentIsSafe(installRoot, backupPath, true))) {
+      throw new Error(`Refusing to remove ${backupPath}: its parent is not safely contained under the receipt install root.`);
+    }
     if (await rollbackTargetIsMissing(backupPath)) {
+      if (!(await rollbackMutationParentIsSafe(installRoot, backupPath, true))) {
+        throw new Error(`Refusing to accept missing backup ${backupPath}: its parent is not safely contained under the receipt install root.`);
+      }
       return { status: "removed" };
     }
     if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, backupPath))) {
-      if (await rollbackTargetIsMissing(backupPath)) {
-        return { status: "removed" };
-      }
       throw new Error(`Refusing to remove ${backupPath}: its parent is not a real directory under the receipt install root.`);
     }
     await rm(backupPath, { recursive: true, force: true });
@@ -1204,7 +1235,8 @@ async function listFiles(root: string): Promise<string[]> {
 async function restoreRollbackFile(
   file: RollbackFileRecord,
   installRoot: string,
-  beforeMutation?: ((targetPath: string) => Promise<void> | void) | undefined
+  beforeMutation?: ((targetPath: string) => Promise<void> | void) | undefined,
+  beforeOwnershipChange?: ((targetPath: string) => Promise<void> | void) | undefined
 ): Promise<
   | { status: "restored" }
   | { status: "removed" }
@@ -1259,7 +1291,11 @@ async function restoreRollbackFile(
     try {
       await temporaryFile.writeFile(bytes);
       if (replacementOwner !== null && platform() !== "win32") {
-        await temporaryFile.chown(replacementOwner.uid, replacementOwner.gid);
+        const temporaryOwner = await temporaryFile.stat();
+        if (temporaryOwner.uid !== replacementOwner.uid || temporaryOwner.gid !== replacementOwner.gid) {
+          await beforeOwnershipChange?.(file.targetPath);
+          await temporaryFile.chown(replacementOwner.uid, replacementOwner.gid);
+        }
       }
       if (replacementMode !== undefined) await temporaryFile.chmod(replacementMode);
     } finally {
@@ -1301,20 +1337,30 @@ async function removeRollbackTarget(
 > {
   try {
     await beforeMutation?.(file.targetPath);
+    if (!(await rollbackMutationParentIsSafe(installRoot, file.targetPath, true))) {
+      throw new Error(`Refusing to remove ${file.targetPath}: its parent is not safely contained under ${installRoot}.`);
+    }
     if (await rollbackTargetIsMissing(file.targetPath)) {
+      if (!(await rollbackMutationParentIsSafe(installRoot, file.targetPath, true))) {
+        throw new Error(`Refusing to accept missing target ${file.targetPath}: its parent is not safely contained under ${installRoot}.`);
+      }
       return { status: "removed" };
     }
     if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, file.targetPath))) {
-      if (await rollbackTargetIsMissing(file.targetPath)) {
-        return { status: "removed" };
-      }
       throw new Error(`Refusing to remove ${file.targetPath}: its parent is not a real directory under ${installRoot}.`);
     }
     await unlink(file.targetPath);
     return { status: "removed" };
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
-      return { status: "removed" };
+      if (await rollbackMutationParentIsSafe(installRoot, file.targetPath, true)) {
+        return { status: "removed" };
+      }
+      return {
+        status: "failed",
+        code: "rollback_remove_failed",
+        message: `Failed to remove ${file.path}: its parent is not safely contained under ${installRoot}.`
+      };
     }
     if (isNodeError(error) && (error.code === "EISDIR" || error.code === "EPERM") && await isDirectory(file.targetPath)) {
       try {

@@ -121,6 +121,23 @@ test("rollback preserves the replaced target file mode", async (t) => {
   assert.equal(await readFile(runtimePath, "utf8"), "console.log(\"old\");\n");
 });
 
+test("rollback skips ownership changes when the replacement owner already matches", async (t) => {
+  const { receiptPath } = await createAppliedUpdate(t);
+  let ownershipChanges = 0;
+
+  const result = await rollback({
+    receipt: receiptPath,
+    __test: {
+      beforeFileOwnershipChange: () => {
+        ownershipChanges += 1;
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(ownershipChanges, 0);
+});
+
 test("rollback accepts a receipt through a symlinked install root", async (t) => {
   const { receiptPath, targetRoot, targetSkill } = await createAppliedUpdate(t);
   const aliasRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-alias-"));

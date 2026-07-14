@@ -47,6 +47,7 @@ type PruneInput = {
     failAfterReceipt?: boolean;
     afterReceiptWrite?: () => Promise<void> | void;
     beforeFailureRecovery?: () => Promise<void> | void;
+    afterCandidateRevalidation?: (skill: string) => Promise<void> | void;
   };
 };
 
@@ -501,10 +502,14 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       await input.__test?.beforeMutationForSkill?.(candidate.skill);
       await revalidateAssignments(input, planned, [candidate.skill]);
       await revalidateCandidate(planned, candidate);
+      await input.__test?.afterCandidateRevalidation?.(candidate.skill);
       if (candidate.kind === "directory") {
+        await assertNoSymlinkedParentComponents(candidate.quarantinePath!, installRoot);
+        await assertNoSymlinkedParentComponents(candidate.targetPath, installRoot);
         await rename(candidate.targetPath, candidate.quarantinePath!);
         movedDirectories.push(candidate);
       } else if (candidate.kind === "symlink") {
+        await assertNoSymlinkedParentComponents(candidate.targetPath, installRoot);
         await rm(candidate.targetPath);
         removedSymlinks.push(candidate);
       }
