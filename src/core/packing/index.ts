@@ -63,6 +63,7 @@ type PackArtifactSummary = {
 
 type PackedFile = {
   skill: string;
+  destination: string;
   relativePath: string;
   sourcePath: string;
   bundlePath: string;
@@ -161,7 +162,7 @@ export async function pack({
     };
   }
   const planTarget = resolvePlanTarget(manifest, target);
-  const planResult: PlanResult = await plan({ source: sourceRoot, target: planTarget });
+  const planResult: PlanResult = await plan({ source: sourceRoot, target: planTarget, assignmentPath: target });
   const files: PackedFile[] = [];
   const errors: ErrorLike[] = [...planResult.errors];
 
@@ -301,6 +302,7 @@ function computeArtifactId(artifact: Omit<PackArtifact, "id">): string {
       action: item.action,
       variant: item.variant,
       sourcePath: item.sourcePath,
+      destination: item.destination,
       evidence: [...item.evidence]
     })),
     blocked: artifact.blocked.map((item) => ({
@@ -315,6 +317,7 @@ function computeArtifactId(artifact: Omit<PackArtifact, "id">): string {
     files: artifact.files.map((item) => ({
       skill: item.skill,
       relativePath: item.relativePath,
+      destination: item.destination,
       sha256: item.sha256,
       bytes: item.bytes
     })),
@@ -365,6 +368,7 @@ function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {
       relativePath: item.relativePath,
       bundlePath: item.bundlePath,
       sourcePath: path.relative(sourceRoot, item.sourcePath),
+      destination: item.destination,
       bytes: item.bytes,
       sha256: item.sha256
     })),
@@ -373,6 +377,7 @@ function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {
       action: item.action,
       variant: item.variant,
       sourcePath: path.relative(sourceRoot, item.sourcePath),
+      destination: item.destination,
       evidence: item.evidence
     })),
     blocked: artifact.blocked.map((item) => ({
@@ -539,9 +544,10 @@ async function collectSkillFiles(
     const bytes = await readFile(filePath);
     files.push({
       skill: plannedSkill.skill,
+      destination: plannedSkill.destination,
       relativePath,
       sourcePath: filePath,
-      bundlePath: path.join("skills", plannedSkill.skill, relativePath),
+      bundlePath: path.join("skills", plannedSkill.destination, relativePath),
       bytes: bytes.length,
       sha256: createHash("sha256").update(bytes).digest("hex")
     });

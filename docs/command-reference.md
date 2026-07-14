@@ -63,6 +63,13 @@ Available overrides are:
 These overrides are accepted by `targets`, `status`, `diff`, `pack`, `apply`,
 `track`, `reconcile`, `repair`, `prune`, and `import-target`.
 For Hermes, use `--hermes-skills "$HOME/.hermes/skills"` for the default profile or point it at `$HOME/.hermes/profiles/<name>/skills` for a named profile.
+For `hermes-external-skills-root`, `--hermes-skills` overrides only the dedicated
+external-root `path`; the manifest's explicit `home` still identifies the
+read-only `config.yaml` and local `$HERMES_HOME/skills` collision boundary.
+Create that root, then register its exact path in Hermes `skills.external_dirs`
+before `diff` or live apply. Skill Suitcase reports
+`hermes_external_root_unregistered` and never creates the root or edits the file
+for you.
 
 ### `plan`
 
@@ -71,7 +78,7 @@ skill-suitcase plan --source "$SRC" --target codex --json
 ```
 
 Resolves the selected assignment and emits each skill's action, variant, source
-path, evidence, and any blocked reason. It does not resolve target install paths,
+path, relative destination, evidence, and any blocked reason. It does not resolve target install paths,
 choose install modes, hash content, or read/write live targets.
 
 ### `diff`

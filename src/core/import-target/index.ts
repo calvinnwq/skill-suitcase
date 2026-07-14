@@ -151,7 +151,7 @@ type DiffForImport = {
   assignment: string | null;
   installRoot: string | null;
   readOnly?: boolean;
-  planned: Array<{ skill: string; sourcePath: string; variant?: string }>;
+  planned: Array<{ skill: string; sourcePath: string; destination: string; variant?: string }>;
   blocked: Array<{ skill: string; reason?: string }>;
   entries: DiffEntry[];
   errors: Array<{ code: string; message: string; skill?: string }>;
@@ -310,6 +310,7 @@ async function executeImportLocked(
         },
         sourcePath: catalogPath,
         targetPath,
+        destination: path.relative(installRoot, targetPath),
         sourceHash,
         installedFiles,
         priorState
@@ -685,10 +686,14 @@ async function planImport(input: ImportTargetInput, selectedSkills: string[]): P
       continue;
     }
 
-    if (!isSameOrInsidePath(statusItem.targetPath, installRoot)) {
+    const plannedTargetPath = path.resolve(installRoot, planned.destination);
+    if (
+      !isSameOrInsidePath(statusItem.targetPath, installRoot)
+      || path.resolve(statusItem.targetPath) !== plannedTargetPath
+    ) {
       errors.push(importError({
         code: "unsafe_path",
-        message: `Target path for ${skill} resolves outside the install root and cannot be imported.`,
+        message: `Target path for ${skill} does not match planned destination ${planned.destination} and cannot be imported.`,
         skill,
         path: statusItem.targetPath
       }));

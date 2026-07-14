@@ -2,11 +2,13 @@ import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { type Catalog, loadCatalog } from "../catalog/index.js";
 import { platformCompatibilityNames } from "../platform-adapters.js";
+import { isHermesCategorySegment } from "../hermes-categories.js";
 
 type PlannerInput = {
   source: string;
   target: string;
   skills?: string[];
+  assignmentPath?: string;
 };
 
 type PlanItem = {
@@ -18,6 +20,7 @@ type PlanItem = {
   sourcePath: string;
   evidence: string[];
   source?: string;
+  destination: string;
 };
 
 type PlanError = {
@@ -35,7 +38,7 @@ export type PlanResult = {
   errors: PlanError[];
 };
 
-export async function plan({ source, target, skills }: PlannerInput): Promise<PlanResult> {
+export async function plan({ source, target, skills, assignmentPath }: PlannerInput): Promise<PlanResult> {
   if (!source) {
     throw new Error("source is required");
   }
@@ -44,7 +47,18 @@ export async function plan({ source, target, skills }: PlannerInput): Promise<Pl
   }
 
   const { sourceRoot, manifest } = await loadCatalog(source);
-  const assignment = manifest.assignments[target];
+  const targetContext = resolvePlanTargetContext(manifest, target, assignmentPath);
+  if (targetContext.error !== undefined) {
+    return {
+      ok: false,
+      source: sourceRoot,
+      target,
+      planned: [],
+      blocked: [],
+      errors: [targetContext.error]
+    };
+  }
+  const assignment = manifest.assignments[targetContext.assignment];
 
   if (!assignment) {
     return {
@@ -56,7 +70,7 @@ export async function plan({ source, target, skills }: PlannerInput): Promise<Pl
       errors: [
         {
           code: "unknown_target",
-          message: `Unknown target assignment: ${target}`
+          message: `Unknown target assignment: ${targetContext.assignment}`
         }
       ]
     };
@@ -71,11 +85,24 @@ export async function plan({ source, target, skills }: PlannerInput): Promise<Pl
   const errors: PlanError[] = [];
 
   for (const skillName of plannedSkills) {
+    const destination = resolveSkillDestination({
+      skillName,
+      assignment,
+      categorized: targetContext.categorized
+    });
+    if (!destination.ok) {
+      errors.push({
+        code: destination.code,
+        message: destination.message,
+        skill: skillName
+      });
+      continue;
+    }
     const compatibility = manifest.compatibility[skillName] ?? {};
     const variant = selectSkillVariant(manifest, skillName, compatibilityTargets);
 
     if (variant !== null) {
-      const item = await safePlannedSkill(sourceRoot, skillName, compatibility, errors, variant);
+      const item = await safePlannedSkill(sourceRoot, skillName, compatibility, errors, destination.value, variant);
       if (item !== null) {
         planned.push(item);
       }
@@ -86,7 +113,7 @@ export async function plan({ source, target, skills }: PlannerInput): Promise<Pl
     const compatibleAgents = compatibility.agents ?? [];
 
     if (blockedReason) {
-      blocked.push(blockedSkill(sourceRoot, skillName, target, blockedReason, compatibility));
+      blocked.push(blockedSkill(sourceRoot, skillName, target, blockedReason, compatibility, destination.value));
       continue;
     }
 
@@ -100,13 +127,14 @@ export async function plan({ source, target, skills }: PlannerInput): Promise<Pl
           skillName,
           target,
           compatibility.reason ?? `Skill ${skillName} is not compatible with ${target}.`,
-          compatibility
+          compatibility,
+          destination.value
         )
       );
       continue;
     }
 
-    const item = await safePlannedSkill(sourceRoot, skillName, compatibility, errors);
+    const item = await safePlannedSkill(sourceRoot, skillName, compatibility, errors, destination.value);
     if (item !== null) {
       planned.push(item);
     }
@@ -127,10 +155,11 @@ async function safePlannedSkill(
   skillName: string,
   compatibility: Catalog["compatibility"][string],
   errors: PlanError[],
+  destination: string,
   variant: ResolvedSkillVariant | null = null
 ): Promise<PlanItem | null> {
   try {
-    return await plannedSkill(sourceRoot, skillName, compatibility, variant);
+    return await plannedSkill(sourceRoot, skillName, compatibility, destination, variant);
   } catch (error) {
     errors.push({
       code: "source_missing",
@@ -207,6 +236,7 @@ async function plannedSkill(
   sourceRoot: string,
   skillName: string,
   compatibility: Catalog["compatibility"][string],
+  destination: string,
   variant: ResolvedSkillVariant | null = null
 ): Promise<PlanItem> {
   const sourceRelativePath = variant?.source ?? path.join("skills", skillName);
@@ -218,6 +248,7 @@ async function plannedSkill(
     action: "install",
     variant: variant?.name ?? compatibility.variant ?? "canonical",
     sourcePath: skillPath,
+    destination,
     evidence: compatibility.evidence ?? []
   };
   if (variant?.source !== undefined) {
@@ -231,7 +262,8 @@ function blockedSkill(
   skillName: string,
   target: string,
   reason: string,
-  compatibility: Catalog["compatibility"][string]
+  compatibility: Catalog["compatibility"][string],
+  destination: string
 ): PlanItem {
   return {
     skill: skillName,
@@ -239,9 +271,81 @@ function blockedSkill(
     target,
     variant: compatibility.variant ?? "canonical",
     sourcePath: path.join(sourceRoot, "skills", skillName),
+    destination,
     reason,
     evidence: compatibility.evidence ?? []
   };
+}
+
+function resolvePlanTargetContext(
+  manifest: Catalog,
+  target: string,
+  assignmentPathId: string | undefined
+): { assignment: string; categorized: boolean; error?: PlanError } {
+  const explicitPath = assignmentPathId ?? target;
+  const direct = manifest.assignmentPaths?.[explicitPath];
+  if (isRecord(direct)) {
+    return {
+      assignment: normalizeValue(direct.assignment) ?? target,
+      categorized: normalizeValue(direct.kind) === "hermes-external-skills-root"
+    };
+  }
+
+  const matching = Object.values(manifest.assignmentPaths ?? {}).filter(
+    (entry) => isRecord(entry) && normalizeValue(entry.assignment) === target
+  );
+  const layouts = new Set(matching.map(
+    (entry) => normalizeValue(entry.kind) === "hermes-external-skills-root" ? "categorized" : "flat"
+  ));
+  if (layouts.size > 1) {
+    return {
+      assignment: target,
+      categorized: false,
+      error: {
+        code: "ambiguous_assignment_path_layout",
+        message: `Assignment ${target} has target paths with incompatible destination layouts.`
+      }
+    };
+  }
+  return {
+    assignment: target,
+    categorized: matching.length > 0 && normalizeValue(matching[0]?.kind) === "hermes-external-skills-root"
+  };
+}
+
+type DestinationResolution =
+  | { ok: true; value: string }
+  | { ok: false; code: "missing_skill_category" | "invalid_skill_category"; message: string };
+
+function resolveSkillDestination({
+  skillName,
+  assignment,
+  categorized
+}: {
+  skillName: string;
+  assignment: Catalog["assignments"][string];
+  categorized: boolean;
+}): DestinationResolution {
+  if (!categorized) {
+    return { ok: true, value: skillName };
+  }
+
+  const category = normalizeValue(assignment.categories?.[skillName]);
+  if (category === null) {
+    return {
+      ok: false,
+      code: "missing_skill_category",
+      message: `Categorized target requires a category for ${skillName}.`
+    };
+  }
+  if (!isHermesCategorySegment(category)) {
+    return {
+      ok: false,
+      code: "invalid_skill_category",
+      message: `Category for ${skillName} must be one Hermes-discoverable safe plain path segment.`
+    };
+  }
+  return { ok: true, value: path.join(category, skillName) };
 }
 
 type ResolvedSkillVariant = {

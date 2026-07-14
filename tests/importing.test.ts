@@ -352,6 +352,46 @@ compatibility:
   );
 });
 
+test("rejects Hermes-reserved category names during import inspection", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-import-hermes-category-"));
+  await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });
+  await writeFile(path.join(source, "skills", "office-hours", "SKILL.md"), "# Office Hours\n");
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      office-hours: node_modules
+
+assignmentPaths:
+  hermes:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: /tmp/hermes
+    path: /tmp/hermes/external-skills
+`
+  );
+
+  const result = await inspectImportSource({ source });
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.findings.some(
+      (finding) =>
+        finding.code === "invalid_skill_category" &&
+        finding.path === "assignments.hermes.categories.office-hours"
+    ),
+    true
+  );
+});
+
 test("reports invalid logical group metadata deterministically", async () => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-import-bad-groups-"));
   await mkdir(path.join(source, "skills", "office-hours"), { recursive: true });

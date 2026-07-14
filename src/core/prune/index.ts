@@ -24,6 +24,7 @@ import {
   type ReceiptInstallRecord
 } from "../receipts/index.js";
 import { SYMLINK_MODE } from "../install-modes.js";
+import { validateHermesExternalRoot } from "../hermes-external-root.js";
 
 export const PRUNE_PLAN_SCHEMA = "calvinnwq.skills.prune-plan.v0";
 export const PRUNE_TRANSACTION_SCHEMA = "calvinnwq.skills.prune-transaction.v0";
@@ -57,7 +58,7 @@ type PruneError = {
 
 export type PruneCandidate = {
   skill: string;
-  kind: "directory" | "symlink";
+  kind: "directory" | "symlink" | "missing";
   targetPath: string;
   fingerprint: string;
   receiptRecordHash: string;
@@ -173,6 +174,7 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
   const installRoot = target?.platform?.installRoot ?? null;
   const assignment = target?.assignment ?? null;
   const targetIdentity = assignment ?? input.target;
+  const categorizedExternalRoot = target?.platform?.metadata["categorizedExternalRoot"] === true;
   if (target === undefined) errors.push({ code: "unknown_target", message: `Unknown target ${input.target}.` });
   if (target?.platform?.metadata["readOnly"] === true) errors.push({ code: "read_only_target", message: `Target ${input.target} is read-only.` });
   if (target !== undefined && target.safety.classification !== "live-install-root") {
@@ -182,10 +184,25 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
     });
   }
   if (installRoot === null) errors.push({ code: "missing_install_root", message: `Could not resolve install root for ${input.target}.` });
+  if (categorizedExternalRoot && installRoot !== null) {
+    if (target?.home === null || target?.home === undefined) {
+      errors.push({ code: "invalid_target", message: `Categorized Hermes target ${input.target} is missing its explicit home.` });
+    } else {
+      errors.push(...await validateHermesExternalRoot({
+        home: target.home,
+        installRoot,
+        planned: []
+      }));
+    }
+  }
 
   let assignmentPlan: Awaited<ReturnType<typeof plan>>;
   try {
-    assignmentPlan = await plan({ source, target: assignment ?? input.target });
+    assignmentPlan = await plan({
+      source,
+      target: assignment ?? input.target,
+      assignmentPath: input.target
+    });
   } catch (error) {
     errors.push({
       code: "assignment_unverifiable",
@@ -238,14 +255,21 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
         errors.push({ code: "unsafe_skill_name", message: `Skill ${skill} is not a plain path segment.`, skill });
         continue;
       }
-      const targetPath = path.join(installRoot, skill);
-      if (!isDirectChild(targetPath, installRoot)) {
-        errors.push({ code: "unsafe_target_path", message: `Target path ${targetPath} escapes ${installRoot}.`, skill, path: targetPath });
+      const record = selectReceiptRecordForSkill(
+        receipt,
+        skill,
+        targetIdentity,
+        installRoot,
+        categorizedExternalRoot
+      );
+      if (record === null) {
+        errors.push({ code: "missing_receipt_record", message: `Skill ${skill} has no unambiguous receipt record inside ${installRoot}.`, skill, path: installRoot });
         continue;
       }
-      const record = selectReceiptRecord(receipt, skill, targetIdentity, targetPath, installRoot);
-      if (record === null) {
-        errors.push({ code: "missing_receipt_record", message: `Skill ${skill} has no matching receipt record for ${targetPath}.`, skill, path: targetPath });
+      const recordTargetPath = normalize(record.targetPath);
+      const targetPath = recordTargetPath === null ? installRoot : path.resolve(installRoot, recordTargetPath);
+      if (!isInside(targetPath, installRoot)) {
+        errors.push({ code: "unsafe_target_path", message: `Target path ${targetPath} escapes ${installRoot}.`, skill, path: targetPath });
         continue;
       }
       const candidate = await inspectCandidate(skill, targetPath, installRoot, record);
@@ -306,10 +330,36 @@ async function inspectCandidate(
   installRoot: string,
   record: ReceiptInstallRecord
 ): Promise<{ value: PruneCandidate } | { error: PruneError }> {
+  try {
+    await assertNoSymlinkedParentComponents(targetPath, installRoot);
+  } catch (error) {
+    return { error: { code: "unsafe_target_path", message: `Could not safely resolve parent of ${targetPath}: ${errorMessage(error)}`, skill, path: targetPath } };
+  }
   let info;
-  try { info = await lstat(targetPath); }
-  catch (error) {
-    return { error: { code: "target_missing", message: `Cannot prune missing target ${targetPath}: ${errorMessage(error)}`, skill, path: targetPath } };
+  try {
+    info = await lstat(targetPath);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return { value: {
+        skill,
+        kind: "missing",
+        targetPath,
+        fingerprint: sha256("missing"),
+        receiptRecordHash: sha256(stableJson(record)),
+        symlinkTarget: null,
+        quarantinePath: null
+      } };
+    }
+    return { error: { code: "target_unreadable", message: `Could not inspect target ${targetPath}: ${errorMessage(error)}`, skill, path: targetPath } };
+  }
+  try {
+    const resolvedRoot = await realpath(installRoot);
+    const resolvedParent = await realpath(path.dirname(targetPath));
+    if (resolvedParent !== resolvedRoot && !isInside(resolvedParent, resolvedRoot)) {
+      return { error: { code: "unsafe_target_path", message: `Parent of ${targetPath} resolves outside ${installRoot}.`, skill, path: targetPath } };
+    }
+  } catch (error) {
+    return { error: { code: "target_unreadable", message: `Could not inspect parent of ${targetPath}: ${errorMessage(error)}`, skill, path: targetPath } };
   }
   try {
     const receiptRecordHash = sha256(stableJson(record));
@@ -355,6 +405,25 @@ async function inspectCandidate(
     return { value: { skill, kind: "directory", targetPath, fingerprint: sha256(stableJson(tree.entries)), receiptRecordHash, symlinkTarget: null, quarantinePath: null } };
   } catch (error) {
     return { error: { code: "target_unreadable", message: `Could not inspect target ${targetPath}: ${errorMessage(error)}`, skill, path: targetPath } };
+  }
+}
+
+async function assertNoSymlinkedParentComponents(targetPath: string, installRoot: string): Promise<void> {
+  const root = path.resolve(installRoot);
+  const parent = path.resolve(path.dirname(targetPath));
+  if (parent !== root && !isInside(parent, root)) {
+    throw new Error(`Parent of ${targetPath} escapes ${installRoot}.`);
+  }
+  let current = root;
+  for (const part of path.relative(root, parent).split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`Parent component ${current} is a symlink.`);
+      }
+    } catch (error) {
+      if (!isMissingPathError(error)) throw error;
+    }
   }
 }
 
@@ -418,7 +487,7 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       if (candidate.kind === "directory") {
         await rename(candidate.targetPath, candidate.quarantinePath!);
         movedDirectories.push(candidate);
-      } else {
+      } else if (candidate.kind === "symlink") {
         await rm(candidate.targetPath);
         removedSymlinks.push(candidate);
       }
@@ -520,7 +589,11 @@ async function revalidateAssignments(input: PruneInput, planned: PlannedPrune, s
   }
   let assignmentPlan: Awaited<ReturnType<typeof plan>>;
   try {
-    assignmentPlan = await plan({ source: planned.source, target: planned.assignment ?? planned.target });
+    assignmentPlan = await plan({
+      source: planned.source,
+      target: planned.assignment ?? planned.target,
+      assignmentPath: planned.target
+    });
   } catch (error) {
     throw new Error(`Cannot revalidate assignments for ${skills.join(", ")}: ${errorMessage(error)}`);
   }
@@ -572,6 +645,45 @@ function selectReceiptRecord(
   const records = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
   const matches = records.filter((record) => recordMatches(record, skill, targetIdentity, targetPath, installRoot));
   return matches.length === 1 ? matches[0]! : null;
+}
+
+function selectReceiptRecordForSkill(
+  receipt: Receipt,
+  skill: string,
+  targetIdentity: string,
+  installRoot: string,
+  categorizedExternalRoot: boolean
+): ReceiptInstallRecord | null {
+  const raw = receipt.installs?.[skill];
+  const records = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+  const matches = records.filter((record) => {
+    const value = normalize(record.targetPath);
+    if (value === null) return false;
+    const targetPath = path.resolve(installRoot, value);
+    return receiptDestinationMatches(record, skill, targetPath, installRoot, categorizedExternalRoot)
+      && recordMatches(record, skill, targetIdentity, targetPath, installRoot);
+  });
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+function receiptDestinationMatches(
+  record: ReceiptInstallRecord,
+  skill: string,
+  targetPath: string,
+  installRoot: string,
+  categorizedExternalRoot: boolean
+): boolean {
+  const destination = normalize(record.destination);
+  if (!categorizedExternalRoot) {
+    return path.resolve(targetPath) === path.resolve(installRoot, skill)
+      && (destination === null || destination === skill);
+  }
+  if (destination === null) return false;
+  const category = path.dirname(destination);
+  return isPlainSegment(category)
+    && path.basename(destination) === skill
+    && destination === path.join(category, skill)
+    && path.resolve(targetPath) === path.resolve(installRoot, destination);
 }
 
 function recordMatches(
@@ -791,9 +903,6 @@ function normalize(value: unknown): string | null {
 function isPlainSegment(value: string): boolean {
   return value !== "." && value !== ".." && path.basename(value) === value && !value.includes("/") && !value.includes("\\");
 }
-function isDirectChild(candidate: string, root: string): boolean {
-  return path.dirname(path.resolve(candidate)) === path.resolve(root);
-}
 function isInside(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
@@ -818,4 +927,8 @@ function stableJson(value: unknown): string {
 }
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

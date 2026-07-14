@@ -190,6 +190,7 @@ same model; do not rewrite the workflow around provider-specific prose.
 | Generic agent skills root | `agents` | `targets --json` | `--agents-skills` | live only after approval |
 | Claude skills root | `claude` | `targets --json` | `--claude-skills` | live only after approval |
 | Hermes skills root | `hermes` | `targets --json` | `--hermes-skills` | live only after approval |
+| Hermes categorized external root | `hermes` | `targets --json`, then inspect `skills.external_dirs` | `--hermes-skills` overrides the owned external root only | live only after explicit config registration and approval |
 | Grok Build skills root | `grok` | `targets --json` | `--grok-skills` | live only after approval |
 | Provider-managed skills | provider-specific | provider/plugin docs | none in Suitcase | read-only or skip; `pack`/mutation commands refuse even custom manifest assignment paths |
 | Future provider | manifest target id | `targets --json` | provider adapter override if supported | read-only until proven |
@@ -220,6 +221,16 @@ Use local overrides on machines whose homes differ from the catalog defaults:
 "$CLI" status --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json
 "$CLI" diff --source "$SRC" --target grok --grok-skills "$HOME/.grok/skills" --json
 ```
+
+For categorized Hermes materialization, require the manifest adapter kind
+`hermes-external-skills-root`, explicit `home` and owned external-root `path`,
+and an assignment `categories` entry for every selected skill. Verify the exact
+root already exists and is listed in `<home>/config.yaml` under
+`skills.external_dirs`.
+Never add it automatically, never write into `<home>/skills`, and stop on
+`hermes_external_root_unregistered` or `hermes_local_skill_shadow`. Review each
+planned `destination` (`<category>/<skill>`) and confirm the central receipt is
+at the external root before any live apply.
 
 For nested or provider-specific homes, inspect `targets` first and use only
 install roots that exist on the machine and are intended to be Suitcase-owned.

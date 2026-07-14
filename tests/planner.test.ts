@@ -73,6 +73,42 @@ test("hermes plans only portable core skills", async () => {
   assert.deepEqual(result.blocked, []);
 });
 
+test("assignment-level planning preserves categories across multiple categorized paths", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-multi-hermes-plan-"));
+  await mkdir(path.join(source, "skills", "hello-hermes"), { recursive: true });
+  await writeFile(path.join(source, "skills", "hello-hermes", "SKILL.md"), "# Hello\n");
+  await writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - hello-hermes
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      hello-hermes: productivity
+assignmentPaths:
+  hermes-a:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: /path/to/hermes-a
+    path: /path/to/hermes-a/skill-suitcase/skills
+  hermes-b:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: /path/to/hermes-b
+    path: /path/to/hermes-b/skill-suitcase/skills
+compatibility:
+  hello-hermes:
+    agents:
+      - hermes
+`);
+
+  const result = await plan({ source, target: "hermes" });
+  assert.equal(result.ok, true);
+  assert.equal(result.planned[0]?.destination, path.join("productivity", "hello-hermes"));
+});
+
 test("unknown targets return a machine-readable error", async () => {
   const result = await plan({ source: fixtureSource, target: "unknown" });
 

@@ -9,6 +9,7 @@ export type PlatformAdapterKind =
   | "agents-skills-root"
   | "claude-skills-root"
   | "hermes-skills-root"
+  | "hermes-external-skills-root"
   | "opencode-skills-root"
   | "pi-skills-root"
   | "grok-skills-root";
@@ -24,6 +25,7 @@ export type PlatformAdapter = {
     nestedHome?: boolean;
     readOnly?: boolean;
     skillsShCompatibility?: boolean;
+    categorizedExternalRoot?: boolean;
   };
 };
 
@@ -78,6 +80,16 @@ const PLATFORM_ADAPTERS: Record<PlatformAdapterKind, PlatformAdapter> = {
     requiredFields: ["path"],
     compatibilityNames: ["hermes"],
     metadata: {}
+  },
+  "hermes-external-skills-root": {
+    id: "hermes",
+    kind: "hermes-external-skills-root",
+    installRootField: "path",
+    requiredFields: ["home", "path"],
+    compatibilityNames: ["hermes"],
+    metadata: {
+      categorizedExternalRoot: true
+    }
   },
   "agents-skills-root": {
     id: "agents",

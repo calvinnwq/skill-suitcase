@@ -170,6 +170,14 @@ The durable state model belongs to Skill Suitcase:
 External installers or registries may provide useful compatibility data, but
 they must not bypass this model.
 
+Hermes categorized materialization uses a dedicated Skill Suitcase-owned
+external root. Assignment `categories` select one safe category segment per
+skill, and resolved destinations remain inside that root. The central receipt
+stays at the external root; Skill Suitcase never claims Hermes's bundled or
+user-managed `$HERMES_HOME/skills` categories. The owned root must exist and be
+registered in Hermes configuration before planning live filesystem behavior so
+Hermes cannot cache it as absent.
+
 Manifest-owned logical groups are reporting metadata. They may name product
 families, upstream suites, provider boundaries, or other operator-facing buckets
 by referencing skills, suitcases, and assignments already declared in the

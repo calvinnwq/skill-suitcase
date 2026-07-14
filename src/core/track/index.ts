@@ -38,7 +38,7 @@ type DiffForTrack = {
   assignment: string | null;
   installRoot: string | null;
   readOnly?: boolean;
-  planned: Array<{ skill: string; sourcePath: string; variant?: string }>;
+  planned: Array<{ skill: string; sourcePath: string; destination: string; variant?: string }>;
   blocked: Array<{ skill: string; reason?: string }>;
   entries: Array<{
     action: "create" | "update" | "unchanged" | "extra" | "missing" | "blocked";
@@ -166,7 +166,7 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
   const records: TrackRecord[] = [];
 
   for (const planned of plannedForTrack) {
-    const targetPath = path.join(installRoot, planned.skill);
+    const targetPath = path.join(installRoot, planned.destination);
     const classification = await classifySymlinkInstall({
       targetPath,
       expectedSourcePath: planned.sourcePath
@@ -264,6 +264,7 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
       },
       sourcePath: record.sourcePath,
       targetPath: record.targetPath,
+      destination: path.relative(installRoot, record.targetPath),
       sourceHash: record.sourceHash,
       installedFiles: record.installedFiles,
       priorState: {

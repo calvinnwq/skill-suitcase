@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
@@ -38,6 +38,7 @@ type RepairInput = {
     failAfterBackup?: boolean;
     failAfterBackupForSkill?: string;
     failBeforeReceipt?: boolean;
+    beforeMutationForSkill?: (skill: string) => Promise<void> | void;
   };
 };
 
@@ -663,23 +664,27 @@ async function executeRepairLocked(
 
   for (const candidate of plan.candidates) {
     const backupPath = path.join(path.dirname(candidate.targetPath), `.${candidate.skill}.suitcase-pre-repair-${uniqueSuffix()}`);
-    const tmpPath = path.join(path.dirname(candidate.targetPath), `.${candidate.skill}.suitcase-repair-next-${uniqueSuffix()}`);
+    const tmpPath = path.join(installRoot, `.skill-suitcase-repair-next-${candidate.skill}-${uniqueSuffix()}`);
     let copied = false;
     let backedUp = false;
     let installed = false;
 
     try {
+      await input.__test?.beforeMutationForSkill?.(candidate.skill);
+      await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
       await assertSourcePolicyAllowsSource(candidate.sourcePath, sourcePolicy);
       await copyTree(candidate.sourcePath, tmpPath, sourcePolicy);
       copied = true;
       if (!(await treesMatch(candidate.sourcePath, tmpPath, sourcePolicy))) {
         throw new Error(`Temporary repair copy for ${candidate.skill} does not match catalog source.`);
       }
+      await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
       await rename(candidate.targetPath, backupPath);
       backedUp = true;
       if (input.__test?.failAfterBackup === true || input.__test?.failAfterBackupForSkill === candidate.skill) {
         throw new Error("Injected failure after backup.");
       }
+      await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
       await rename(tmpPath, candidate.targetPath);
       installed = true;
       copied = false;
@@ -712,6 +717,7 @@ async function executeRepairLocked(
         },
         sourcePath: candidate.sourcePath,
         targetPath: candidate.targetPath,
+        destination: path.relative(installRoot, candidate.targetPath),
         sourceHash: await hashDirectory(candidate.sourcePath, sourcePolicy),
         installedFiles,
         priorState,
@@ -834,6 +840,28 @@ async function executeRepairLocked(
     receiptPath: receiptPathWritten,
     postRepairStatus
   };
+}
+
+async function assertTargetParentInsideInstallRoot(targetPath: string, installRoot: string): Promise<void> {
+  const lexicalRoot = path.resolve(installRoot);
+  const lexicalParent = path.resolve(path.dirname(targetPath));
+  if (!isSameOrInsidePath(lexicalParent, lexicalRoot)) {
+    throw new Error(`Target parent ${lexicalParent} escapes install root ${lexicalRoot}.`);
+  }
+  let current = lexicalRoot;
+  for (const part of path.relative(lexicalRoot, lexicalParent).split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    if ((await lstat(current)).isSymbolicLink()) {
+      throw new Error(`Target parent component ${current} is a symlink.`);
+    }
+  }
+  const [resolvedRoot, resolvedParent] = await Promise.all([
+    realpath(installRoot),
+    realpath(path.dirname(targetPath))
+  ]);
+  if (!isSameOrInsidePath(resolvedParent, resolvedRoot)) {
+    throw new Error(`Target parent ${path.dirname(targetPath)} resolves outside install root ${installRoot}.`);
+  }
 }
 
 function postStatusCurrentErrors({

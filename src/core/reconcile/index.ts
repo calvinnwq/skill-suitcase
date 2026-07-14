@@ -554,6 +554,7 @@ async function executeReconcileLocked(
         },
         sourcePath: candidate.sourcePath,
         targetPath: candidate.targetPath,
+        destination: path.relative(installRoot, candidate.targetPath),
         sourceHash: await hashDirectory(candidate.sourcePath, sourcePolicy),
         installedFiles,
         priorState: {

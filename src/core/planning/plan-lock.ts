@@ -24,6 +24,7 @@ type PlanEntry = {
   action: "install" | "blocked";
   variant: string;
   evidence: string[];
+  destination: string;
 };
 
 export type PlanLock = {
@@ -285,7 +286,8 @@ function plannedEntry(item: PlanResult["planned"][number]): PlanEntry {
     skill: item.skill,
     action: item.action,
     variant: item.variant,
-    evidence: Array.isArray(item.evidence) ? [...item.evidence] : []
+    evidence: Array.isArray(item.evidence) ? [...item.evidence] : [],
+    destination: item.destination
   };
 }
 

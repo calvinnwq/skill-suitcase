@@ -30,7 +30,8 @@ A catalog root contains `skill-suitcase.yaml`, canonical skill directories at
 `skills/<name>/`, and any declared variant directories. The manifest may define:
 
 - `suitcases`: named collections of skill names;
-- `assignments`: target-facing selections of suitcases;
+- `assignments`: target-facing selections of suitcases and optional per-skill
+  `categories` for categorized target adapters;
 - `assignmentPaths`: target adapter kinds, assignment names, and install paths;
 - `groups`: reporting metadata that references existing skills, suitcases, or
   assignments without changing install semantics;
@@ -71,6 +72,34 @@ Supported path overrides are
 `--hermes-skills`, and `--grok-skills`.
 The writable `hermes-skills-root` adapter uses the same direct install-root pattern as `openclaw-skills-root`.
 The default profile normally targets `$HOME/.hermes/skills`, while a named profile targets `$HOME/.hermes/profiles/<name>/skills`.
+The writable `hermes-external-skills-root` adapter instead requires explicit
+`home` and `path` fields and materializes each assigned skill at
+`<path>/<category>/<skill>`. Its assignment must declare one safe plain category
+segment for every selected skill:
+
+```yaml
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      agent-swarm: autonomous-ai-agents
+
+assignmentPaths:
+  hermes:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: $HOME/.hermes
+    path: $HOME/.hermes/skill-suitcase/skills
+```
+
+Before materialization, the operator creates the external root and registers its
+exact path in `<home>/config.yaml` under `skills.external_dirs`. The adapter
+requires both conditions and never edits that configuration. It also refuses a
+same-name skill under `<home>/skills` or elsewhere in the owned external root,
+category symlinks, path traversal, unmanaged destination collisions, and receipt destination drift.
+The one receipt remains at the external root. Existing flat Hermes targets are
+unchanged.
 
 OpenCode and Pi are provider-backed compatibility targets and are read-only.
 That policy follows the adapter kind even when a manifest supplies a custom
@@ -181,8 +210,9 @@ Detailed preconditions and refusal cases live in
 The receipt at `.skill-suitcase-receipt.json` is the target-side ownership
 record. Its schema is `calvinnwq.skills.receipt.v0`. A managed install record
 captures the skill, target path, source path and provenance, install mode,
-version and content hashes, installed-file hashes, and rollback metadata when
-available.
+version and content hashes, installed-file hashes, resolved relative
+destination, and rollback metadata when available. Older receipt records without
+`destination` remain valid.
 
 Receipt updates use atomic replacement and a receipt-local transaction lock.
 Concurrent workflows must not silently discard one another's records. A legacy

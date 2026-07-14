@@ -107,6 +107,27 @@ test("prune dry-run plans explicit obsolete directory and symlink without mutati
   assert.equal(result.transactionPath, null);
 });
 
+test("flat-target prune refuses a receipt target nested below the skill path", async (t) => {
+  const fixture = await createFixture(t);
+  const receipt = await readReceipt({ installRoot: fixture.targetRoot });
+  const raw = receipt.installs?.["dir-old"];
+  assert.notEqual(raw, undefined);
+  const record = Array.isArray(raw) ? raw[0]! : raw!;
+  record.targetPath = path.join(fixture.targetRoot, "unrelated", "dir-old");
+  await writeReceipt({ installRoot: fixture.targetRoot, receipt });
+
+  const result = await prune({
+    source: fixture.sourceRoot,
+    target: "codex",
+    skills: ["dir-old"],
+    dryRun: true
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "missing_receipt_record"), true);
+  assert.equal((await stat(fixture.directoryTarget)).isDirectory(), true);
+});
+
 test("prune refuses provider read-only policy with a writable adapter", async (t) => {
   const fixture = await createFixture(t);
   const manifestPath = path.join(fixture.sourceRoot, "skill-suitcase.yaml");
