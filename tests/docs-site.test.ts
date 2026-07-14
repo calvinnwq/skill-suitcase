@@ -73,12 +73,11 @@ function navigationEntries(source: string): Array<{ number: string | undefined; 
     const href = value.h;
     if (typeof title !== "string") assert.fail("navigation items must have titles");
     if (typeof href !== "string") assert.fail("navigation items must have hrefs");
-    if (value.ext === true) return;
     const number = value.n;
     if (number !== undefined && typeof number !== "string") {
       assert.fail("navigation item numbers must be strings");
     }
-    entries.push({ number, title, href });
+    if (value.ext !== true) entries.push({ number, title, href });
     if (value.children === undefined) return;
     assert.ok(Array.isArray(value.children), "navigation item children must be arrays");
     value.children.forEach(appendItem);
@@ -239,14 +238,17 @@ test("navigation extraction includes unnumbered internal entries", () => {
       { t: "Overview copy", h: "index.html", children: [
         { n: "02", t: "Install", h: "install.html" }
       ] },
-      { t: "GitHub", h: "https://example.com", ext: true }
+      { t: "GitHub", h: "https://example.com", ext: true, children: [
+        { n: "03", t: "Reference", h: "reference.html" }
+      ] }
     ] }];
     var ORDER = [];
   `);
 
   assert.deepEqual(entries, [
     { number: undefined, title: "Overview copy", href: "index.html" },
-    { number: "02", title: "Install", href: "install.html" }
+    { number: "02", title: "Install", href: "install.html" },
+    { number: "03", title: "Reference", href: "reference.html" }
   ]);
 });
 
