@@ -224,6 +224,11 @@ function hasNestedHtmlCommandElement(node: HtmlNode): boolean {
   });
 }
 
+function isHtmlCommandAttribute(attribute: HtmlAttribute): boolean {
+  const name = attribute.name.toLowerCase().replace(/^data-/, "");
+  return COMMAND_VALUE_KEYS.has(name);
+}
+
 function htmlCommandExamples(contents: string, fragment = false): CommandExample[] {
   const root = (fragment ? parseFragment(contents) : parseHtml(contents)) as unknown as HtmlNode;
   const examples: CommandExample[] = [];
@@ -236,6 +241,16 @@ function htmlCommandExamples(contents: string, fragment = false): CommandExample
     const plainPre = tagName === "pre" && !hasNestedHtmlCommandElement(node);
     const languageClass = classes.find((className) => className.startsWith("language-"));
     const language = languageClass?.slice("language-".length).toLowerCase() ?? inheritedLanguage;
+
+    for (const attribute of node.attrs ?? []) {
+      if (isHtmlCommandAttribute(attribute) && hasCliReference(attribute.value)) {
+        examples.push({
+          block: true,
+          contents: attribute.value,
+          ...(language === undefined ? {} : { language })
+        });
+      }
+    }
 
     if (cmdline || code || plainPre) {
       const text = htmlText(node);
@@ -1226,7 +1241,9 @@ function decodedDocumentText(contents: string): string {
 }
 
 function assertNoPrivateMachinePaths(path: string, contents: string): void {
-  const normalizedContents = decodedDocumentText(contents).replace(/\\{2,}/g, "\\").replaceAll("\\/", "/");
+  const normalizedContents = `${contents}\n${decodedDocumentText(contents)}`
+    .replace(/\\{2,}/g, "\\")
+    .replaceAll("\\/", "/");
   const localPathContents = normalizedContents.replace(/\bhttps?:\/\/[^\s`"'<>]+/gi, "");
   assert.doesNotMatch(localPathContents, /\/Users\/[^/\\\s`"']+/, `${path} contains a macOS user path`);
   assert.doesNotMatch(localPathContents, /\/home\/[^/\\\s`"']+/, `${path} contains a Linux user path`);
@@ -1278,6 +1295,7 @@ test("private machine path checks cover portable and private forms", () => {
     String.raw`\\server\Users\alice\project`,
     String.raw`C:&#92;Users&#92;alice&#92;project`,
     String.raw`C:&bsol;Users&bsol;alice&bsol;project`,
+    "<file:///Users/alice/project>",
     "<!-- /Users/alice/project -->"
   ]) {
     assert.throws(() => assertNoPrivateMachinePaths("fixture.md", privatePath), /contains a .* user path/);
@@ -1306,6 +1324,7 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     ["fixture.html", "<pre>skill-suitcase bogus --json</pre>"],
     ["fixture.html", "<pre><code>skill-suitcase&nbsp;bogus --json</code></pre>"],
     ["fixture.html", "<span class=\"cmdline\">skill-suitcase bogus --json</span>"],
+    ["fixture.html", "<button data-command=\"skill-suitcase bogus --json\">Run</button>"],
     ["fixture.yaml", "command: skill-suitcase bogus --json"],
     ["fixture.yaml", "command: [skill-suitcase, bogus, --json]"],
     ["fixture.yaml", "commands:\n  - skill-suitcase bogus --json"],
