@@ -348,13 +348,16 @@ git diff --check
 
 `build` removes `dist`, compiles the TypeScript sources, and marks `dist/src/cli.js` executable so stale generated output cannot survive a package build.
 `test` rebuilds first, verifies that the recursively discovered compiled test inventory exactly matches `tests/**/*.test.ts`, then runs every compiled test and every `scripts/**/*.test.mjs` test with Node's built-in test runner.
+The test inventory validates every public and reusable CLI example as an accepted, deterministic `--json` invocation and enforces portable paths without contributor-specific home directories.
 `package:smoke` runs the supported local pack verification: npm invokes `prepack` to create a clean build and record build-input, source, and output hashes in the ignored `dist/.package-build.json`, then the smoke script parses `npm pack --json`, validates the pinned public metadata and exact allowed payload, installs the tarball into an empty temporary project, and runs the read-only `targets` command through the installed executable.
+Package validation pins the curated Markdown files under `docs/` and excludes the GitHub Pages-only HTML, CSS, and JavaScript from the tarball.
 `architecture:check` runs `scripts/check-architecture.mjs` to enforce the
 recognized source layers, allowed imports, thin CLI and command limits,
 process-IO ownership, and renderer-mediated output described in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 `docs:serve` previews the static docs site from `docs/` at `http://127.0.0.1:8080/`.
-The same pages are validated by `tests/docs-site.test.ts` inside `pnpm test` and deploy to GitHub Pages through `.github/workflows/pages.yml`.
+`tests/docs-site.test.ts` keeps HTML pages at the root of `docs/`, requires exactly one uniquely labeled navigation entry per page, and verifies that the rendered pager follows the contiguous numbered reading order.
+The pages deploy to GitHub Pages through `.github/workflows/pages.yml`.
 
 CI uses the package's pinned pnpm `10.34.4` toolchain.
 The `verify` job runs the tests, lint/typecheck, architecture check, and
@@ -369,8 +372,10 @@ behavior in `src/core/`, infrastructure in `src/adapters/`, and output contracts
 in `src/renderers/`. See the module boundaries in
 [`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md).
 
-Development dependencies support TypeScript compilation, Node.js types, and
-issue-form YAML validation. The manifest reader is strict and intentionally
+Development dependencies support TypeScript compilation, Node.js types,
+issue-form YAML validation, and structured Markdown, HTML, CSS, JavaScript,
+JSON, YAML, plain-text, and shell-example parsing for the documentation gate.
+The manifest reader is strict and intentionally
 scoped to the current `skill-suitcase.yaml` schema, including manifest-owned
 logical groups as reporting metadata.
 

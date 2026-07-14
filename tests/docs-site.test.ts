@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { test } from "node:test";
 
 import { parse } from "yaml";
@@ -8,9 +9,10 @@ import { parse } from "yaml";
 /**
  * The static docs site under docs/ is plain HTML plus one stylesheet and one
  * client script, deployed as-is to GitHub Pages. These tests are the site's
- * deterministic build check: shared chrome, navigation coverage, link
- * integrity, storage-hardened client behavior, and the content contracts the
- * site must keep aligned with the shipped CLI.
+ * deterministic build check: shared chrome, exact page and navigation
+ * coverage, pager reading order, link integrity, storage-hardened client
+ * behavior, and the content contracts the site must keep aligned with the
+ * shipped CLI.
  */
 
 const DOC_PAGES = [
@@ -28,59 +30,73 @@ function read(path: string): string {
   return readFileSync(path, "utf8");
 }
 
-test("docs site pages share the expected chrome", () => {
-  for (const page of DOC_PAGES) {
-    const html = read(page);
-    const name = page.replace("docs/", "");
-    assert.match(html, /class="masthead"/, page);
-    assert.match(html, /class="brand" href="index\.html"/, page);
-    assert.match(html, /data-theme-toggle/, page);
-    assert.match(html, /data-search-open/, page);
-    assert.match(
-      html,
-      /data-search-open aria-label="Search documentation" aria-haspopup="dialog"><span>Search docs<\/span><kbd aria-hidden="true">\/<\/kbd>/,
-      page
-    );
-    assert.match(html, /href="site\.css"/, page);
-    assert.match(html, /src="site\.js" defer/, page);
-    assert.match(html, /try\{stored=localStorage\.getItem\("skill-suitcase-docs-theme"\);/, page);
-    assert.doesNotMatch(html, /dataset\.theme=localStorage\.getItem/, page);
-    assert.match(html, new RegExp(`<body data-page="${name.replace(".", "\\.")}"`), page);
-    assert.match(html, /<nav id="sidebar" class="sidebar" aria-label="Documentation">/, page);
-    assert.match(html, /<nav id="toc" aria-label="On this page">/, page);
-    assert.match(html, /<footer class="pager" id="pager">/, page);
-    assert.match(html, /<a class="skip" href="#content">/, page);
+function htmlPagePaths(directory: string): string[] {
+  const pages: string[] = [];
+
+  function visit(currentDirectory: string): void {
+    for (const entry of readdirSync(currentDirectory, { withFileTypes: true })) {
+      const path = join(currentDirectory, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+      } else if (entry.isFile() && entry.name.endsWith(".html")) {
+        const page = relative(directory, path).split(sep).join("/");
+        assert.ok(!page.includes("/"), `docs site only supports root-level HTML pages: ${page}`);
+        pages.push(page);
+      }
+    }
   }
-});
 
-test("navigation manifest covers every page in numbered reading order", () => {
-  const js = read("docs/site.js");
+  visit(directory);
+  return pages.sort();
+}
 
-  for (const page of DOC_PAGES) {
-    const name = page.replace("docs/", "");
-    assert.match(js, new RegExp(`h: "${name.replace(".", "\\.")}"`), name);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function navigationEntries(source: string): Array<{ number: string | undefined; title: string; href: string }> {
+  const declaration = "var NAV = ";
+  const navigationStart = source.indexOf(declaration);
+  const navigationEnd = source.indexOf("var ORDER = []", navigationStart);
+  assert.ok(navigationStart >= 0 && navigationEnd > navigationStart, "site script must declare NAV before ORDER");
+  const expression = source
+    .slice(navigationStart + declaration.length, navigationEnd)
+    .trim()
+    .replace(/;$/, "");
+  const navigation: unknown = new Function(`return (${expression});`)();
+  assert.ok(Array.isArray(navigation), "NAV must be an array");
+
+  const entries: Array<{ number: string | undefined; title: string; href: string }> = [];
+  function appendItem(value: unknown): void {
+    assert.ok(isRecord(value), "navigation items must be objects");
+    const title = value.t;
+    const href = value.h;
+    if (typeof title !== "string") assert.fail("navigation items must have titles");
+    if (typeof href !== "string") assert.fail("navigation items must have hrefs");
+    if (value.ext === true) return;
+    const number = value.n;
+    if (number !== undefined && typeof number !== "string") {
+      assert.fail("navigation item numbers must be strings");
+    }
+    entries.push({ number, title, href });
+    if (value.children === undefined) return;
+    assert.ok(Array.isArray(value.children), "navigation item children must be arrays");
+    value.children.forEach(appendItem);
   }
-  for (const n of ["01", "02", "03", "04", "05", "06", "07", "08"]) {
-    assert.match(js, new RegExp(`n: "${n}"`), n);
+
+  for (const group of navigation) {
+    assert.ok(isRecord(group) && Array.isArray(group.items), "navigation groups must contain item arrays");
+    group.items.forEach(appendItem);
   }
-  assert.match(js, /setAttribute\("aria-current", "page"\)/);
-  assert.match(js, /THEME_KEY = "skill-suitcase-docs-theme"/);
-  assert.match(js, /skill-suitcase-docs-index-v2/);
-  assert.doesNotMatch(js, /artshelf/i, "the docs chrome must use Skill Suitcase identifiers");
-});
+  return entries;
+}
 
-test("table of contents preserves canonical fragment owners", () => {
-  const js = read("docs/site.js");
-
-  assert.match(js, /var owner = h\.closest\("\.cmd\[id\]"\);\s*if \(owner\) return owner\.id;/);
-  assert.match(js, /while \(root\.getElementById\(id\)\)/);
-  assert.match(js, /a\.href = "#" \+ id/);
-  assert.match(js, /t\.href = "#" \+ id/);
-  assert.match(js, /p\.h \+ "#" \+ headingId\(head, doc\)/);
-  assert.doesNotMatch(js, /if \(!h\.id\) h\.id = slug/);
-});
-
-test("docs chrome renders when web storage is unavailable", () => {
+function runDocsSite(page: string): {
+  clickHandlers: Array<(event: { target: { closest: (selector: string) => unknown } }) => void>;
+  document: any;
+  pager: any;
+  sidebar: any;
+} {
   const clickHandlers: Array<(event: { target: { closest: (selector: string) => unknown } }) => void> = [];
   const makeElement = (tagName = "div"): any => {
     const el: any = {
@@ -106,7 +122,7 @@ test("docs chrome renders when web storage is unavailable", () => {
   const pager = makeElement("footer");
   const document: any = {
     body: {
-      dataset: { page: "index.html" },
+      dataset: { page },
       classList: { remove() {}, contains() { return false; }, toggle() { return true; } },
       appendChild() {}
     },
@@ -137,11 +153,130 @@ test("docs chrome renders when web storage is unavailable", () => {
     innerHeight: 800,
     scrollY: 0
   };
+  const executeSite = new Function("document", "window", "navigator", "setTimeout", read("docs/site.js"));
+  executeSite(document, window, {}, setTimeout);
 
-  assert.doesNotThrow(() => {
-    const runSite = new Function("document", "window", "navigator", "setTimeout", read("docs/site.js"));
-    runSite(document, window, {}, setTimeout);
-  });
+  return { clickHandlers, document, pager, sidebar };
+}
+
+test("docs site pages share the expected chrome", () => {
+  for (const page of DOC_PAGES) {
+    const html = read(page);
+    const name = page.replace("docs/", "");
+    assert.match(html, /class="masthead"/, page);
+    assert.match(html, /class="brand" href="index\.html"/, page);
+    assert.match(html, /data-theme-toggle/, page);
+    assert.match(html, /data-search-open/, page);
+    assert.match(
+      html,
+      /data-search-open aria-label="Search documentation" aria-haspopup="dialog"><span>Search docs<\/span><kbd aria-hidden="true">\/<\/kbd>/,
+      page
+    );
+    assert.match(html, /href="site\.css"/, page);
+    assert.match(html, /src="site\.js" defer/, page);
+    assert.match(html, /try\{stored=localStorage\.getItem\("skill-suitcase-docs-theme"\);/, page);
+    assert.doesNotMatch(html, /dataset\.theme=localStorage\.getItem/, page);
+    assert.match(html, new RegExp(`<body data-page="${name.replace(".", "\\.")}"`), page);
+    assert.match(html, /<nav id="sidebar" class="sidebar" aria-label="Documentation">/, page);
+    assert.match(html, /<nav id="toc" aria-label="On this page">/, page);
+    assert.match(html, /<footer class="pager" id="pager">/, page);
+    assert.match(html, /<a class="skip" href="#content">/, page);
+  }
+});
+
+test("navigation manifest covers every page in numbered reading order", () => {
+  const js = read("docs/site.js");
+  const entries = navigationEntries(js);
+  const sitePages = htmlPagePaths("docs").map((path) => `docs/${path}`);
+
+  assert.deepEqual(
+    entries.map((entry) => entry.href),
+    DOC_PAGES.map((page) => page.replace("docs/", "")),
+    "the navigation manifest must list every page exactly once in reading order"
+  );
+  assert.deepEqual(
+    entries.map((entry) => entry.number),
+    ["01", "02", "03", "04", "05", "06", "07", "08"],
+    "numbered navigation must stay contiguous"
+  );
+  assert.equal(
+    new Set(entries.map((entry) => entry.title)).size,
+    entries.length,
+    "navigation labels must stay unique"
+  );
+  assert.deepEqual(sitePages, [...DOC_PAGES].sort(), "every HTML page must be reachable from navigation");
+  assert.match(js, /setAttribute\("aria-current", "page"\)/);
+  assert.match(js, /THEME_KEY = "skill-suitcase-docs-theme"/);
+  assert.match(js, /skill-suitcase-docs-index-v2/);
+  assert.doesNotMatch(js, /artshelf/i, "the docs chrome must use Skill Suitcase identifiers");
+});
+
+test("rendered pager follows the documented reading order", () => {
+  const pages = DOC_PAGES.map((page) => page.replace("docs/", ""));
+
+  for (const [index, page] of pages.entries()) {
+    const { pager } = runDocsSite(page);
+    const previous = pages[index - 1];
+    const next = pages[index + 1];
+
+    assert.deepEqual(
+      pager.children.map((child: any) => ({
+        className: child.className ?? "",
+        href: child.href ?? null
+      })),
+      [
+        previous ? { className: "prev", href: previous } : { className: "", href: null },
+        next ? { className: "next", href: next } : { className: "", href: null }
+      ],
+      `${page} pager must link to its DOC_PAGES neighbors`
+    );
+  }
+});
+
+test("navigation extraction includes unnumbered internal entries", () => {
+  const entries = navigationEntries(`
+    var NAV = [{ items: [
+      { t: "Overview copy", h: "index.html", children: [
+        { n: "02", t: "Install", h: "install.html" }
+      ] },
+      { t: "GitHub", h: "https://example.com", ext: true }
+    ] }];
+    var ORDER = [];
+  `);
+
+  assert.deepEqual(entries, [
+    { number: undefined, title: "Overview copy", href: "index.html" },
+    { number: "02", title: "Install", href: "install.html" }
+  ]);
+});
+
+test("HTML page inventory rejects unsupported nested docs routes", (t) => {
+  const fixture = mkdtempSync(join(tmpdir(), "skill-suitcase-docs-site-"));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  mkdirSync(join(fixture, "guides"));
+  writeFileSync(join(fixture, "index.html"), "");
+  writeFileSync(join(fixture, "guides", "setup.html"), "");
+
+  assert.throws(
+    () => htmlPagePaths(fixture),
+    /docs site only supports root-level HTML pages: guides\/setup\.html/
+  );
+});
+
+test("table of contents preserves canonical fragment owners", () => {
+  const js = read("docs/site.js");
+
+  assert.match(js, /var owner = h\.closest\("\.cmd\[id\]"\);\s*if \(owner\) return owner\.id;/);
+  assert.match(js, /while \(root\.getElementById\(id\)\)/);
+  assert.match(js, /a\.href = "#" \+ id/);
+  assert.match(js, /t\.href = "#" \+ id/);
+  assert.match(js, /p\.h \+ "#" \+ headingId\(head, doc\)/);
+  assert.doesNotMatch(js, /if \(!h\.id\) h\.id = slug/);
+});
+
+test("docs chrome renders when web storage is unavailable", () => {
+  const { clickHandlers, document, sidebar } = runDocsSite("index.html");
+
   assert.equal(document.documentElement.dataset.theme, "dark");
   assert.ok(sidebar.children.length > 0, "sidebar should render without storage");
 

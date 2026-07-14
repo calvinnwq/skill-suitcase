@@ -13,6 +13,15 @@ import {
   validatePackResult
 } from "./package-validation.mjs";
 
+const EXPECTED_PACKED_DOCS = [
+  "docs/command-reference.md",
+  "docs/getting-started.md",
+  "docs/install-smoke.md",
+  "docs/portability-matrix.md",
+  "docs/release-readiness.md",
+  "docs/skills-sh-delegation.md"
+];
+
 test("public package metadata and files allowlist stay pinned", async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   assert.doesNotThrow(() => validatePackageMetadata(packageJson));
@@ -83,7 +92,7 @@ test("npm pack JSON must describe exactly one package", () => {
   );
 });
 
-test("packed payload validation rejects a missing bin, lost executable mode, and unintended files", async () => {
+test("packed payload contains exactly the intended docs and rejects unintended files", async () => {
   await recordPackageBuild();
   const packResult = parsePackJson(execFileSync(
     "npm",
@@ -91,6 +100,12 @@ test("packed payload validation rejects a missing bin, lost executable mode, and
     { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 }
   ));
   await validatePackResult(process.cwd(), packResult);
+
+  assert.deepEqual(
+    packResult.files.map((file) => file.path).filter((path) => path.startsWith("docs/")).sort(),
+    EXPECTED_PACKED_DOCS,
+    "npm pack must include the curated Markdown docs without the Pages-only site payload"
+  );
 
   const missingBin = structuredClone(packResult);
   missingBin.files = missingBin.files.filter((file) => file.path !== CLI_BIN_PATH);

@@ -34,6 +34,11 @@ results, including findings, warnings, and `ok: false` errors, belong on stdout.
 Parser/usage failures, uncaught fatal diagnostics, and non-JSON notices belong
 on stderr. Command modules should own parsing and validation, while durable
 behavior belongs in core modules.
+Every literal CLI invocation in public and reusable documentation must be
+accepted by the shipped CLI and produce deterministic output with `--json`,
+including each invocation in a chained command.
+Use portable placeholders instead of macOS, Linux, or Windows contributor home
+paths.
 
 ## Commit and release conventions
 
