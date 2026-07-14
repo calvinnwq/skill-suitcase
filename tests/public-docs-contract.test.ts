@@ -37,6 +37,7 @@ const HTML_PROSE_ELEMENTS = new Set([
 const COMMAND_VALUE_KEYS = new Set(["command", "commands", "example", "examples", "run", "runs", "script", "scripts"]);
 const ARGV_VALUE_KEYS = new Set(["command", "example", "run", "script"]);
 const COMMAND_CONTAINER_KEYS = new Set(["commands", "examples", "runs", "scripts"]);
+const CLI_REFERENCE_DATA_COMMANDS = new Set(["cd", "echo", "gh", "git", "printf"]);
 const COMMAND_REGISTRY = createCommandRegistry();
 const PUBLIC_COMMANDS: ReadonlySet<string> = new Set(COMMAND_REGISTRY.names());
 const OPTIONAL_INVOCATION_PLACEHOLDERS = new Set(["<local-overrides>"]);
@@ -117,6 +118,8 @@ const ENV_SPLIT_ESCAPE_VALUES: Readonly<Record<string, string>> = {
   v: "\v",
   _: " "
 };
+const TIMEOUT_DURATION_PATTERN = /^(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|0[xX](?:[\dA-Fa-f]+(?:\.[\dA-Fa-f]*)?|\.[\dA-Fa-f]+)[pP][+-]?\d+)[smhd]?$/;
+const TIMEOUT_SIGNAL_PATTERN = /^(?:\d+|(?:SIG)?[A-Za-z][A-Za-z0-9]*)$/;
 const NPM_EXEC_VALUE_OPTIONS = new Set([
   "-c",
   "-C",
@@ -441,6 +444,12 @@ const WRAPPER_VALUE_PATTERNS: Readonly<Record<string, Readonly<Record<string, Re
     "--input": /^\d+(?:[KMGTPEZYRQ](?:i?B)?)?$/i,
     "--output": /^(?:L|\d+(?:[KMGTPEZYRQ](?:i?B)?)?)$/i
   },
+  timeout: {
+    "-k": TIMEOUT_DURATION_PATTERN,
+    "-s": TIMEOUT_SIGNAL_PATTERN,
+    "--kill-after": TIMEOUT_DURATION_PATTERN,
+    "--signal": TIMEOUT_SIGNAL_PATTERN
+  },
   xargs: {
     "-L": /^[1-9]\d*$/,
     "-n": /^[1-9]\d*$/,
@@ -458,6 +467,12 @@ interface CommandExample {
   block: boolean;
   contents: string;
   language?: string;
+}
+
+interface PhrasingChunk {
+  formatted: boolean;
+  inlineCode: boolean;
+  text: string;
 }
 
 type ShellDialect = "fish" | "posix" | "powershell";
@@ -512,11 +527,80 @@ function htmlText(node: HtmlNode): string {
   return (node.childNodes ?? []).map(htmlText).join("");
 }
 
+function phrasingCommandExamples(
+  chunks: PhrasingChunk[],
+  allowUnformattedLauncher = false
+): CommandExample[] {
+  const text = chunks.map((chunk) => chunk.text).join("");
+  const spans = chunks.map((chunk, index) => ({
+    chunk,
+    end: chunks.slice(0, index + 1).reduce((length, item) => length + item.text.length, 0)
+  }));
+  const launchers = [...text.matchAll(
+    /(?<![A-Za-z0-9._~/-])(?:skill-suitcase|\$\{?CLI\}?|dist[\\/]src[\\/]cli\.js)(?=\s|$)/gi
+  )];
+  const extracted: CommandExample[] = [];
+
+  for (let index = 0; index < launchers.length; index += 1) {
+    const launcher = launchers[index];
+    if (launcher === undefined) continue;
+    const start = launcher.index;
+    if (start === undefined) continue;
+    const span = spans.find((item) => item.end > start);
+    const prefix = text.slice(0, start);
+    const commandCue = /(?:^|[\s:])(?:execute|invoke|run|try)\s*$/i.test(prefix);
+    if (span === undefined || (!span.chunk.formatted && !commandCue && !allowUnformattedLauncher)) continue;
+    if (span.chunk.inlineCode && span.chunk.text.trim() !== launcher[0]) continue;
+
+    const nextLauncher = launchers[index + 1]?.index ?? text.length;
+    const tail = text.slice(start, nextLauncher);
+    const sentence = tail.match(/\S[.!?](?:\s|$)/);
+    const sentenceEnd = sentence?.index === undefined ? tail.length : sentence.index + sentence[0].trimEnd().length;
+    const command = tail.slice(0, sentenceEnd).trim();
+    const commandName = command.match(/^\S+\s+(\S+)/)?.[1] ?? "";
+    if (!PUBLIC_COMMANDS.has(commandName) && !commandCue && !command.includes("--json")) continue;
+    extracted.push(...textCommandExamples(command, commandCue));
+  }
+
+  return extracted;
+}
+
+function htmlPhrasingChunks(node: HtmlNode, formatted = false): PhrasingChunk[] {
+  if (node.nodeName === "#text") {
+    return [{ formatted, inlineCode: false, text: node.value ?? "" }];
+  }
+  const tagName = node.tagName?.toLowerCase();
+  const classes = node.attrs?.find((attribute) => attribute.name === "class")?.value.split(/\s+/) ?? [];
+  const inlineCode = tagName === "code";
+  const childFormatted = formatted || inlineCode || classes.includes("cmdline");
+  return (node.childNodes ?? []).flatMap((child) => htmlPhrasingChunks(child, childFormatted));
+}
+
 function hasNestedHtmlCommandElement(node: HtmlNode): boolean {
   return (node.childNodes ?? []).some((child) => {
     const tagName = child.tagName?.toLowerCase();
     const classes = child.attrs?.find((attribute) => attribute.name === "class")?.value.split(/\s+/) ?? [];
     return tagName === "code" || classes.includes("cmdline") || hasNestedHtmlCommandElement(child);
+  });
+}
+
+function hasIncompleteNestedHtmlCommandElement(node: HtmlNode): boolean {
+  return (node.childNodes ?? []).some((child) => {
+    const tagName = child.tagName?.toLowerCase();
+    const classes = child.attrs?.find((attribute) => attribute.name === "class")?.value.split(/\s+/) ?? [];
+    const commandElement = tagName === "code" || classes.includes("cmdline");
+    const text = commandElement ? htmlText(child) : "";
+    return (commandElement && hasCliReference(text) && !text.includes("--json"))
+      || hasIncompleteNestedHtmlCommandElement(child);
+  });
+}
+
+function hasNestedHtmlProseElement(node: HtmlNode): boolean {
+  return (node.childNodes ?? []).some((child) => {
+    const tagName = child.tagName?.toLowerCase();
+    return tagName === "pre"
+      || (tagName !== undefined && HTML_PROSE_ELEMENTS.has(tagName))
+      || hasNestedHtmlProseElement(child);
   });
 }
 
@@ -561,9 +645,20 @@ function htmlCommandExamples(contents: string, fragment = false): CommandExample
       return;
     }
 
-    if (tagName !== undefined && HTML_PROSE_ELEMENTS.has(tagName) && !hasNestedHtmlCommandElement(node)) {
-      examples.push(...textCommandExamples(htmlText(node)));
-      return;
+    if (
+      tagName !== undefined
+      && HTML_PROSE_ELEMENTS.has(tagName)
+      && !hasNestedHtmlProseElement(node)
+    ) {
+      if (!hasNestedHtmlCommandElement(node)) {
+        examples.push(...textCommandExamples(htmlText(node)));
+        return;
+      }
+      if (hasIncompleteNestedHtmlCommandElement(node)) {
+        const phrasingExamples = phrasingCommandExamples(htmlPhrasingChunks(node), true);
+        examples.push(...phrasingExamples);
+        if (phrasingExamples.length > 0) return;
+      }
     }
 
     if (!fragment && node.nodeName === "#text") {
@@ -582,10 +677,7 @@ function markdownCommandExamples(contents: string): CommandExample[] {
   const root = fromMarkdown(contents) as unknown as MarkdownNode;
   const examples: CommandExample[] = [];
 
-  function inlineChunks(
-    node: MarkdownNode,
-    formatted = false
-  ): Array<{ formatted: boolean; inlineCode: boolean; text: string }> {
+  function inlineChunks(node: MarkdownNode, formatted = false): PhrasingChunk[] {
     if (node.type === "text" || node.type === "inlineCode") {
       return [{
         formatted: formatted || node.type === "inlineCode",
@@ -598,39 +690,7 @@ function markdownCommandExamples(contents: string): CommandExample[] {
   }
 
   function proseExamples(node: MarkdownNode): CommandExample[] {
-    const chunks = inlineChunks(node);
-    const text = chunks.map((chunk) => chunk.text).join("");
-    const spans = chunks.map((chunk, index) => ({
-      chunk,
-      end: chunks.slice(0, index + 1).reduce((length, item) => length + item.text.length, 0)
-    }));
-    const launchers = [...text.matchAll(
-      /(?<![A-Za-z0-9._~/-])(?:skill-suitcase|\$\{?CLI\}?|dist[\\/]src[\\/]cli\.js)(?=\s|$)/gi
-    )];
-    const extracted: CommandExample[] = [];
-
-    for (let index = 0; index < launchers.length; index += 1) {
-      const launcher = launchers[index];
-      if (launcher === undefined) continue;
-      const start = launcher.index;
-      if (start === undefined) continue;
-      const span = spans.find((item) => item.end > start);
-      const prefix = text.slice(0, start);
-      const commandCue = /(?:^|[\s:])(?:execute|invoke|run|try)\s*$/i.test(prefix);
-      if (span === undefined || (!span.chunk.formatted && !commandCue)) continue;
-      if (span.chunk.inlineCode && span.chunk.text.trim() !== launcher[0]) continue;
-
-      const nextLauncher = launchers[index + 1]?.index ?? text.length;
-      const tail = text.slice(start, nextLauncher);
-      const sentence = tail.match(/\S[.!?](?:\s|$)/);
-      const sentenceEnd = sentence?.index === undefined ? tail.length : sentence.index + 1;
-      const command = tail.slice(0, sentenceEnd).trim();
-      const commandName = command.match(/^\S+\s+(\S+)/)?.[1] ?? "";
-      if (!PUBLIC_COMMANDS.has(commandName) && !commandCue && !command.includes("--json")) continue;
-      extracted.push(...textCommandExamples(command));
-    }
-
-    return extracted;
+    return phrasingCommandExamples(inlineChunks(node));
   }
 
   function visit(node: MarkdownNode, proseContents = new Set<string>()): void {
@@ -752,7 +812,7 @@ function structuredCommandExamples(
   ));
 }
 
-function textCommandExamples(contents: string): CommandExample[] {
+function textCommandExamples(contents: string, forceCommand = false): CommandExample[] {
   if (!hasCliReference(contents)) return [];
   const lines = contents.split(/\r?\n/);
   const examples: CommandExample[] = [];
@@ -763,7 +823,7 @@ function textCommandExamples(contents: string): CommandExample[] {
       source.push(lines[index] ?? "");
     }
     const command = source.join("\n");
-    if (hasCliReference(command) && !plainTextCliProse(command)) {
+    if (hasCliReference(command) && (forceCommand || !plainTextCliProse(command))) {
       examples.push({ block: false, contents: command });
     }
   }
@@ -1522,8 +1582,7 @@ function wrapperCommandIndex(executable: string, words: Word[]): number | null {
 }
 
 function isTimeoutDuration(value: string): boolean {
-  const number = value.replace(/[smhd]$/, "");
-  return /^(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|0[xX](?:[\dA-Fa-f]+(?:\.[\dA-Fa-f]*)?|\.[\dA-Fa-f]+)[pP][+-]?\d+)$/.test(number);
+  return TIMEOUT_DURATION_PATTERN.test(value);
 }
 
 function wrapperPrefixHasOption(
@@ -2059,6 +2118,16 @@ function validateInvocation(path: string, invocation: string[]): void {
   );
 }
 
+function isClassifiedCliReferenceContext(executable: string, dialect: ShellDialect): boolean {
+  return EXECUTION_WRAPPERS.has(executable)
+    || SHELL_EXECUTORS.has(executable)
+    || CLI_REFERENCE_DATA_COMMANDS.has(executable)
+    || ["cmd", "cmd.exe", "find", "node", "node.exe", "npm", "npx", "pnpm", "yarn"].includes(executable)
+    || (dialect !== "powershell" && executable === "eval")
+    || (dialect === "powershell" && executable === "start-process")
+    || executable === POWERSHELL_CALL_WRAPPER;
+}
+
 function validateCommandExample(path: string, example: CommandExample): number {
   const commands = parseCommandExample(path, example);
   const dialect = shellDialect(example.language);
@@ -2089,6 +2158,12 @@ function validateCommandExample(path: string, example: CommandExample): number {
     const unsupportedNodeLaunch = (executable === "node" || executable === "node.exe")
       && words.some((word) => hasCliReference(word.value));
     assert.ok(!unsupportedNodeLaunch, `${path} has an unsupported Node CLI launch form`);
+    const launcherArgument = words.slice(1).findIndex((word) => isCliLauncherReference(word.value));
+    const unsupportedWrapper = words[1]?.value !== "="
+      && !isClassifiedCliReferenceContext(executable, dialect)
+      && launcherArgument >= 0
+      && launcherArgument + 2 < words.length;
+    assert.ok(!unsupportedWrapper, `${path} has unsupported execution wrapper: ${executable}`);
   }
 
   return invocationCount;
@@ -2329,6 +2404,26 @@ test("documentation parsers reject fragmented and malformed CLI launches", async
   await t.test("unformatted Markdown command cue", () => {
     assert.throws(
       () => validateCliExamples("fixture.md", "Run skill-suitcase bogus --json"),
+      /unknown command: bogus/
+    );
+  });
+
+  await t.test("cue-prefixed known Markdown command", () => {
+    assert.throws(
+      () => validateCliExamples(
+        "fixture.md",
+        "Run skill-suitcase status ignored --not-a-real-flag --json."
+      ),
+      /without --json|invalid CLI invocation/
+    );
+  });
+
+  await t.test("HTML prose with inline command markup", () => {
+    assert.throws(
+      () => validateCliExamples(
+        "fixture.html",
+        "<p>Run <code>skill-suitcase</code> bogus --json</p>"
+      ),
       /unknown command: bogus/
     );
   });
@@ -2583,6 +2678,28 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     ),
     /invalid timeout duration: skill-suitcase/
   );
+  for (const source of [
+    "timeout -k -v 5 skill-suitcase status --source . --json",
+    "timeout --kill-after=-v 5 skill-suitcase status --source . --json",
+    "timeout -s -v 5 skill-suitcase status --source . --json",
+    "timeout --signal=-v 5 skill-suitcase status --source . --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", markdownFixture(source)),
+      /invalid timeout wrapper option value/,
+      source
+    );
+  }
+  for (const source of [
+    "setsid skill-suitcase bogus --json",
+    "setsid \"skill-suitcase\" bogus --json"
+  ]) {
+    assert.throws(
+      () => validateCliExamples("fixture.md", markdownFixture(source)),
+      /unsupported execution wrapper: setsid/,
+      source
+    );
+  }
   assert.throws(
     () => validateCliExamples(
       "fixture.md",
@@ -2618,6 +2735,8 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "timeout -f -p 5 skill-suitcase status --source . --json",
     "timeout 0.5s skill-suitcase status --source . --json",
     "timeout -v 5 skill-suitcase status --source . --json",
+    "timeout -k 1s -s TERM 5 skill-suitcase status --source . --json",
+    "timeout --kill-after=1m --signal=9 5 skill-suitcase status --source . --json",
     "watch -d1 skill-suitcase status --source . --json",
     "watch --differences=permanent skill-suitcase status --source . --json",
     "xargs -n 1 skill-suitcase status --source . --json",
