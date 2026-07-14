@@ -55,7 +55,7 @@ async function createCategorizedRecoveryFixture(
   category: string;
   targetSkill: string;
   artifactPath: string;
-  writeManifest: (included?: boolean) => Promise<void>;
+  writeManifest: (included?: boolean, category?: string) => Promise<void>;
 }> {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-recovery-"));
   t.after(() => rm(sandbox, { recursive: true, force: true }));
@@ -70,14 +70,14 @@ async function createCategorizedRecoveryFixture(
   await mkdir(externalRoot, { recursive: true });
   await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: hello-hermes\n---\n# Catalog\n");
   await writeFile(path.join(hermesHome, "config.yaml"), `skills:\n  external_dirs: ${externalRoot}\n`);
-  const writeManifest = async (included = true) => writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
+  const writeManifest = async (included = true, manifestCategory = "productivity") => writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
   core:
     skills:${included ? "\n      - hello-hermes" : " []"}
 assignments:
   hermes:
     suitcases:
       - core
-    categories:${included ? "\n      hello-hermes: productivity" : " {}"}
+    categories:${included ? `\n      hello-hermes: ${manifestCategory}` : " {}"}
 assignmentPaths:
   hermes:
     kind: hermes-external-skills-root
@@ -1124,7 +1124,14 @@ test("categorized Hermes status and diff match planned destinations across categ
     t.skip("requires a case-insensitive filesystem");
     return;
   }
-  await rename(fixture.category, mixedCaseCategory);
+  await fixture.writeManifest(true, "Productivity");
+  const repacked = runCli<{ bundle: { artifactPath: string } }>([
+    "pack",
+    "--source", fixture.source,
+    "--target", "hermes",
+    "--output", path.join(fixture.sandbox, "recased-artifact"),
+    "--json"
+  ]);
 
   const targetArgs = ["--source", fixture.source, "--target", "hermes", "--json"];
   const settled = runCli<{ ok: boolean; summary: { current: number } }>([
@@ -1138,6 +1145,13 @@ test("categorized Hermes status and diff match planned destinations across categ
   ]);
   assert.equal(unchanged.ok, true);
   assert.equal(unchanged.summary.unchanged, 1);
+
+  const reapplied = await apply({
+    source: fixture.source,
+    target: "hermes",
+    artifact: repacked.bundle.artifactPath
+  });
+  assert.equal(reapplied.ok, true);
 });
 
 test("categorized Hermes symlink apply cleanup refuses a replaced category", async (t) => {

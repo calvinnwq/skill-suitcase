@@ -31,6 +31,10 @@ import {
   type SourcePolicy
 } from "../source-policy.js";
 import { validateHermesExternalRoot } from "../hermes-external-root.js";
+import {
+  isCaseInsensitiveFilesystem,
+  normalizeFilesystemComparisonPath
+} from "../filesystem-comparison.js";
 
 type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
 type StatusSummary = {
@@ -376,6 +380,7 @@ export async function status({
       );
     }
 
+    const installRootCaseInsensitive = await isCaseInsensitiveFilesystem(installRoot);
     for (const planned of assignmentPlan.planned) {
       const installRecordResult = selectInstallRecord({
         installRecords: receipt.installs?.[planned.skill],
@@ -383,7 +388,8 @@ export async function status({
         skillName: planned.skill,
         receiptPath,
         targetPath: path.join(installRoot, planned.destination),
-        destination: planned.destination
+        destination: planned.destination,
+        caseInsensitive: installRootCaseInsensitive
       });
       if (installRecordResult.errors.length > 0) {
         assignmentResult.errors.push(...installRecordResult.errors);
@@ -1489,7 +1495,8 @@ function selectInstallRecord({
   skillName,
   receiptPath,
   targetPath,
-  destination
+  destination,
+  caseInsensitive
 }: {
   installRecords: unknown;
   installRoot: string;
@@ -1497,6 +1504,7 @@ function selectInstallRecord({
   receiptPath: string;
   targetPath: string;
   destination: string;
+  caseInsensitive: boolean;
 }): { installRecord: InstallRecord | null; errors: StatusFinding[] } {
   if (installRecords === undefined) {
     return { installRecord: null, errors: [] };
@@ -1515,7 +1523,12 @@ function selectInstallRecord({
   }
 
   const normalizedRootPath = path.resolve(installRoot);
-  const normalizedSkillTarget = normalizeValue(path.resolve(targetPath));
+  const comparisonKey = (value: string) => normalizeFilesystemComparisonPath(
+    path.resolve(value),
+    caseInsensitive
+  );
+  const normalizedRootKey = comparisonKey(normalizedRootPath);
+  const normalizedSkillTarget = comparisonKey(targetPath);
   const matching: InstallRecord[] = [];
 
   for (const entry of installRecords) {
@@ -1527,10 +1540,10 @@ function selectInstallRecord({
       continue;
     }
     const resolvedCandidate = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(normalizedRootPath, candidate);
-    const normalizedCandidate = normalizeValue(resolvedCandidate);
+    const normalizedCandidate = comparisonKey(resolvedCandidate);
     if (
-      normalizedCandidate === normalizedRootPath ||
-      (normalizedSkillTarget !== null && normalizedCandidate === normalizedSkillTarget)
+      normalizedCandidate === normalizedRootKey ||
+      normalizedCandidate === normalizedSkillTarget
     ) {
       matching.push(entry as InstallRecord);
     }
@@ -1551,7 +1564,11 @@ function selectInstallRecord({
   if (matching.length === 1) {
     const [matchingRecord] = matching;
     const recordedDestination = normalizeValue(matchingRecord?.destination);
-    if (recordedDestination !== null && recordedDestination !== destination) {
+    if (
+      recordedDestination !== null
+      && comparisonKey(path.resolve(normalizedRootPath, recordedDestination))
+        !== comparisonKey(path.resolve(normalizedRootPath, destination))
+    ) {
       return {
         installRecord: null,
         errors: [{
