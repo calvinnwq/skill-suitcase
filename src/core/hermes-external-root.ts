@@ -71,7 +71,9 @@ export async function validateHermesExternalRoot({
     });
   }
 
-  for (const skill of await findSkillShadows(localSkillsRoot, plannedSkills)) {
+  const localShadows = await findSkillShadows(localSkillsRoot, plannedSkills);
+  findings.push(...shadowTraversalFindings(localShadows.directorySymlinks));
+  for (const skill of localShadows.skills) {
     findings.push({
       code: "hermes_local_skill_shadow",
       message: `Local Hermes skill named ${skill} under ${localSkillsRoot} would shadow categorized external skill ${skill}.`,
@@ -82,7 +84,9 @@ export async function validateHermesExternalRoot({
   const plannedDestinations = new Map(
     plannedIdentities.map((item) => [path.resolve(normalizedRoot, item.destination), item.identity])
   );
-  for (const skill of await findSkillShadows(normalizedRoot, plannedSkills, plannedDestinations)) {
+  const managedShadows = await findSkillShadows(normalizedRoot, plannedSkills, plannedDestinations);
+  findings.push(...shadowTraversalFindings(managedShadows.directorySymlinks));
+  for (const skill of managedShadows.skills) {
     findings.push({
       code: "hermes_managed_skill_shadow",
       message: `Another Hermes skill named ${skill} inside managed root ${normalizedRoot} conflicts with its planned destination.`,
@@ -165,6 +169,7 @@ async function validateRegistration(
   let registered = false;
   for (const entry of entries) {
     const configuredPath = normalizeConfiguredPath(entry, home);
+    if (configuredPath === null) continue;
     const canonicalConfiguredPath = await canonicalizePath(configuredPath);
     const comparisonConfiguredPath = await filesystemComparisonPath(canonicalConfiguredPath);
     if (comparisonConfiguredPath === comparisonInstallRoot) {
@@ -200,7 +205,9 @@ async function validateRegistration(
       continue;
     }
     if (!precedingRoot.exists) continue;
-    for (const skill of await findSkillShadows(precedingRoot.path, plannedSkills)) {
+    const precedingShadows = await findSkillShadows(precedingRoot.path, plannedSkills);
+    findings.push(...shadowTraversalFindings(precedingShadows.directorySymlinks));
+    for (const skill of precedingShadows.skills) {
       findings.push({
         code: "hermes_external_skill_shadow",
         message: `Hermes external skill named ${skill} under earlier configured root ${precedingRoot.path} would shadow ${path.join(installRoot, skill)}.`,
@@ -222,16 +229,21 @@ function parseExternalDirs(text: string): string[] {
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
-function normalizeConfiguredPath(value: string, hermesHome: string): string {
-  const expanded = value.trim()
-    .replace(/^~(?=\/|$)/, os.homedir())
+function normalizeConfiguredPath(value: string, hermesHome: string): string | null {
+  let unresolved = false;
+  const expanded = expandHermesHomePrefix(value.trim(), os.homedir())
     .replace(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g, (match, braced: string | undefined, bare: string | undefined) => {
       const name = braced ?? bare ?? "";
-      if (name === "HERMES_HOME") return hermesHome;
-      if (name === "HOME") return os.homedir();
-      return process.env[name] ?? match;
+      const environmentValue = process.env[name];
+      if (environmentValue === undefined) unresolved = true;
+      return environmentValue ?? match;
     });
+  if (unresolved) return null;
   return path.resolve(path.isAbsolute(expanded) ? expanded : path.join(hermesHome, expanded));
+}
+
+export function expandHermesHomePrefix(value: string, homeDirectory: string): string {
+  return value.replace(/^~(?=[/\\]|$)/, homeDirectory);
 }
 
 async function canonicalizePath(value: string): Promise<string> {
@@ -254,8 +266,9 @@ async function findSkillShadows(
   root: string,
   skills: Set<string>,
   plannedDestinations: ReadonlyMap<string, string> = new Map()
-): Promise<string[]> {
+): Promise<{ skills: string[]; directorySymlinks: string[] }> {
   const found = new Set<string>();
+  const directorySymlinks = new Set<string>();
   const pending = [root];
   const visited = new Set<string>();
   while (pending.length > 0 && found.size < skills.size) {
@@ -278,12 +291,26 @@ async function findSkillShadows(
       if (HERMES_EXCLUDED_SKILL_DIRECTORIES.has(entry.name)) continue;
       if (identity !== null && HERMES_SKILL_SUPPORT_DIRECTORIES.has(entry.name)) continue;
       const child = path.join(current, entry.name);
-      if (entry.isDirectory() || entry.isSymbolicLink() && await isDirectory(await canonicalizePath(child))) {
+      if (entry.isSymbolicLink()) {
+        if (await isDirectory(await canonicalizePath(child))) directorySymlinks.add(child);
+        continue;
+      }
+      if (entry.isDirectory()) {
         pending.push(child);
       }
     }
   }
-  return [...found].sort((left, right) => left.localeCompare(right));
+  return {
+    skills: [...found].sort((left, right) => left.localeCompare(right)),
+    directorySymlinks: [...directorySymlinks].sort((left, right) => left.localeCompare(right))
+  };
+}
+
+function shadowTraversalFindings(directorySymlinks: string[]): HermesExternalRootFinding[] {
+  return directorySymlinks.map((directory) => ({
+    code: "hermes_shadow_directory_symlink",
+    message: `Hermes shadow validation refuses directory symlink ${directory}.`
+  }));
 }
 
 async function readLocalSkillIdentity(directory: string, fallback: string): Promise<string | null> {

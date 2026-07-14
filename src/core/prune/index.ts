@@ -46,6 +46,7 @@ type PruneInput = {
     afterReceiptPrepared?: () => Promise<void> | void;
     failAfterReceipt?: boolean;
     afterReceiptWrite?: () => Promise<void> | void;
+    beforeFailureRecovery?: () => Promise<void> | void;
   };
 };
 
@@ -425,6 +426,22 @@ async function assertNoSymlinkedParentComponents(targetPath: string, installRoot
       if (!isMissingPathError(error)) throw error;
     }
   }
+  const resolvedRoot = await realpath(root);
+  let existingParent = parent;
+  while (true) {
+    try {
+      existingParent = await realpath(existingParent);
+      break;
+    } catch (error) {
+      if (!isMissingPathError(error)) throw error;
+      const ancestor = path.dirname(existingParent);
+      if (ancestor === existingParent) throw error;
+      existingParent = ancestor;
+    }
+  }
+  if (existingParent !== resolvedRoot && !isInside(existingParent, resolvedRoot)) {
+    throw new Error(`Parent of ${targetPath} resolves outside ${installRoot}.`);
+  }
 }
 
 async function executePrune(input: PruneInput, planned: PlannedPrune): Promise<PruneApplyResult> {
@@ -528,6 +545,7 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
     };
   } catch (error) {
     const rollbackErrors: string[] = [];
+    await input.__test?.beforeFailureRecovery?.();
     if (receiptReplaced) {
       try {
         const backup = await readFile(receiptBackupPath);
@@ -542,11 +560,18 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       await rm(receiptTempPath, { force: true }).catch(() => undefined);
     }
     for (const candidate of [...removedSymlinks].reverse()) {
-      try { await symlink(candidate.symlinkTarget!, candidate.targetPath); }
+      try {
+        await assertNoSymlinkedParentComponents(candidate.targetPath, installRoot);
+        await symlink(candidate.symlinkTarget!, candidate.targetPath);
+      }
       catch (rollbackError) { rollbackErrors.push(`${candidate.skill} symlink restore: ${errorMessage(rollbackError)}`); }
     }
     for (const candidate of [...movedDirectories].reverse()) {
-      try { await rename(candidate.quarantinePath!, candidate.targetPath); }
+      try {
+        await assertNoSymlinkedParentComponents(candidate.targetPath, installRoot);
+        await assertNoSymlinkedParentComponents(candidate.quarantinePath!, installRoot);
+        await rename(candidate.quarantinePath!, candidate.targetPath);
+      }
       catch (rollbackError) { rollbackErrors.push(`${candidate.skill} directory restore: ${errorMessage(rollbackError)}`); }
     }
     if (ownsQuarantineRoot && rollbackErrors.length === 0) {

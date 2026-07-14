@@ -120,6 +120,7 @@ export async function assessPlanLock({
   }
 
   const prior: Partial<PlanLockRecord> = lock;
+  const priorPlanEntries = normalizePriorPlanEntries(prior.planEntries);
 
   let current: PlanLockRecord;
   try {
@@ -166,7 +167,7 @@ export async function assessPlanLock({
     reasons.push("selected_skills_changed");
   }
 
-  if (!objectHashesEqual(current.planEntries, prior.planEntries ?? null)) {
+  if (!objectHashesEqual(current.planEntries, priorPlanEntries.entries)) {
     reasons.push("plan_entries_changed");
   }
 
@@ -174,7 +175,9 @@ export async function assessPlanLock({
     reasons.push("file_hashes_changed");
   }
 
-  if (current.planId !== prior.planId) {
+  const priorPlanId = computeComparablePlanId(prior, prior.planEntries ?? null);
+  const normalizedPriorPlanId = computeComparablePlanId(prior, priorPlanEntries.entries);
+  if (prior.planId !== priorPlanId || current.planId !== normalizedPriorPlanId) {
     reasons.push("plan_id_changed");
   }
 
@@ -226,22 +229,43 @@ async function collectPlanFileHashes(
 }
 
 function computePlanId(lockRecord: Omit<PlanLockRecord, "planId">): string {
+  return computeComparablePlanId(lockRecord, lockRecord.planEntries);
+}
+
+function computeComparablePlanId(
+  lockRecord: Partial<Omit<PlanLockRecord, "planId">>,
+  planEntries: unknown
+): string {
   const stablePlanRecord = {
     schema: lockRecord.schema,
     source: {
-      repo: lockRecord.source.repo,
-      ref: lockRecord.source.ref,
-      commit: lockRecord.source.commit
+      repo: lockRecord.source?.repo,
+      ref: lockRecord.source?.ref,
+      commit: lockRecord.source?.commit
     },
     target: lockRecord.target,
     assignmentPath: lockRecord.assignmentPath,
-    selectedSkills: [...lockRecord.selectedSkills],
-    planEntries: stableObject(lockRecord.planEntries),
+    selectedSkills: Array.isArray(lockRecord.selectedSkills)
+      ? [...lockRecord.selectedSkills]
+      : lockRecord.selectedSkills,
+    planEntries: stableObject(planEntries),
     fileHashes: stableObject(lockRecord.fileHashes)
   };
 
   const serialized = JSON.stringify(stablePlanRecord);
   return createHash("sha256").update(serialized).digest("hex");
+}
+
+function normalizePriorPlanEntries(value: unknown): { entries: unknown } {
+  if (!Array.isArray(value)) return { entries: value ?? null };
+  const entries = value.map((item) => {
+    if (!isRecord(item) || "destination" in item || typeof item["skill"] !== "string") return item;
+    return {
+      ...item,
+      destination: item["skill"]
+    };
+  });
+  return { entries };
 }
 
 async function resolveSourceCommit(explicitSourceCommit: string | undefined, sourceRoot: string) {

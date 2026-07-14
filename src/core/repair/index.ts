@@ -39,6 +39,8 @@ type RepairInput = {
     failAfterBackupForSkill?: string;
     failBeforeReceipt?: boolean;
     beforeMutationForSkill?: (skill: string) => Promise<void> | void;
+    beforeFailureRecoveryForSkill?: (skill: string) => Promise<void> | void;
+    afterStagingForSkill?: (skill: string, stagingPath: string) => Promise<void> | void;
   };
 };
 
@@ -482,7 +484,7 @@ async function planRepair(input: RepairInput, selectedSkills: string[]): Promise
       entries: skillEntries.sort(compareEntries),
       backup: {
         strategy: "rename-target-directory",
-        backupPathTemplate: backupPathTemplate(path.dirname(statusItem.targetPath), skill)
+        backupPathTemplate: backupPathTemplate(diffResult.installRoot, statusItem.targetPath, skill)
       },
       finalAction: "replace-target-from-catalog"
     };
@@ -663,8 +665,9 @@ async function executeRepairLocked(
   const sourcePolicy = manifest.sourcePolicy;
 
   for (const candidate of plan.candidates) {
-    const backupPath = path.join(path.dirname(candidate.targetPath), `.${candidate.skill}.suitcase-pre-repair-${uniqueSuffix()}`);
-    const tmpPath = path.join(installRoot, `.skill-suitcase-repair-next-${candidate.skill}-${uniqueSuffix()}`);
+    const transactionDirectory = transactionDirectoryForTarget(candidate.targetPath, installRoot);
+    const backupPath = path.join(transactionDirectory, `.${candidate.skill}.suitcase-pre-repair-${uniqueSuffix()}`);
+    const tmpPath = path.join(transactionDirectory, `.${candidate.skill}.suitcase-repair-next-${uniqueSuffix()}`);
     let copied = false;
     let backedUp = false;
     let installed = false;
@@ -672,19 +675,24 @@ async function executeRepairLocked(
     try {
       await input.__test?.beforeMutationForSkill?.(candidate.skill);
       await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
+      await ensureTransactionDirectory(transactionDirectory, installRoot);
+      await assertTargetParentInsideInstallRoot(tmpPath, installRoot);
       await assertSourcePolicyAllowsSource(candidate.sourcePath, sourcePolicy);
       await copyTree(candidate.sourcePath, tmpPath, sourcePolicy);
       copied = true;
+      await input.__test?.afterStagingForSkill?.(candidate.skill, tmpPath);
       if (!(await treesMatch(candidate.sourcePath, tmpPath, sourcePolicy))) {
         throw new Error(`Temporary repair copy for ${candidate.skill} does not match catalog source.`);
       }
       await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
+      await assertTargetParentInsideInstallRoot(backupPath, installRoot);
       await rename(candidate.targetPath, backupPath);
       backedUp = true;
       if (input.__test?.failAfterBackup === true || input.__test?.failAfterBackupForSkill === candidate.skill) {
         throw new Error("Injected failure after backup.");
       }
       await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
+      await assertTargetParentInsideInstallRoot(tmpPath, installRoot);
       await rename(tmpPath, candidate.targetPath);
       installed = true;
       copied = false;
@@ -755,23 +763,44 @@ async function executeRepairLocked(
         backupPath
       });
     } catch (error) {
-      if (installed) {
-        await removePath(candidate.targetPath);
-      }
-      if (backedUp) {
-        await restorePath(backupPath, candidate.targetPath);
+      await input.__test?.beforeFailureRecoveryForSkill?.(candidate.skill);
+      const recoveryErrors: string[] = [];
+      const retainedBackups: RepairedBackup[] = [];
+      const candidateRecoveryErrors = await recoverRepairedTarget({
+        targetPath: candidate.targetPath,
+        backupPath,
+        installed,
+        backedUp,
+        installRoot
+      });
+      recoveryErrors.push(...candidateRecoveryErrors);
+      if (backedUp && candidateRecoveryErrors.length > 0) {
+        retainedBackups.push({ skill: candidate.skill, targetPath: candidate.targetPath, backupPath });
       }
       if (copied) {
-        await removePath(tmpPath);
+        try {
+          await assertTargetParentInsideInstallRoot(tmpPath, installRoot);
+          await removePath(tmpPath);
+        } catch (cleanupError) {
+          recoveryErrors.push(`Temporary repair copy retained at ${tmpPath}: ${errorMessage(cleanupError)}`);
+        }
       }
       const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
       for (const completed of backups.reverse()) {
-        await removePath(completed.targetPath);
-        await restorePath(completed.backupPath, completed.targetPath);
+        const completedRecoveryErrors = await recoverRepairedTarget({
+          targetPath: completed.targetPath,
+          backupPath: completed.backupPath,
+          installed: true,
+          backedUp: true,
+          installRoot
+        });
+        recoveryErrors.push(...completedRecoveryErrors);
+        if (completedRecoveryErrors.length > 0) retainedBackups.push(completed);
       }
       repairedSkills.length = 0;
       repairedFiles = 0;
       backups.length = 0;
+      backups.push(...retainedBackups);
       receiptPathWritten = null;
       return {
         ...plan,
@@ -793,6 +822,10 @@ async function executeRepairLocked(
             skill: candidate.skill,
             path: candidate.targetPath
           }),
+          ...recoveryErrors.map((message) => repairError({
+            code: "repair_recovery_failed",
+            message
+          })),
           ...receiptRollbackComplete ? [] : [repairError({
             code: "receipt_rollback_failed",
             message: "Receipt rollback was incomplete after repair failed."
@@ -862,6 +895,63 @@ async function assertTargetParentInsideInstallRoot(targetPath: string, installRo
   if (!isSameOrInsidePath(resolvedParent, resolvedRoot)) {
     throw new Error(`Target parent ${path.dirname(targetPath)} resolves outside install root ${installRoot}.`);
   }
+}
+
+async function ensureTransactionDirectory(transactionDirectory: string, installRoot: string): Promise<void> {
+  try {
+    const info = await lstat(transactionDirectory);
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error(`Transaction directory ${transactionDirectory} must be a real directory.`);
+    }
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+    await mkdir(transactionDirectory, { recursive: false });
+  }
+  await assertTargetParentInsideInstallRoot(path.join(transactionDirectory, ".transaction-check"), installRoot);
+}
+
+function transactionDirectoryForTarget(targetPath: string, installRoot: string): string {
+  return path.dirname(path.relative(installRoot, targetPath)) === "."
+    ? path.dirname(targetPath)
+    : path.join(installRoot, ".archive");
+}
+
+async function recoverRepairedTarget({
+  targetPath,
+  backupPath,
+  installed,
+  backedUp,
+  installRoot
+}: {
+  targetPath: string;
+  backupPath: string;
+  installed: boolean;
+  backedUp: boolean;
+  installRoot: string;
+}): Promise<string[]> {
+  const errors: string[] = [];
+  let targetReady = true;
+  if (installed) {
+    try {
+      await assertTargetParentInsideInstallRoot(targetPath, installRoot);
+      await removePath(targetPath);
+    } catch (error) {
+      targetReady = false;
+      errors.push(`Could not safely remove failed repair target ${targetPath}: ${errorMessage(error)}`);
+    }
+  }
+  if (backedUp && targetReady) {
+    try {
+      await assertTargetParentInsideInstallRoot(targetPath, installRoot);
+      await assertTargetParentInsideInstallRoot(backupPath, installRoot);
+      await restorePath(backupPath, targetPath);
+    } catch (error) {
+      errors.push(`Could not restore ${targetPath}; backup retained at ${backupPath}: ${errorMessage(error)}`);
+    }
+  } else if (backedUp) {
+    errors.push(`Backup retained at ${backupPath} because ${targetPath} could not be safely cleared.`);
+  }
+  return errors;
 }
 
 function postStatusCurrentErrors({
@@ -1187,8 +1277,8 @@ function refusedSkillsFromErrors(errors: RepairError[]): string[] {
   )].sort();
 }
 
-function backupPathTemplate(installRoot: string, skill: string): string {
-  return path.join(installRoot, `.${skill}.suitcase-pre-repair-<timestamp>`);
+function backupPathTemplate(installRoot: string, targetPath: string, skill: string): string {
+  return path.join(transactionDirectoryForTarget(targetPath, installRoot), `.${skill}.suitcase-pre-repair-<timestamp>`);
 }
 
 type DirectoryTreeValidationResult =
@@ -1620,19 +1710,11 @@ async function readOptionalText(filePath: string): Promise<string | null> {
 }
 
 async function removePath(targetPath: string): Promise<void> {
-  try {
-    await rm(targetPath, { recursive: true, force: true });
-  } catch {
-    // best effort cleanup only
-  }
+  await rm(targetPath, { recursive: true, force: true });
 }
 
 async function restorePath(from: string, to: string): Promise<void> {
-  try {
-    await rename(from, to);
-  } catch {
-    // best effort restore only
-  }
+  await rename(from, to);
 }
 
 function compareBackups(left: RepairedBackup, right: RepairedBackup): number {

@@ -1055,7 +1055,11 @@ function validateReconcileBackupPath({
   if (backupPath === null) {
     return { ok: true };
   }
-  if (path.dirname(backupPath) === path.dirname(targetPath) && path.basename(backupPath).startsWith(`.${skill}.suitcase-pre-reconcile-`)) {
+  const backupParent = path.dirname(backupPath);
+  const siblingBackup = backupParent === path.dirname(targetPath);
+  const categorizedArchiveBackup = path.basename(backupParent) === ".archive"
+    && path.dirname(backupParent) === path.dirname(path.dirname(targetPath));
+  if ((siblingBackup || categorizedArchiveBackup) && path.basename(backupPath).startsWith(`.${skill}.suitcase-pre-reconcile-`)) {
     return { ok: true };
   }
   return {
