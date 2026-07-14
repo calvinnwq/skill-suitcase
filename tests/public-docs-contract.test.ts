@@ -14,6 +14,26 @@ import { createCommandRegistry, parseCommandArgs } from "../src/commands/index.j
 
 const PUBLIC_DOC_ROOTS = ["docs", "skills", "examples"];
 const TEXT_DOCUMENT_EXTENSIONS = new Set([".css", ".html", ".js", ".json", ".md", ".txt", ".yaml", ".yml"]);
+const HTML_PROSE_ELEMENTS = new Set([
+  "address",
+  "article",
+  "aside",
+  "blockquote",
+  "dd",
+  "div",
+  "dt",
+  "figcaption",
+  "footer",
+  "header",
+  "li",
+  "main",
+  "nav",
+  "p",
+  "section",
+  "summary",
+  "td",
+  "th"
+]);
 const COMMAND_VALUE_KEYS = new Set(["command", "commands", "example", "examples", "run", "runs", "script", "scripts"]);
 const ARGV_VALUE_KEYS = new Set(["command", "example", "run", "script"]);
 const COMMAND_CONTAINER_KEYS = new Set(["commands", "examples", "runs", "scripts"]);
@@ -96,15 +116,104 @@ const ENV_SPLIT_ESCAPE_VALUES: Readonly<Record<string, string>> = {
   _: " "
 };
 const NPM_EXEC_VALUE_OPTIONS = new Set([
+  "-c",
   "-C",
   "-w",
   "--cache",
+  "--call",
   "--package",
   "--prefix",
   "--registry",
   "--script-shell",
   "--userconfig",
   "--workspace"
+]);
+const NPM_RUNNER_FLAG_OPTIONS = new Set([
+  "-p",
+  "-s",
+  "--include-workspace-root",
+  "--no",
+  "--offline",
+  "--prefer-offline",
+  "--prefer-online",
+  "--silent",
+  "--workspaces",
+  "--yes"
+]);
+const NPM_ACTIONS = new Set([
+  "access",
+  "adduser",
+  "approve-scripts",
+  "audit",
+  "bugs",
+  "cache",
+  "ci",
+  "completion",
+  "config",
+  "dedupe",
+  "deny-scripts",
+  "deprecate",
+  "diff",
+  "dist-tag",
+  "docs",
+  "doctor",
+  "edit",
+  "exec",
+  "explain",
+  "explore",
+  "find-dupes",
+  "fund",
+  "get",
+  "help",
+  "help-search",
+  "init",
+  "install",
+  "install-ci-test",
+  "install-test",
+  "link",
+  "ll",
+  "login",
+  "logout",
+  "ls",
+  "org",
+  "outdated",
+  "owner",
+  "pack",
+  "ping",
+  "pkg",
+  "prefix",
+  "profile",
+  "prune",
+  "publish",
+  "query",
+  "rebuild",
+  "repo",
+  "restart",
+  "root",
+  "run",
+  "run-script",
+  "sbom",
+  "search",
+  "set",
+  "shrinkwrap",
+  "stage",
+  "star",
+  "stars",
+  "start",
+  "stop",
+  "team",
+  "test",
+  "token",
+  "trust",
+  "undeprecate",
+  "uninstall",
+  "unpublish",
+  "unstar",
+  "update",
+  "version",
+  "view",
+  "whoami",
+  "x"
 ]);
 const NPX_VALUE_OPTIONS = new Set([
   "-c",
@@ -132,6 +241,68 @@ const PNPM_RUNNER_FLAG_OPTIONS = new Set([
   "--workspace-root"
 ]);
 const YARN_RUNNER_FLAG_OPTIONS = new Set<string>();
+const POSIX_SHELL_FLAG_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+  bash: new Set([
+    "-a", "-b", "-e", "-f", "-h", "-i", "-k", "-l", "-m", "-n", "-p", "-t", "-u", "-v", "-x",
+    "-B", "-C", "-E", "-H", "-P", "-T",
+    "--debugger", "--login", "--noediting", "--noprofile", "--norc", "--posix", "--restricted", "--verbose"
+  ]),
+  dash: new Set(["-a", "-b", "-e", "-f", "-i", "-l", "-m", "-n", "-p", "-u", "-v", "-x"]),
+  fish: new Set(["-i", "-l", "-N", "-n", "-P", "--interactive", "--login", "--no-config", "--no-execute", "--private"]),
+  ksh: new Set(["-a", "-b", "-e", "-f", "-h", "-i", "-l", "-m", "-n", "-p", "-u", "-v", "-x"]),
+  sh: new Set(["-a", "-b", "-e", "-f", "-h", "-i", "-l", "-m", "-n", "-p", "-u", "-v", "-x"]),
+  zsh: new Set(["-d", "-f", "-i", "-l", "-m", "-n", "-s", "-t", "-v", "-x"])
+};
+const POSIX_SHELL_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+  bash: new Set(["-c", "-O", "-o", "--init-file", "--rcfile"]),
+  dash: new Set(["-c", "-o"]),
+  fish: new Set(["-c", "-C", "-d", "-o", "-p", "--command", "--debug", "--debug-output", "--features", "--init-command", "--profile"]),
+  ksh: new Set(["-c", "-o"]),
+  sh: new Set(["-c", "-o"]),
+  zsh: new Set(["-c", "-o"])
+};
+const POWERSHELL_FLAG_OPTIONS = new Set([
+  "-interactive",
+  "-login",
+  "-mta",
+  "-noexit",
+  "-nologo",
+  "-noninteractive",
+  "-noprofile",
+  "-noprofileloadtime",
+  "-sta"
+]);
+const POWERSHELL_VALUE_OPTIONS = new Set([
+  "-configurationname",
+  "-custompipename",
+  "-encodedarguments",
+  "-encodedcommand",
+  "-executionpolicy",
+  "-file",
+  "-inputformat",
+  "-outputformat",
+  "-settingsfile",
+  "-workingdirectory"
+]);
+const START_PROCESS_FLAG_PARAMETERS = new Set([
+  "-confirm",
+  "-loaduserprofile",
+  "-nonewwindow",
+  "-passthru",
+  "-usenewenvironment",
+  "-wait",
+  "-whatif"
+]);
+const START_PROCESS_VALUE_PARAMETERS = new Set([
+  "-credential",
+  "-environment",
+  "-redirectstandarderror",
+  "-redirectstandardinput",
+  "-redirectstandardoutput",
+  "-verb",
+  "-windowstyle",
+  "-workingdirectory"
+]);
 const NO_WRAPPER_FLAG_OPTIONS = new Set<string>();
 const NO_WRAPPER_OPTIONAL_VALUE_OPTIONS = new Map<string, RegExp>();
 const NO_WRAPPER_VALUE_OPTIONS = new Set<string>();
@@ -326,6 +497,7 @@ function htmlCommandExamples(contents: string, fragment = false): CommandExample
 
   function visit(node: HtmlNode, insidePre: boolean, inheritedLanguage?: string): void {
     const tagName = node.tagName?.toLowerCase();
+    if (tagName === "script" || tagName === "style" || tagName === "template") return;
     const classes = node.attrs?.find((attribute) => attribute.name === "class")?.value.split(/\s+/) ?? [];
     const cmdline = classes.includes("cmdline");
     const code = tagName === "code";
@@ -352,7 +524,17 @@ function htmlCommandExamples(contents: string, fragment = false): CommandExample
           ...(language === undefined ? {} : { language })
         });
       }
-      if (cmdline) return;
+      return;
+    }
+
+    if (tagName !== undefined && HTML_PROSE_ELEMENTS.has(tagName) && !hasNestedHtmlCommandElement(node)) {
+      examples.push(...textCommandExamples(htmlText(node)));
+      return;
+    }
+
+    if (!fragment && node.nodeName === "#text") {
+      examples.push(...textCommandExamples(node.value ?? ""));
+      return;
     }
 
     for (const child of node.childNodes ?? []) visit(child, insidePre || tagName === "pre", language);
@@ -962,15 +1144,84 @@ function packageRunnerActionIndex(
   return action;
 }
 
+function npmActionIndex(words: Word[]): number | null {
+  for (let index = 1; index < words.length; index += 1) {
+    const token = words[index]?.value ?? "";
+    if (token === "--") return null;
+    if (!token.startsWith("-") || token === "-") return index;
+    assert.ok(
+      isSupportedWrapperOption(
+        token,
+        NPM_RUNNER_FLAG_OPTIONS,
+        NO_WRAPPER_OPTIONAL_VALUE_OPTIONS,
+        NPM_EXEC_VALUE_OPTIONS
+      ),
+      `unsupported npm package-runner option: ${token}`
+    );
+    if (wrapperOptionValueMode(token, NPM_EXEC_VALUE_OPTIONS) === "separate") {
+      assert.ok(words[index + 1] !== undefined, `npm package-runner option requires a value: ${token}`);
+      index += 1;
+    }
+  }
+  return null;
+}
+
+function npmExecActionIndex(words: Word[]): number | null {
+  const action = npmActionIndex(words);
+  return action !== null && (words[action]?.value === "exec" || words[action]?.value === "x") ? action : null;
+}
+
+function npmExecSeparatorIndex(words: Word[], action: number): number | null {
+  let positional = false;
+  for (let index = action + 1; index < words.length; index += 1) {
+    const token = words[index]?.value ?? "";
+    if (token === "--") return positional ? null : index;
+    if (!token.startsWith("-") || token === "-") {
+      if (isCliLauncherReference(token) || isCliPackageReference(token)) return null;
+      positional = true;
+      continue;
+    }
+    assert.ok(
+      isSupportedWrapperOption(
+        token,
+        NPM_RUNNER_FLAG_OPTIONS,
+        NO_WRAPPER_OPTIONAL_VALUE_OPTIONS,
+        NPM_EXEC_VALUE_OPTIONS
+      ),
+      `unsupported npm package-runner option: ${token}`
+    );
+    if (wrapperOptionValueMode(token, NPM_EXEC_VALUE_OPTIONS) === "separate") {
+      assert.ok(words[index + 1] !== undefined, `npm package-runner option requires a value: ${token}`);
+      index += 1;
+    }
+  }
+  return null;
+}
+
+function npmExecPositionalLauncher(words: Word[], action: number): string | null {
+  for (let index = action + 1; index < words.length; index += 1) {
+    const token = words[index]?.value ?? "";
+    if (token === "--") return null;
+    if (!token.startsWith("-") || token === "-") return token;
+    if (wrapperOptionValueMode(token, NPM_EXEC_VALUE_OPTIONS) === "separate") index += 1;
+  }
+  return null;
+}
+
 function packageRunnerInvocation(words: Word[], dialect: ShellDialect): string[] | null {
   const executable = executableName(words[0]?.value ?? "", dialect);
   const values = words.map((word) => word.value);
   if (!values.some(hasCliReference)) return null;
 
   if (executable === "npm") {
-    const execIndex = values.findIndex((value) => value === "exec" || value === "x");
-    const separator = values.indexOf("--", execIndex + 1);
-    if (execIndex < 0 || separator < 0) return null;
+    const actionIndex = npmActionIndex(words);
+    if (actionIndex === null) return null;
+    const action = values[actionIndex] ?? "";
+    assert.ok(NPM_ACTIONS.has(action), `unsupported npm package-runner action: ${action}`);
+    if (action !== "exec" && action !== "x") return null;
+    const execIndex = actionIndex;
+    const separator = npmExecSeparatorIndex(words, execIndex);
+    if (separator === null) return null;
     const launcher = separator + 1;
     const launchValue = values[launcher] ?? "";
     if (isCliExecutable(launchValue, dialect) || isCliPackageSpecifier(launchValue, dialect)) {
@@ -1018,6 +1269,8 @@ function packageRunnerInvocation(words: Word[], dialect: ShellDialect): string[]
 function packageRunnerCommandString(
   words: Word[],
   start: number,
+  runner: string,
+  flagOptions: ReadonlySet<string>,
   valueOptions: ReadonlySet<string>,
   stopAtPositional: boolean
 ): string | undefined {
@@ -1027,9 +1280,19 @@ function packageRunnerCommandString(
     if (token === "-c" || token === "--call") return words[index + 1]?.value;
     if (token.startsWith("--call=")) return token.slice("--call=".length);
     if (/^-c.+/.test(token)) return token.slice(2);
+    if (token.startsWith("-")) {
+      assert.ok(
+        isSupportedWrapperOption(token, flagOptions, NO_WRAPPER_OPTIONAL_VALUE_OPTIONS, valueOptions),
+        `unsupported ${runner} package-runner option: ${token}`
+      );
+    }
     const valueMode = wrapperOptionValueMode(token, valueOptions);
-    if (valueMode === "separate") index += 1;
+    if (valueMode === "separate") {
+      assert.ok(words[index + 1] !== undefined, `${runner} package-runner option requires a value: ${token}`);
+      index += 1;
+    }
     if (token.startsWith("-")) continue;
+    if (isCliLauncherReference(token) || isCliPackageReference(token)) return undefined;
     if (stopAtPositional) return undefined;
   }
   return undefined;
@@ -1199,7 +1462,7 @@ function envSplitStringWords(contents: string): string[] {
     if (character === "$") {
       const expansion = contents.slice(index).match(/^\$\{[A-Za-z_][A-Za-z0-9_]*\}/)?.[0];
       assert.ok(expansion !== undefined, "env -S supports only ${VARNAME} expansion");
-      append("value");
+      append(expansion === "${CLI}" ? expansion : "value");
       index += expansion.length - 1;
       continue;
     }
@@ -1326,20 +1589,49 @@ function invocationFromWords(
 
 function powershellStartProcessExample(words: Word[]): CommandExample[] {
   const suffix = words.slice(1);
-  const filePathOption = suffix.findIndex((word) => /^-filepath$/i.test(word.value));
-  const launcherIndex = filePathOption >= 0
-    ? filePathOption + 1
-    : suffix.findIndex((word) => !word.value.startsWith("-"));
+  let launcherIndex: number | null = null;
+  let argumentListOption: number | null = null;
+  let positionalArgumentStart: number | null = null;
+
+  for (let index = 0; index < suffix.length; index += 1) {
+    const token = suffix[index]?.value ?? "";
+    const parameter = token.toLowerCase();
+    if (parameter === "-filepath") {
+      assert.ok(suffix[index + 1] !== undefined, "Start-Process -FilePath requires a value");
+      assert.equal(launcherIndex, null, "Start-Process defines FilePath more than once");
+      launcherIndex = index + 1;
+      index += 1;
+      continue;
+    }
+    if (parameter === "-argumentlist" || parameter === "-args") {
+      argumentListOption = index;
+      while (
+        index + 1 < suffix.length
+        && !(suffix[index + 1]?.text === suffix[index + 1]?.value && /^-[A-Za-z]/.test(suffix[index + 1]?.value ?? ""))
+      ) index += 1;
+      continue;
+    }
+    if (START_PROCESS_FLAG_PARAMETERS.has(parameter)) continue;
+    if (START_PROCESS_VALUE_PARAMETERS.has(parameter)) {
+      assert.ok(suffix[index + 1] !== undefined, `Start-Process parameter requires a value: ${token}`);
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("-")) assert.fail(`unsupported Start-Process parameter: ${token}`);
+    if (launcherIndex === null) launcherIndex = index;
+    else if (argumentListOption === null && positionalArgumentStart === null) positionalArgumentStart = index;
+  }
+
+  if (launcherIndex === null) return [];
   const launcher = suffix[launcherIndex]?.value ?? "";
   if (!isCliExecutable(launcher, "powershell") && !isSourceEntrypoint(launcher, "powershell")) return [];
 
-  const argumentListOption = suffix.findIndex((word) => /^-(?:argumentlist|args)$/i.test(word.value));
-  const argumentStart = argumentListOption + 1;
-  const nextOption = argumentListOption < 0
+  const argumentStart = argumentListOption === null ? positionalArgumentStart : argumentListOption + 1;
+  const nextOption = argumentStart === null
     ? -1
     : suffix.slice(argumentStart)
       .findIndex((word) => word.text === word.value && /^-[A-Za-z]/.test(word.value));
-  const argumentWords = argumentListOption < 0
+  const argumentWords = argumentStart === null
     ? []
     : suffix.slice(argumentStart, nextOption < 0 ? suffix.length : argumentStart + nextOption);
   const argumentsSource = argumentWords
@@ -1350,6 +1642,65 @@ function powershellStartProcessExample(words: Word[]): CommandExample[] {
     contents: `${POWERSHELL_CALL_WRAPPER} ${renderArgv([launcher])}${argumentsSource === "" ? "" : ` ${argumentsSource}`}`,
     language: "powershell"
   }];
+}
+
+function powershellCommandString(name: string, suffix: Word[]): string | undefined {
+  for (let index = 0; index < suffix.length; index += 1) {
+    const token = suffix[index]?.value ?? "";
+    const option = token.toLowerCase();
+    if (option === "-c" || option === "-command") {
+      return suffix.slice(index + 1).map((word) => word.value).join(" ") || undefined;
+    }
+    if (!token.startsWith("-") || token === "--") return undefined;
+    assert.ok(
+      POWERSHELL_FLAG_OPTIONS.has(option) || POWERSHELL_VALUE_OPTIONS.has(option),
+      `unsupported ${name} shell option: ${token}`
+    );
+    if (POWERSHELL_VALUE_OPTIONS.has(option)) {
+      assert.ok(suffix[index + 1] !== undefined, `${name} shell option requires a value: ${token}`);
+      index += 1;
+    }
+  }
+  return undefined;
+}
+
+function posixShellCommandString(name: string, suffix: Word[]): string | undefined {
+  const flagOptions = POSIX_SHELL_FLAG_OPTIONS[name] ?? NO_WRAPPER_FLAG_OPTIONS;
+  const valueOptions = POSIX_SHELL_VALUE_OPTIONS[name] ?? NO_WRAPPER_VALUE_OPTIONS;
+  for (let index = 0; index < suffix.length; index += 1) {
+    const token = suffix[index]?.value ?? "";
+    if (token === "--" || !token.startsWith("-") || token === "-") return undefined;
+    if (token.startsWith("--")) {
+      const equalsIndex = token.indexOf("=");
+      const option = equalsIndex < 0 ? token : token.slice(0, equalsIndex);
+      assert.ok(flagOptions.has(token) || valueOptions.has(option), `unsupported ${name} shell option: ${token}`);
+      if (option === "--command") {
+        return equalsIndex < 0 ? suffix[index + 1]?.value : token.slice(equalsIndex + 1);
+      }
+      if (valueOptions.has(option) && equalsIndex < 0) {
+        assert.ok(suffix[index + 1] !== undefined, `${name} shell option requires a value: ${token}`);
+        index += 1;
+      }
+      continue;
+    }
+    if (valueOptions.has(token) && token !== "-c") {
+      assert.ok(suffix[index + 1] !== undefined, `${name} shell option requires a value: ${token}`);
+      index += 1;
+      continue;
+    }
+
+    let command = false;
+    for (let character = 1; character < token.length; character += 1) {
+      const option = `-${token[character] ?? ""}`;
+      if (option === "-c") command = true;
+      else assert.ok(flagOptions.has(option), `unsupported ${name} shell option: ${option}`);
+    }
+    if (command) {
+      assert.ok(suffix[index + 1] !== undefined, `${name} shell option requires a command: ${token}`);
+      return suffix[index + 1]?.value;
+    }
+  }
+  return undefined;
 }
 
 function nestedCommandExamplesFromWords(words: Word[], inheritedLanguage?: string): CommandExample[] {
@@ -1363,14 +1714,9 @@ function nestedCommandExamplesFromWords(words: Word[], inheritedLanguage?: strin
 
   if (SHELL_EXECUTORS.has(name)) {
     const powershell = name === "powershell" || name === "powershell.exe" || name === "pwsh" || name === "pwsh.exe";
-    const option = suffix.findIndex((word) => powershell
-      ? /^-(?:c|command)$/i.test(word.value)
-      : /^-[a-z]*c[a-z]*$/i.test(word.value));
-    const contents = option < 0
-      ? undefined
-      : powershell
-        ? suffix.slice(option + 1).map((word) => word.value).join(" ")
-        : suffix[option + 1]?.value;
+    const contents = powershell
+      ? powershellCommandString(name, suffix)
+      : posixShellCommandString(name, suffix);
     if (contents === undefined) return [];
     const language = name === "fish"
       ? "fish"
@@ -1388,11 +1734,12 @@ function nestedCommandExamplesFromWords(words: Word[], inheritedLanguage?: strin
   }
 
   if (name === "npm" || name === "npx") {
-    const action = name === "npm" ? suffix.findIndex((word) => word.value === "exec" || word.value === "x") : -1;
-    const start = name === "npm" ? action + 1 : 0;
+    const action = name === "npm" ? npmExecActionIndex(words) : null;
+    const start = name === "npm" ? (action ?? -1) : 0;
     const valueOptions = name === "npx" ? NPX_VALUE_OPTIONS : NPM_EXEC_VALUE_OPTIONS;
-    const contents = (name === "npx" || action >= 0)
-      ? packageRunnerCommandString(suffix, start, valueOptions, name === "npx")
+    const flagOptions = name === "npx" ? NPX_RUNNER_FLAG_OPTIONS : NPM_RUNNER_FLAG_OPTIONS;
+    const contents = (name === "npx" || action !== null)
+      ? packageRunnerCommandString(suffix, start, name, flagOptions, valueOptions, name === "npx")
       : undefined;
     if (contents !== undefined) {
       return [{
@@ -1555,10 +1902,11 @@ function validateCommandExample(path: string, example: CommandExample): number {
     }
 
     const executable = executableName(words[0]?.value ?? "", dialect);
-    const values = words.map((word) => word.value);
-    const npmExec = executable === "npm" && values.some((value) => value === "exec" || value === "x");
+    const npmExecAction = executable === "npm" ? npmExecActionIndex(words) : null;
+    const npmLauncher = npmExecAction === null ? null : npmExecPositionalLauncher(words, npmExecAction);
     assert.ok(
-      !npmExec || !values.some((value) => isCliExecutable(value, dialect) || isCliPackageSpecifier(value, dialect)),
+      npmLauncher === null
+        || (!isCliExecutable(npmLauncher, dialect) && !isCliPackageSpecifier(npmLauncher, dialect)),
       `${path} npm exec CLI examples must use -- before skill-suitcase`
     );
     const unsupportedNodeLaunch = (executable === "node" || executable === "node.exe")
@@ -1674,6 +2022,8 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     ["fixture.html", "<pre>skill-suitcase bogus --json</pre>"],
     ["fixture.html", "<pre><code>skill-suitcase&nbsp;bogus --json</code></pre>"],
     ["fixture.html", "<span class=\"cmdline\">skill-suitcase bogus --json</span>"],
+    ["fixture.html", "<p>skill-suitcase bogus --json</p>"],
+    ["fixture.html", "<div><span>skill-suitcase</span> bogus --json</div>"],
     ["fixture.html", "<button data-command=\"skill-suitcase bogus --json\">Run</button>"],
     ["fixture.yaml", "command: skill-suitcase bogus --json"],
     ["fixture.yaml", "command: [skill-suitcase, bogus, --json]"],
@@ -1719,6 +2069,8 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
   assert.equal(validateCliExamples("fixture.txt", "skill-suitcase"), 0);
   assert.equal(validateCliExamples("fixture.txt", "skill-suitcase status reports target state."), 0);
   assert.equal(validateCliExamples("fixture.txt", "skill-suitcase status requires --source and --json."), 0);
+  assert.equal(validateCliExamples("fixture.html", "<p>skill-suitcase status --source . --json</p>"), 1);
+  assert.equal(validateCliExamples("fixture.html", "<p>skill-suitcase status reports target state.</p>"), 0);
   assert.equal(
     validateCliExamples(
       "fixture.txt",
@@ -1834,6 +2186,7 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "./dist/src/cli.js bogus --json",
     "env -i skill-suitcase bogus --json",
     "env -S 'skill-suitcase bogus --json'",
+    "env -S '${CLI} bogus --json'",
     "env --split-string='skill-suitcase bogus --json'",
     "env -vS'skill-suitcase bogus --json'",
     "env -vS 'skill-suitcase bogus --json'",
@@ -1969,6 +2322,7 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "env --split-string 'skill-suitcase status --source . --json'",
     "env --split-string='skill-suitcase status --source . --json'",
     "env -S 'ROOT=${ROOT} skill-suitcase\\_status --source . --json'",
+    "env -S '${CLI} status --source . --json'",
     "env -S 'skill-suitcase\\tstatus --source . --json\\c ignored'",
     "env -vS'skill-suitcase status --source . --json'",
     "env -vS 'skill-suitcase status --source . --json'",
@@ -2050,6 +2404,8 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     );
   }
   assert.equal(validateCliExamples("fixture.md", markdownFixture("npm exec -- skill-suitcase status --source . --json")), 1);
+  assert.equal(validateCliExamples("fixture.md", markdownFixture("npm exec cowsay -- skill-suitcase bogus --json")), 0);
+  assert.equal(validateCliExamples("fixture.md", markdownFixture("npm run exec -- skill-suitcase bogus --json")), 0);
   assert.equal(validateCliExamples("fixture.md", markdownFixture("npx cowsay -- skill-suitcase bogus --json")), 0);
   assert.equal(
     validateCliExamples(
@@ -2078,6 +2434,56 @@ test("launcher normalization covers wrappers, runners, paths, and command string
   assert.throws(
     () => validateCliExamples("fixture.md", markdownFixture("npm exec skill-suitcase bogus --json")),
     /must use -- before skill-suitcase/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("npm bogus exec -- skill-suitcase status --source . --json")
+    ),
+    /unsupported npm package-runner action: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("npm --definitely-invalid exec -- skill-suitcase status --source . --json")
+    ),
+    /unsupported npm package-runner option: --definitely-invalid/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("bash --definitely-invalid -c 'skill-suitcase status --source . --json'")
+    ),
+    /unsupported bash shell option: --definitely-invalid/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("bash -cQ 'skill-suitcase status --source . --json'")
+    ),
+    /unsupported bash shell option: -Q/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("pwsh -DefinitelyInvalid -Command skill-suitcase status --source . --json", "powershell")
+    ),
+    /unsupported pwsh shell option: -DefinitelyInvalid/
+  );
+  for (const [source, language] of [
+    ["bash --noprofile -lc 'skill-suitcase status --source . --json'", "sh"],
+    ["bash -cl 'skill-suitcase status --source . --json'", "sh"],
+    ["fish --no-config --command 'skill-suitcase status --source . --json'", "fish"],
+    ["pwsh -NoProfile -WorkingDirectory . -Command skill-suitcase status --source . --json", "powershell"]
+  ] as const) {
+    assert.equal(validateCliExamples("fixture.md", markdownFixture(source, language)), 1, source);
+  }
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("npm --prefix . exec -- skill-suitcase status --source . --json")
+    ),
+    1
   );
   for (const source of [
     "Skill-Suitcase status --source . --json",
@@ -2183,11 +2589,48 @@ test("dialect normalization validates PowerShell and Fish examples", () => {
     ),
     /unknown command: bogus/
   );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture(
+        "Start-Process -WorkingDirectory . skill-suitcase -ArgumentList 'bogus --json'",
+        "powershell"
+      )
+    ),
+    /unknown command: bogus/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("Start-Process -WorkingDirectory . skill-suitcase 'bogus --json'", "powershell")
+    ),
+    /unknown command: bogus/
+  );
   assert.equal(
     validateCliExamples(
       "fixture.md",
       markdownFixture(
         "Start-Process -FilePath skill-suitcase -ArgumentList 'status --source . --json' -Wait",
+        "powershell"
+      )
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture(
+        "Start-Process -WorkingDirectory . skill-suitcase -ArgumentList 'status --source . --json' -Wait",
+        "powershell"
+      )
+    ),
+    1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture(
+        "Start-Process -WorkingDirectory . skill-suitcase 'status --source . --json' -Wait",
         "powershell"
       )
     ),
