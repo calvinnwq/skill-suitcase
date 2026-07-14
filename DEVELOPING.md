@@ -84,11 +84,6 @@ HTML, JavaScript, JSON, Markdown, plain-text, and YAML documentation under
 It rejects contributor-specific macOS, Linux, and Windows home paths and checks
 each CLI invocation independently, including installed-binary, `$CLI`, compiled
 CLI, wrapper, package-runner, and structured command examples.
-Execution-wrapper parsing fails closed on unsupported options,
-missing or invalid required values, and unrecognized launch forms.
-It accepts supported flag-only options, required values in attached or separate
-forms, optional inline values, and clustered short options, while shell
-executors likewise reject unsupported options and missing values.
 Each example must be accepted by the shipped CLI and produce deterministic
 output with `--json`.
 `package:smoke` clean-builds through npm's `prepack` hook, validates the public
