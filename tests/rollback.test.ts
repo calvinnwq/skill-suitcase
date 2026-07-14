@@ -109,6 +109,18 @@ test("apply captures rollback state and rollback restores previous file bytes", 
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"old\");\n");
 });
 
+test("rollback preserves the replaced target file mode", async (t) => {
+  const { receiptPath, targetSkill } = await createAppliedUpdate(t);
+  const runtimePath = path.join(targetSkill, "runtime.js");
+  await chmod(runtimePath, 0o664);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, true);
+  assert.equal((await stat(runtimePath)).mode & 0o777, 0o664);
+  assert.equal(await readFile(runtimePath, "utf8"), "console.log(\"old\");\n");
+});
+
 test("rollback accepts a receipt through a symlinked install root", async (t) => {
   const { receiptPath, targetRoot, targetSkill } = await createAppliedUpdate(t);
   const aliasRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-alias-"));
@@ -375,7 +387,17 @@ test("rollback removes installs that were missing before apply", async (t) => {
   assert.equal(applyResult.ok, true);
 
   const receiptPath = path.join(targetRoot, RECEIPT_FILE);
-  const result = await rollback({ receipt: receiptPath });
+  let removedBeforeMutation = false;
+  const result = await rollback({
+    receipt: receiptPath,
+    __test: {
+      beforeFileMutation: async () => {
+        if (removedBeforeMutation) return;
+        removedBeforeMutation = true;
+        await rm(targetSkill, { recursive: true, force: true });
+      }
+    }
+  });
 
   assert.equal(result.ok, true);
   assert.equal(result.summary.removed, 2);

@@ -44,6 +44,8 @@ type ApplyInput = {
     beforeWriteForSkill?: (skill: string) => Promise<void> | void;
     afterCopyBackup?: (targetPath: string, backupPath: string) => Promise<void> | void;
     beforeSymlinkFailureCleanup?: () => Promise<void> | void;
+    afterSymlinkCleanupClassification?: (targetPath: string) => Promise<void> | void;
+    beforeCopyBackupCleanup?: (targetPath: string, backupPath: string) => Promise<void> | void;
   };
 };
 
@@ -695,7 +697,11 @@ export async function apply({
     });
   }
 
-  await cleanupApplyBackups({ restorePlan, installRoot });
+  const backupCleanupErrors = await cleanupApplyBackups({
+    restorePlan,
+    installRoot,
+    beforeCleanup: __test?.beforeCopyBackupCleanup
+  });
 
   let postApplyStatus: StatusResult | null = null;
   try {
@@ -709,7 +715,7 @@ export async function apply({
   }
 
     return {
-      ok: true,
+      ok: backupCleanupErrors.length === 0,
       source: diffResult.source,
       target,
       mode: context.mode,
@@ -728,7 +734,10 @@ export async function apply({
         skills: [...filesAppliedBySkill.keys()],
         files: writeEntries.items.length
       },
-      errors: []
+      errors: backupCleanupErrors.map((message) => ({
+        code: "apply_backup_cleanup_failed",
+        message
+      }))
     };
     });
   } catch (error) {
@@ -1009,6 +1018,8 @@ async function applySymlinkInstalls({
         if (classification.state !== "correct") {
           throw new Error(`created link is now ${classification.state}`);
         }
+        await __test?.afterSymlinkCleanupClassification?.(createdLink.targetPath);
+        await assertSafeMutationParent(createdLink.targetPath, installRoot, false);
         await unlink(createdLink.targetPath);
       } catch (cleanupError) {
         cleanupErrors.push({
@@ -2158,21 +2169,27 @@ async function rollbackApplyWrites({
 
 async function cleanupApplyBackups({
   restorePlan,
-  installRoot
+  installRoot,
+  beforeCleanup
 }: {
   restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
   installRoot: string;
-}): Promise<void> {
+  beforeCleanup?: ((targetPath: string, backupPath: string) => Promise<void> | void) | undefined;
+}): Promise<string[]> {
+  const errors: string[] = [];
   for (const plannedRestore of restorePlan) {
     if (plannedRestore.backupPath !== null) {
       try {
+        await beforeCleanup?.(plannedRestore.targetPath, plannedRestore.backupPath);
         await assertSafeMutationParent(plannedRestore.backupPath, installRoot, false);
-      } catch {
-        continue;
+        await unlink(plannedRestore.backupPath);
+      } catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT") continue;
+        errors.push(`Apply backup retained at ${plannedRestore.backupPath}: ${errorMessage(error)}`);
       }
-      await unlinkSafe(plannedRestore.backupPath);
     }
   }
+  return errors;
 }
 
 async function assertSafeMutationParent(
@@ -2448,13 +2465,5 @@ async function statSafe(filePath: string): Promise<import("node:fs").Stats | nul
       return null;
     }
     return null;
-  }
-}
-
-async function unlinkSafe(filePath: string): Promise<void> {
-  try {
-    await unlink(filePath);
-  } catch {
-    // best effort only
   }
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants, realpathSync } from "node:fs";
-import { access, lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { platform } from "node:os";
 import path from "node:path";
 import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
 import {
@@ -22,6 +23,10 @@ const SYMLINK_ROLLBACK_SCHEMA = "calvinnwq.skills.symlink-rollback.v0";
 
 type RollbackInput = {
   receipt: string;
+  __test?: {
+    beforeFileMutation?: (targetPath: string) => Promise<void> | void;
+    beforeReconcileBackupRemoval?: (backupPath: string) => Promise<void> | void;
+  };
 };
 
 type AppliedSymlinkRollback =
@@ -111,7 +116,7 @@ type RollbackParseResult = {
   };
 };
 
-export async function rollback({ receipt }: RollbackInput): Promise<RollbackResult> {
+export async function rollback({ receipt, __test }: RollbackInput): Promise<RollbackResult> {
   if (!receipt) {
     throw new Error("receipt is required");
   }
@@ -383,7 +388,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
     };
 
     for (const file of rollbackState.files) {
-      const restored = await restoreRollbackFile(file);
+      const restored = await restoreRollbackFile(file, installRoot, __test?.beforeFileMutation);
       if (restored.status === "restored") {
         item.restored += 1;
         result.summary.restored += 1;
@@ -409,7 +414,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
       result.ok = false;
     } else {
       if (installWasPreviouslyMissing(record)) {
-        const removedTarget = await removeMissingInstallTarget(targetPath);
+        const removedTarget = await removeMissingInstallTarget(targetPath, installRoot);
         if (removedTarget.status === "failed") {
           item.failed += 1;
           result.summary.failed += 1;
@@ -435,7 +440,9 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
         const removedBackup = await removeReconcileBackup({
           skill,
           targetPath,
-          backupPath: rollbackState.backupPath
+          backupPath: rollbackState.backupPath,
+          installRoot,
+          beforeRemoval: __test?.beforeReconcileBackupRemoval
         });
         if (removedBackup.status === "failed") {
           item.failed += 1;
@@ -729,6 +736,36 @@ async function symlinkParentIsRealDirectoryUnderInstallRoot(
   }
 }
 
+async function rollbackMutationParentIsSafe(
+  installRoot: string,
+  targetPath: string,
+  allowMissing: boolean
+): Promise<boolean> {
+  const parentPath = path.dirname(targetPath);
+  if (!isPathInsideOrSame(installRoot, parentPath) || await pathHasSymlinkComponent(installRoot, parentPath)) {
+    return false;
+  }
+  if (!allowMissing) {
+    return symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, targetPath);
+  }
+  try {
+    const resolvedInstallRoot = await realpath(installRoot);
+    let existingParent = parentPath;
+    while (true) {
+      try {
+        return isPathInsideOrSame(resolvedInstallRoot, await realpath(existingParent));
+      } catch (error) {
+        if (!isNodeError(error) || error.code !== "ENOENT") return false;
+        const nextParent = path.dirname(existingParent);
+        if (nextParent === existingParent) return false;
+        existingParent = nextParent;
+      }
+    }
+  } catch {
+    return false;
+  }
+}
+
 function normalizeRollback(value: unknown, installRoot: string, receiptDirectory: string): RollbackParseResult {
   if (!isRecord(value)) {
     return { kind: "invalid", targetPath: null, message: "rollback state must be an object." };
@@ -925,6 +962,9 @@ async function targetRootIsRealDirectoryUnderInstallRoot(installRoot: string, ta
     if (!targetInfo.isDirectory() || targetInfo.isSymbolicLink()) {
       return false;
     }
+    if (await pathHasSymlinkComponent(installRoot, targetPath)) {
+      return false;
+    }
     const [resolvedInstallRoot, resolvedTargetPath] = await Promise.all([
       realpath(installRoot),
       realpath(targetPath)
@@ -990,11 +1030,20 @@ function installWasPreviouslyUnmanagedReconcile(record: ReceiptInstallRecord): b
   return record.mode === "reconcile" && isRecord(record.priorState) && record.priorState.status === "unknown";
 }
 
-async function removeMissingInstallTarget(targetPath: string): Promise<
+async function removeMissingInstallTarget(targetPath: string, installRoot: string): Promise<
   | { status: "removed" }
   | { status: "failed"; code: string; message: string }
 > {
   try {
+    if (await rollbackTargetIsMissing(targetPath)) {
+      return { status: "removed" };
+    }
+    if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, targetPath))) {
+      if (await rollbackTargetIsMissing(targetPath)) {
+        return { status: "removed" };
+      }
+      throw new Error(`Refusing to remove ${targetPath}: its parent is not a real directory under ${installRoot}.`);
+    }
     await rm(targetPath, { recursive: true, force: true });
     return { status: "removed" };
   } catch (error) {
@@ -1009,11 +1058,15 @@ async function removeMissingInstallTarget(targetPath: string): Promise<
 async function removeReconcileBackup({
   skill,
   targetPath,
-  backupPath
+  backupPath,
+  installRoot,
+  beforeRemoval
 }: {
   skill: string;
   targetPath: string;
   backupPath: string | null;
+  installRoot: string;
+  beforeRemoval?: ((backupPath: string) => Promise<void> | void) | undefined;
 }): Promise<
   | { status: "removed" | "skipped" }
   | { status: "failed"; code: string; message: string; path: string }
@@ -1031,6 +1084,16 @@ async function removeReconcileBackup({
     };
   }
   try {
+    await beforeRemoval?.(backupPath);
+    if (await rollbackTargetIsMissing(backupPath)) {
+      return { status: "removed" };
+    }
+    if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, backupPath))) {
+      if (await rollbackTargetIsMissing(backupPath)) {
+        return { status: "removed" };
+      }
+      throw new Error(`Refusing to remove ${backupPath}: its parent is not a real directory under the receipt install root.`);
+    }
     await rm(backupPath, { recursive: true, force: true });
     return { status: "removed" };
   } catch (error) {
@@ -1138,7 +1201,11 @@ async function listFiles(root: string): Promise<string[]> {
   return files.sort();
 }
 
-async function restoreRollbackFile(file: RollbackFileRecord): Promise<
+async function restoreRollbackFile(
+  file: RollbackFileRecord,
+  installRoot: string,
+  beforeMutation?: ((targetPath: string) => Promise<void> | void) | undefined
+): Promise<
   | { status: "restored" }
   | { status: "removed" }
   | { status: "failed"; code: string; message: string }
@@ -1152,7 +1219,7 @@ async function restoreRollbackFile(file: RollbackFileRecord): Promise<
   }
 
   if (file.previous.kind === "missing") {
-    return removeRollbackTarget(file);
+    return removeRollbackTarget(file, installRoot, beforeMutation);
   }
 
   const bytes = Buffer.from(file.previous.bytes, "base64");
@@ -1164,24 +1231,85 @@ async function restoreRollbackFile(file: RollbackFileRecord): Promise<
       message: `Stored rollback bytes for ${file.path} do not match their digest.`
     };
   }
+  const temporaryPath = path.join(
+    path.dirname(file.targetPath),
+    `.suitcase-rollback-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  );
+  let temporaryCreated = false;
   try {
+    const currentTarget = await lstat(file.targetPath).catch((error: unknown) => {
+      if (isNodeError(error) && error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (currentTarget !== null && (!currentTarget.isFile() || currentTarget.isSymbolicLink())) {
+      throw new Error(`Refusing to restore ${file.targetPath}: the target is not a regular file.`);
+    }
+    const replacementMode = currentTarget === null ? undefined : currentTarget.mode & 0o777;
+    const replacementOwner = currentTarget === null ? null : { uid: currentTarget.uid, gid: currentTarget.gid };
+    await beforeMutation?.(file.targetPath);
+    if (!(await rollbackMutationParentIsSafe(installRoot, file.targetPath, true))) {
+      throw new Error(`Refusing to restore ${file.targetPath}: its parent is not a real directory under ${installRoot}.`);
+    }
     await mkdir(path.dirname(file.targetPath), { recursive: true });
-    await writeFile(file.targetPath, bytes);
+    if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, file.targetPath))) {
+      throw new Error(`Refusing to restore ${file.targetPath}: its parent is not a real directory under ${installRoot}.`);
+    }
+    const temporaryFile = await open(temporaryPath, "wx", replacementMode);
+    temporaryCreated = true;
+    try {
+      await temporaryFile.writeFile(bytes);
+      if (replacementOwner !== null && platform() !== "win32") {
+        await temporaryFile.chown(replacementOwner.uid, replacementOwner.gid);
+      }
+      if (replacementMode !== undefined) await temporaryFile.chmod(replacementMode);
+    } finally {
+      await temporaryFile.close();
+    }
+    if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, file.targetPath))) {
+      throw new Error(`Refusing to restore ${file.targetPath}: its parent is not a real directory under ${installRoot}.`);
+    }
+    await rename(temporaryPath, file.targetPath);
+    temporaryCreated = false;
   } catch (error) {
+    let cleanupFailure = "";
+    if (temporaryCreated) {
+      try {
+        if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, temporaryPath))) {
+          throw new Error(`its parent is not a real directory under ${installRoot}`);
+        }
+        await unlink(temporaryPath);
+      } catch (cleanupError) {
+        cleanupFailure = `; temporary rollback file retained at ${temporaryPath}: ${errorMessage(cleanupError)}`;
+      }
+    }
     return {
       status: "failed",
       code: "restore_write_failed",
-      message: `Failed to restore ${file.path}: ${errorMessage(error)}`
+      message: `Failed to restore ${file.path}: ${errorMessage(error)}${cleanupFailure}`
     };
   }
   return { status: "restored" };
 }
 
-async function removeRollbackTarget(file: RollbackFileRecord): Promise<
+async function removeRollbackTarget(
+  file: RollbackFileRecord,
+  installRoot: string,
+  beforeMutation?: ((targetPath: string) => Promise<void> | void) | undefined
+): Promise<
   | { status: "removed" }
   | { status: "failed"; code: string; message: string }
 > {
   try {
+    await beforeMutation?.(file.targetPath);
+    if (await rollbackTargetIsMissing(file.targetPath)) {
+      return { status: "removed" };
+    }
+    if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, file.targetPath))) {
+      if (await rollbackTargetIsMissing(file.targetPath)) {
+        return { status: "removed" };
+      }
+      throw new Error(`Refusing to remove ${file.targetPath}: its parent is not a real directory under ${installRoot}.`);
+    }
     await unlink(file.targetPath);
     return { status: "removed" };
   } catch (error) {
@@ -1190,6 +1318,9 @@ async function removeRollbackTarget(file: RollbackFileRecord): Promise<
     }
     if (isNodeError(error) && (error.code === "EISDIR" || error.code === "EPERM") && await isDirectory(file.targetPath)) {
       try {
+        if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, file.targetPath))) {
+          throw new Error(`Refusing to remove ${file.targetPath}: its parent is not a real directory under ${installRoot}.`);
+        }
         await rm(file.targetPath, { recursive: true, force: true });
         return { status: "removed" };
       } catch (rmError) {
@@ -1205,6 +1336,16 @@ async function removeRollbackTarget(file: RollbackFileRecord): Promise<
       code: "rollback_remove_failed",
       message: `Failed to remove ${file.path}: ${errorMessage(error)}`
     };
+  }
+}
+
+async function rollbackTargetIsMissing(targetPath: string): Promise<boolean> {
+  try {
+    await lstat(targetPath);
+    return false;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return true;
+    throw error;
   }
 }
 
@@ -1249,6 +1390,9 @@ function resolveReceiptPathUnderRoot(root: string, candidate: string, aliasRoot:
   if (isPathInsideOrSame(resolvedRoot, resolvedCandidate)) {
     return resolvedCandidate;
   }
+  if (isPathInsideOrSame(resolvedAliasRoot, resolvedCandidate)) {
+    return path.resolve(resolvedRoot, path.relative(resolvedAliasRoot, resolvedCandidate));
+  }
   try {
     const canonicalParent = realpathSync(path.dirname(resolvedCandidate));
     const canonicalCandidate = path.join(canonicalParent, path.basename(resolvedCandidate));
@@ -1257,10 +1401,7 @@ function resolveReceiptPathUnderRoot(root: string, candidate: string, aliasRoot:
     }
   } catch {
   }
-  if (!isPathInsideOrSame(resolvedAliasRoot, resolvedCandidate)) {
-    return null;
-  }
-  return path.resolve(resolvedRoot, path.relative(resolvedAliasRoot, resolvedCandidate));
+  return null;
 }
 
 function resolveRelativePath(root: string, relativePath: string): string {
