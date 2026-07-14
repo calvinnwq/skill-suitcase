@@ -349,6 +349,7 @@ git diff --check
 `build` removes `dist`, compiles the TypeScript sources, and marks `dist/src/cli.js` executable so stale generated output cannot survive a package build.
 `test` rebuilds first, verifies that the recursively discovered compiled test inventory exactly matches `tests/**/*.test.ts`, then runs every compiled test and every `scripts/**/*.test.mjs` test with Node's built-in test runner.
 The test inventory validates every public and reusable CLI example as an accepted, deterministic `--json` invocation and enforces portable paths without contributor-specific home directories.
+Its execution-wrapper parser rejects unsupported options, missing or invalid required values, and unrecognized launch forms while accepting supported flags, value forms, and clustered short options.
 `package:smoke` runs the supported local pack verification: npm invokes `prepack` to create a clean build and record build-input, source, and output hashes in the ignored `dist/.package-build.json`, then the smoke script parses `npm pack --json`, validates the pinned public metadata and exact allowed payload, installs the tarball into an empty temporary project, and runs the read-only `targets` command through the installed executable.
 Package validation pins the curated Markdown files under `docs/` and excludes the GitHub Pages-only HTML, CSS, and JavaScript from the tarball.
 `architecture:check` runs `scripts/check-architecture.mjs` to enforce the

@@ -181,6 +181,11 @@ It also includes `tests/public-docs-contract.test.ts`, which scans root Markdown
 and reusable text documentation under `docs/`, `skills/`, and `examples/` for
 contributor-specific home paths and validates every literal CLI launch form as
 an accepted, deterministic `--json` invocation.
+Execution-wrapper launch validation fails closed on unsupported
+options, missing or invalid required values, and unrecognized launch forms.
+Supported flag-only options, attached or separate required values, optional
+inline values, and clustered short options remain accepted.
+Shell executors likewise reject unsupported options and missing values.
 
 Review the npm dry-run output for the expected executable, compiled runtime,
 operator skill, license, and public docs. Refuse the release if it contains
