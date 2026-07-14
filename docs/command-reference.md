@@ -198,8 +198,8 @@ entries.
 Each staged file is stored beneath `skills/<destination>/`, and destination
 metadata participates in the artifact ID.
 
-Pack refuses output beneath an absolute manifest-declared install root.
-The shipped guard checks manifest paths only: it does not account for CLI target overrides and does not expand home-relative strings such as `~`, so it is not a substitute for choosing a safe output.
+Pack refuses output beneath an absolute resolved install root, including CLI target overrides.
+The shipped guard does not expand home-relative strings such as `~`, so it is not a substitute for choosing a safe output.
 Pack also refuses selected untracked, non-ignored source files, `sourcePolicy.deny` matches, and provider-managed read-only targets.
 Git-ignored regular files may still be materialized unless `sourcePolicy` excludes or denies them, so inspect the staged artifact.
 Always use a temporary output directory outside both the catalog and every resolved target root so staging does not dirty either workspace.

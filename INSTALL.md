@@ -380,7 +380,7 @@ skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" 
 
 Artifact apply validates the stored bundle, but ordinary missing/behind writes are rebuilt from current catalog source and packed hashes gate only the dirty-behind exception.
 Re-run `pack` immediately before `apply`, inspect the current `diff`, and approve the exact target override and install mode instead of treating an older artifact as byte-for-byte authorization.
-Pack refuses output beneath absolute install paths declared in the manifest, but that guard does not account for CLI target overrides or expand `~`.
+Pack refuses output beneath absolute resolved install paths, including CLI target overrides, but that guard does not expand `~`.
 Keep output in a temporary directory outside the catalog and every resolved target root.
 
 For Git-backed catalogs, staged artifacts and plan locks refuse selected source skills with untracked, non-ignored files.

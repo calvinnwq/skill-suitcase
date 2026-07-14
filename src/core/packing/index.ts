@@ -4,6 +4,10 @@ import { chmod, copyFile, mkdir, readdir, readFile, stat, writeFile } from "node
 import path from "node:path";
 import { loadCatalog, type LoadedCatalog, type TargetOverrides } from "../catalog/index.js";
 import {
+  isCaseInsensitiveFilesystem,
+  normalizeFilesystemComparisonPath
+} from "../filesystem-comparison.js";
+import {
   findTargetRegistryEntriesByAssignment,
   resolveTargetRegistryEntryFromManifest
 } from "../catalog/target-registry.js";
@@ -183,6 +187,10 @@ export async function pack({
     }
   }
 
+  if (output !== null && errors.length === 0) {
+    errors.push(...await collectBundlePathCollisionErrors(files, path.resolve(output)));
+  }
+
   const sourceCommit = resolveSourceCommit(sourceRoot);
   const artifact = buildArtifactRecord({
     sourceRoot,
@@ -314,6 +322,30 @@ async function writeBundle({ outputPath, sourceRoot, manifest, artifact, manifes
   }
   await mkdir(path.dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, `${JSON.stringify(storedManifest, null, 2)}\n`, "utf8");
+}
+
+async function collectBundlePathCollisionErrors(
+  files: PackedFile[],
+  outputPath: string
+): Promise<ErrorLike[]> {
+  const caseInsensitive = await isCaseInsensitiveFilesystem(outputPath);
+  const filesByPath = new Map<string, PackedFile[]>();
+  for (const file of files) {
+    const key = normalizeFilesystemComparisonPath(
+      path.resolve(outputPath, file.bundlePath),
+      caseInsensitive
+    );
+    const matching = filesByPath.get(key) ?? [];
+    matching.push(file);
+    filesByPath.set(key, matching);
+  }
+  return [...filesByPath.values()]
+    .filter((matching) => matching.length > 1)
+    .sort((left, right) => left[0]!.bundlePath.localeCompare(right[0]!.bundlePath))
+    .map((matching) => ({
+      code: "duplicate_bundle_path",
+      message: `Pack files ${matching.map((file) => `${file.skill}:${file.bundlePath}`).join(", ")} resolve to the same path on output filesystem ${outputPath}.`
+    }));
 }
 
 function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {

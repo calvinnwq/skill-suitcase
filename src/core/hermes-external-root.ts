@@ -6,6 +6,11 @@ import {
   HERMES_EXCLUDED_SKILL_DIRECTORIES,
   HERMES_SKILL_SUPPORT_DIRECTORIES
 } from "./hermes-categories.js";
+import {
+  filesystemComparisonPath,
+  isCaseInsensitiveFilesystem,
+  normalizeFilesystemComparisonPath
+} from "./filesystem-comparison.js";
 import { classifySymlinkInstall } from "./install-modes.js";
 
 export type HermesExternalRootFinding = {
@@ -87,12 +92,27 @@ export async function validateHermesExternalRoot({
     path.resolve(value),
     managedRootCaseInsensitive
   );
-  const plannedDestinations = new Map(
-    plannedIdentities.map((item) => [managedDestinationKey(path.resolve(normalizedRoot, item.destination)), {
+  const plannedDestinations = new Map<string, { identity: string; sourcePath: string | null }>();
+  const plannedByDestination = new Map<string, typeof plannedIdentities>();
+  for (const item of plannedIdentities) {
+    const key = managedDestinationKey(path.resolve(normalizedRoot, item.destination));
+    const entries = plannedByDestination.get(key) ?? [];
+    entries.push(item);
+    plannedByDestination.set(key, entries);
+    plannedDestinations.set(key, {
       identity: item.identity,
       sourcePath: item.sourcePath ?? null
-    }])
-  );
+    });
+  }
+  const destinationConflicts = [...plannedByDestination.values()]
+    .filter((items) => items.length > 1)
+    .sort((left, right) => left[0]!.destination.localeCompare(right[0]!.destination))
+    .map((items) => ({
+      code: "hermes_planned_destination_conflict",
+      message: `Planned Hermes skills ${items.map((item) => `${item.skill} (${item.destination})`).join(", ")} resolve to the same filesystem destination.`,
+      skill: items[0]!.skill
+    }));
+  if (destinationConflicts.length > 0) return destinationConflicts;
   const managedShadows = await findSkillShadows(
     normalizedRoot,
     plannedSkills,
@@ -183,7 +203,12 @@ async function validateRegistration(
   let registered = false;
   for (const entry of entries) {
     const configuredPath = normalizeConfiguredPath(entry, home);
-    if (configuredPath === null) continue;
+    if (configuredPath === null) {
+      return [{
+        code: "hermes_external_root_unregistered",
+        message: `Cannot safely resolve Hermes external directory ${JSON.stringify(entry)} before managed root ${installRoot}.`
+      }];
+    }
     const canonicalConfiguredPath = await canonicalizePath(configuredPath);
     const comparisonConfiguredPath = await filesystemComparisonPath(canonicalConfiguredPath);
     if (comparisonConfiguredPath === comparisonInstallRoot) {
@@ -391,54 +416,6 @@ function isInsideOrEqual(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === ""
     || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-}
-
-async function filesystemComparisonPath(value: string): Promise<string> {
-  return normalizeFilesystemComparisonPath(value, await isCaseInsensitiveFilesystem(value));
-}
-
-function normalizeFilesystemComparisonPath(value: string, caseInsensitive: boolean): string {
-  return caseInsensitive ? value.toLocaleLowerCase("en-US") : value;
-}
-
-async function isCaseInsensitiveFilesystem(value: string): Promise<boolean> {
-  if (process.platform === "win32") return true;
-  let existing = path.resolve(value);
-  while (true) {
-    try {
-      existing = await realpath(existing);
-      break;
-    } catch {
-      const parent = path.dirname(existing);
-      if (parent === existing) return false;
-      existing = parent;
-    }
-  }
-
-  let probe = existing;
-  while (true) {
-    const basename = path.basename(probe);
-    const alternateBasename = toggleFirstAsciiLetterCase(basename);
-    if (alternateBasename !== basename) {
-      try {
-        const alternate = await realpath(path.join(path.dirname(probe), alternateBasename));
-        return alternate === probe;
-      } catch {
-        return false;
-      }
-    }
-    const parent = path.dirname(probe);
-    if (parent === probe) return false;
-    probe = parent;
-  }
-}
-
-function toggleFirstAsciiLetterCase(value: string): string {
-  return value.replace(/[A-Za-z]/, (letter) =>
-    letter === letter.toLocaleLowerCase("en-US")
-      ? letter.toLocaleUpperCase("en-US")
-      : letter.toLocaleLowerCase("en-US")
-  );
 }
 
 function errorMessage(error: unknown): string {

@@ -62,7 +62,7 @@ test("command reference matches shipped planning, diff, pack, and rollback bound
   assert.ok(reference.includes("choose install modes"));
   assert.ok(reference.includes("`create`, `update`, `unchanged`, `extra`, `missing`, or `blocked`"));
   assert.ok(reference.includes("`diff` does not run the git source-hygiene check"));
-  assert.ok(reference.includes("beneath an absolute manifest-declared install root"));
+  assert.ok(reference.includes("beneath an absolute resolved install root, including cli target overrides"));
   assert.ok(reference.includes("does not expand home-relative strings"));
   assert.ok(reference.includes("stored receipt version/hash is not revalidated"));
   assert.ok(reference.includes("untracked, non-ignored source files"));

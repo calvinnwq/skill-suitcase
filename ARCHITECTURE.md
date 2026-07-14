@@ -510,7 +510,7 @@ materialization flows such as `pack`, `apply`, `track`, `reconcile`, `repair`,
 into Suitcase-managed install roots.
 
 Pack output must stay outside the catalog and every resolved target root.
-The shipped guard rejects output beneath absolute manifest-declared path fields, but it does not account for CLI target overrides or expand `~`, so callers remain responsible for choosing a safe staging directory.
+The shipped guard rejects output beneath absolute resolved target paths, including CLI target overrides, but it does not expand `~`, so callers remain responsible for choosing a safe staging directory.
 
 Live mutations require explicit approval input or an approved command mode:
 

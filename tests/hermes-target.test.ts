@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, syml
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { isCaseInsensitiveFilesystem } from "../src/core/filesystem-comparison.js";
 import { expandHermesHomePrefix, validateHermesExternalRoot } from "../src/core/hermes-external-root.js";
 import { computePackArtifactId } from "../src/core/packing/artifact-id.js";
 import { apply } from "../src/apply.js";
@@ -873,9 +874,13 @@ test("categorized Hermes registration uses the process environment for variable 
   await mkdir(path.join(otherHome, "external"), { recursive: true });
   await writeFile(path.join(hermesHome, "config.yaml"), "skills:\n  external_dirs: ${HERMES_HOME}/external\n");
   const originalHermesHome = process.env["HERMES_HOME"];
+  const unresolvedVariable = "SKILL_SUITCASE_UNSET_HERMES_ROOT";
+  const originalUnresolvedValue = process.env[unresolvedVariable];
   t.after(() => {
     if (originalHermesHome === undefined) delete process.env["HERMES_HOME"];
     else process.env["HERMES_HOME"] = originalHermesHome;
+    if (originalUnresolvedValue === undefined) delete process.env[unresolvedVariable];
+    else process.env[unresolvedVariable] = originalUnresolvedValue;
   });
 
   process.env["HERMES_HOME"] = otherHome;
@@ -902,6 +907,63 @@ test("categorized Hermes registration uses the process environment for variable 
     planned: [{ skill: "hello-hermes", destination: path.join("productivity", "hello-hermes") }]
   });
   assert.equal(literalVariable.some((finding) => finding.code === "hermes_external_root_unregistered"), true);
+
+  delete process.env[unresolvedVariable];
+  const literalPrecedingRoot = path.join(hermesHome, `\${${unresolvedVariable}}`);
+  await mkdir(path.join(literalPrecedingRoot, "hello-hermes"), { recursive: true });
+  await writeFile(
+    path.join(literalPrecedingRoot, "hello-hermes", "SKILL.md"),
+    "---\nname: hello-hermes\n---\n# Earlier shadow\n"
+  );
+  await writeFile(
+    path.join(hermesHome, "config.yaml"),
+    `skills:\n  external_dirs:\n    - \${${unresolvedVariable}}\n    - ${installRoot}\n`
+  );
+  const unresolvedPrecedingEntry = await validateHermesExternalRoot({
+    home: hermesHome,
+    installRoot,
+    planned: [{ skill: "hello-hermes", destination: path.join("productivity", "hello-hermes") }]
+  });
+  assert.equal(
+    unresolvedPrecedingEntry.some((finding) => finding.code === "hermes_external_root_unregistered"),
+    true
+  );
+});
+
+test("categorized Hermes rejects planned destinations that alias on the target filesystem", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-destination-alias-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const hermesHome = path.join(sandbox, "hermes");
+  const installRoot = path.join(sandbox, "external");
+  await mkdir(installRoot, { recursive: true });
+  await mkdir(hermesHome, { recursive: true });
+  await writeFile(path.join(hermesHome, "config.yaml"), `skills:\n  external_dirs: ${installRoot}\n`);
+
+  const exactConflict = await validateHermesExternalRoot({
+    home: hermesHome,
+    installRoot,
+    planned: [
+      { skill: "first", destination: path.join("productivity", "shared") },
+      { skill: "second", destination: path.join("productivity", "shared") }
+    ]
+  });
+  assert.equal(
+    exactConflict.some((finding) => finding.code === "hermes_planned_destination_conflict"),
+    true
+  );
+
+  const caseConflict = await validateHermesExternalRoot({
+    home: hermesHome,
+    installRoot,
+    planned: [
+      { skill: "Foo", destination: path.join("Product", "Foo") },
+      { skill: "foo", destination: path.join("product", "foo") }
+    ]
+  });
+  assert.equal(
+    caseConflict.some((finding) => finding.code === "hermes_planned_destination_conflict"),
+    await isCaseInsensitiveFilesystem(installRoot)
+  );
 });
 
 test("categorized Hermes copy apply retains and reports an unsafe rollback backup", async (t) => {
