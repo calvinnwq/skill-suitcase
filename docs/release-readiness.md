@@ -172,14 +172,15 @@ aliases.
 `pnpm test` performs a clean build, requires the recursively discovered
 compiled test inventory to match `tests/**/*.test.ts` exactly, and then runs
 every compiled test and every `scripts/**/*.test.mjs` test.
-That inventory includes `tests/docs-site.test.ts`, which validates the static
-site's shared chrome, exact HTML page inventory, unique navigation coverage,
-contiguous numbered reading order, rendered pager order, local links,
-client-side storage fallbacks, and Pages deployment contract.
+That inventory includes `tests/docs-site.test.ts`, which restricts HTML pages to
+the `docs/` root and validates the static site's shared chrome, exact HTML page
+inventory, unique navigation labels, contiguous numbered reading order,
+rendered pager order, local links, client-side storage fallbacks, and Pages
+deployment contract.
 It also includes `tests/public-docs-contract.test.ts`, which scans root Markdown
 and reusable text documentation under `docs/`, `skills/`, and `examples/` for
-contributor-specific home paths and validates every literal CLI invocation for
-a shipped command and `--json`.
+contributor-specific home paths and validates every literal CLI launch form as
+an accepted, deterministic `--json` invocation.
 
 Review the npm dry-run output for the expected executable, compiled runtime,
 operator skill, license, and public docs. Refuse the release if it contains
@@ -233,9 +234,9 @@ Before publishing, verify:
 - The README and package homepage route readers to
   `https://calvinnwq.github.io/skill-suitcase/`.
 - The plain HTML site under `docs/` previews with `pnpm run docs:serve`, passes
-  `tests/docs-site.test.ts`, lists every HTML page exactly once in contiguous
-  numbered navigation and pager order, and remains outside the npm package
-  payload.
+  `tests/docs-site.test.ts`, keeps all HTML pages at the site root, lists each
+  page exactly once under a unique navigation label in contiguous numbered
+  navigation and pager order, and remains outside the npm package payload.
 - `.github/workflows/pages.yml` deploys `docs/` after relevant changes land on
   `main`, with `.nojekyll` preserved at the site root.
 - Repository Settings > Pages uses GitHub Actions as the publishing source so
@@ -243,8 +244,9 @@ Before publishing, verify:
 - `SPEC.md` describes the normative current-state contract and remains distinct from product direction, architecture, and detailed command usage.
 - Public examples use `$HOME`, `/path/to/...`, or explicit target overrides;
   they do not require a maintainer-specific absolute path.
-- Every literal public `skill-suitcase` example uses a shipped command and
-  includes `--json` on each invocation, including chained commands.
+- Every literal public CLI launch form is accepted by the shipped CLI and
+  produces deterministic output with `--json` on each invocation, including
+  chained commands.
 - Long-form command behavior lives in `docs/command-reference.md`, not in a
   README roadmap or milestone narrative.
 - `INSTALL.md` covers packaged CLI and operator-skill setup.

@@ -78,11 +78,14 @@ match those sources exactly.
 It then runs every compiled test and every `scripts/**/*.test.mjs` test with
 Node's built-in test runner, including deterministic checks for the community
 files, issue forms, local documentation links, and packaging validation.
-`tests/public-docs-contract.test.ts` inventories root Markdown and reusable text
-documentation under `docs/`, `skills/`, and `examples/`.
+`tests/public-docs-contract.test.ts` inventories root Markdown and reusable CSS,
+HTML, JavaScript, JSON, Markdown, plain-text, and YAML documentation under
+`docs/`, `skills/`, and `examples/`.
 It rejects contributor-specific macOS, Linux, and Windows home paths and checks
-each literal `skill-suitcase` shell invocation independently for a shipped
-command, a valid upstream subcommand when applicable, and `--json`.
+each CLI invocation independently, including installed-binary, `$CLI`, compiled
+CLI, wrapper, package-runner, and structured command examples.
+Each example must be accepted by the shipped CLI and produce deterministic
+output with `--json`.
 `package:smoke` clean-builds through npm's `prepack` hook, validates the public
 metadata and exact tarball payload, installs that tarball in an empty temporary
 project, and runs its read-only `targets` command.
@@ -122,16 +125,18 @@ data rather than depending on a contributor's home directory.
 Examples should use placeholders such as `/path/to/skills-catalog`, `$HOME`, or
 temporary directories. Do not commit credentials, private prompts, real agent
 home contents, or contributor-specific absolute paths.
-Every literal public `skill-suitcase` shell invocation must name a shipped
-command and include `--json`, including each invocation in a pipeline, command
-substitution, or subshell.
+Every literal public CLI invocation must be accepted by the shipped CLI and
+produce deterministic output with `--json`, including each invocation in a
+pipeline, command substitution, or subshell.
+For example, do not combine `pack --dry-run` with `--output` in documentation.
 
 The static docs site lives in `docs/` as plain HTML with one shared local
 stylesheet and client script; there is no build step.
 Preview it locally with `pnpm run docs:serve` at `http://127.0.0.1:8080/`.
 `tests/docs-site.test.ts` is the site's deterministic check and runs inside
 `pnpm test`.
-It requires every HTML page to appear exactly once in the navigation manifest,
-keeps the numbered reading order contiguous, and verifies that rendered pager
-links follow that order.
+HTML pages must stay at the root of `docs/`.
+The navigation manifest must contain exactly one uniquely labeled internal
+entry per page, keep the numbered reading order contiguous, and render pager
+links in that order.
 Deployment goes through `.github/workflows/pages.yml`.
