@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { validateHermesExternalRoot } from "../src/core/hermes-external-root.js";
+import { computePackArtifactId } from "../src/core/packing/artifact-id.js";
 import { apply } from "../src/apply.js";
 import { reconcile } from "../src/reconcile.js";
 import { repair } from "../src/repair.js";
@@ -192,12 +193,31 @@ ${skills.map((skill) => `  ${skill.name}:\n    agents:\n      - hermes\n    vari
     "pack", "--source", source, "--target", "hermes", "--output", artifactRoot, "--json"
   ]);
   assert.equal(packed.ok, true);
-  const bundleManifest = JSON.parse(await readFile(packed.bundle.manifestPath, "utf8")) as {
+  const bundleManifest = JSON.parse(await readFile(packed.bundle.manifestPath, "utf8")) as Omit<Parameters<typeof computePackArtifactId>[0], "planned" | "files"> & {
+    artifactId: string;
     planned: Array<{ skill: string; destination: string }>;
     files: Array<{ skill: string; destination: string; bundlePath: string }>;
   };
   assert.equal(bundleManifest.planned[0]?.destination, path.join("autonomous-ai-agents", "agent-swarm"));
   assert.equal(bundleManifest.files[0]?.bundlePath, path.join("skills", "autonomous-ai-agents", "agent-swarm", "SKILL.md"));
+  assert.equal(computePackArtifactId(bundleManifest), bundleManifest.artifactId);
+  assert.equal(computePackArtifactId({
+    ...bundleManifest,
+    planned: bundleManifest.planned.map((item) => Object.fromEntries(Object.entries(item).reverse())),
+    files: bundleManifest.files.map((item) => Object.fromEntries(Object.entries(item).reverse()))
+  }), bundleManifest.artifactId);
+  assert.notEqual(computePackArtifactId({
+    ...bundleManifest,
+    planned: bundleManifest.planned.map((item, index) => index === 0
+      ? { ...item, destination: path.join("creative", item.skill) }
+      : item)
+  }), bundleManifest.artifactId);
+  assert.notEqual(computePackArtifactId({
+    ...bundleManifest,
+    files: bundleManifest.files.map((item, index) => index === 0
+      ? { ...item, destination: path.join("creative", item.skill) }
+      : item)
+  }), bundleManifest.artifactId);
 
   const targetArgs = ["--source", source, "--target", "hermes", "--json"];
   const reviewedManifest = await readFile(path.join(source, "skill-suitcase.yaml"), "utf8");
@@ -789,4 +809,40 @@ test("Hermes shadow validation uses source metadata identity", async (t) => {
   assert.equal(findings.some((finding) =>
     finding.code === "hermes_local_skill_shadow" && finding.skill === "actual-name"
   ), true);
+});
+
+test("Hermes external roots reject duplicate planned metadata identities", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-duplicate-identity-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const hermesHome = path.join(sandbox, "hermes");
+  const externalRoot = path.join(sandbox, "external");
+  const firstSource = path.join(sandbox, "catalog", "skills", "first-alias");
+  const secondSource = path.join(sandbox, "catalog", "skills", "second-alias");
+  await mkdir(firstSource, { recursive: true });
+  await mkdir(secondSource, { recursive: true });
+  await writeFile(path.join(firstSource, "SKILL.md"), "---\nname: shared-name\n---\n# First\n");
+  await writeFile(path.join(secondSource, "SKILL.md"), "---\nname: shared-name\n---\n# Second\n");
+
+  const findings = await validateHermesExternalRoot({
+    home: hermesHome,
+    installRoot: externalRoot,
+    planned: [
+      {
+        skill: "first-alias",
+        sourcePath: firstSource,
+        destination: path.join("one", "first-alias")
+      },
+      {
+        skill: "second-alias",
+        sourcePath: secondSource,
+        destination: path.join("two", "second-alias")
+      }
+    ]
+  });
+
+  assert.deepEqual(findings, [{
+    code: "hermes_planned_skill_identity_conflict",
+    message: "Planned Hermes skills first-alias, second-alias share identity shared-name and would create duplicate skills.",
+    skill: "shared-name"
+  }]);
 });

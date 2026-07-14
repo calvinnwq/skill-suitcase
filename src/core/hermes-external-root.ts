@@ -40,6 +40,21 @@ export async function validateHermesExternalRoot({
       ? item.skill
       : await readLocalSkillIdentity(item.sourcePath, item.skill) ?? item.skill
   })));
+  const skillsByIdentity = new Map<string, string[]>();
+  for (const item of plannedIdentities) {
+    const skills = skillsByIdentity.get(item.identity) ?? [];
+    skills.push(item.skill);
+    skillsByIdentity.set(item.identity, skills);
+  }
+  const identityConflicts = [...skillsByIdentity]
+    .filter(([, skills]) => skills.length > 1)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([identity, skills]) => ({
+      code: "hermes_planned_skill_identity_conflict",
+      message: `Planned Hermes skills ${skills.join(", ")} share identity ${identity} and would create duplicate skills.`,
+      skill: identity
+    }));
+  if (identityConflicts.length > 0) return identityConflicts;
   const plannedSkills = new Set(plannedIdentities.map((item) => item.identity));
 
   findings.push(...await validateRegistration(normalizedHome, normalizedRoot, plannedSkills));

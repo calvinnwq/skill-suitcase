@@ -29,6 +29,7 @@ import {
   sourcePolicyHasExcludePatterns,
   type SourcePolicy
 } from "../source-policy.js";
+import { BUNDLE_SCHEMA, matchesPackArtifactId } from "../packing/artifact-id.js";
 
 type ApplyInput = {
   source: string;
@@ -96,6 +97,7 @@ type ArtifactManifest = {
     skill: string;
     relativePath: string;
     bundlePath: string;
+    destination?: unknown;
     bytes?: number;
     sha256: string;
   }>;
@@ -163,7 +165,6 @@ export type ApplyResult = {
   errors: ApplyFinding[];
 };
 
-const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_FILE = "skill-suitcase-bundle.json";
 const SYMLINK_ROLLBACK_SCHEMA = "calvinnwq.skills.symlink-rollback.v0";
 
@@ -1757,7 +1758,16 @@ async function validatedArtifactFileHashes({
     return null;
   }
 
-  if (computeStoredArtifactId(manifest) !== manifest.artifactId) {
+  if (!matchesPackArtifactId(manifest.artifactId, {
+    source: manifest.source,
+    target: manifest.target,
+    action: manifest.action,
+    planned: manifest.planned,
+    blocked: manifest.blocked ?? [],
+    files: manifest.files,
+    fileHashes: manifest.fileHashes,
+    summary: manifest.summary
+  })) {
     return null;
   }
 
@@ -1798,62 +1808,6 @@ async function validatedArtifactFileHashes({
   }
 
   return approvedHashes;
-}
-
-function computeStoredArtifactId(manifest: ArtifactManifest): string | null {
-  if (
-    manifest.action !== "pack"
-    || !Array.isArray(manifest.files)
-    || !isRecord(manifest.summary)
-    || !isRecord(manifest.fileHashes)
-  ) {
-    return null;
-  }
-
-  const stableArtifact = {
-    source: manifest.source,
-    target: manifest.target,
-    action: manifest.action,
-    planned: manifest.planned.map((item) => ({
-      skill: item.skill,
-      action: (item as { action?: unknown }).action,
-      variant: (item as { variant?: unknown }).variant,
-      sourcePath: normalizeArtifactSourcePath(manifest.source.repo, item.sourcePath),
-      evidence: evidenceArray(item)
-    })),
-    blocked: (manifest.blocked ?? []).map((item) => ({
-      skill: item.skill,
-      action: (item as { action?: unknown }).action,
-      target: (item as { target?: unknown }).target,
-      reason: (item as { reason?: unknown }).reason,
-      variant: (item as { variant?: unknown }).variant,
-      sourcePath: normalizeArtifactSourcePath(manifest.source.repo, (item as { sourcePath?: unknown }).sourcePath),
-      evidence: evidenceArray(item)
-    })),
-    files: manifest.files.map((item) => ({
-      skill: item.skill,
-      relativePath: item.relativePath,
-      sha256: item.sha256,
-      bytes: item.bytes
-    })),
-    fileHashes: manifest.fileHashes,
-    summary: manifest.summary,
-    schema: BUNDLE_SCHEMA
-  };
-
-  return createHash("sha256").update(JSON.stringify(stableObject(stableArtifact))).digest("hex");
-}
-
-function normalizeArtifactSourcePath(sourceRoot: string, sourcePath: unknown): unknown {
-  if (typeof sourcePath !== "string") {
-    return sourcePath;
-  }
-  return path.isAbsolute(sourcePath) ? sourcePath : path.join(sourceRoot, sourcePath);
-}
-
-function evidenceArray(value: unknown): unknown[] {
-  const evidence = isRecord(value) ? value.evidence : undefined;
-  return Array.isArray(evidence) ? [...evidence] : [];
 }
 
 async function sourceFileMatchesApprovedHash({
@@ -1921,23 +1875,6 @@ function isArtifactFileRecord(file: unknown): file is NonNullable<ArtifactManife
     && typeof (file as { relativePath?: unknown }).relativePath === "string"
     && typeof (file as { bundlePath?: unknown }).bundlePath === "string"
     && typeof (file as { sha256?: unknown }).sha256 === "string";
-}
-
-function stableObject(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => stableObject(item));
-  }
-
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-
-  const source = value as Record<string, unknown>;
-  const ordered: Record<string, unknown> = {};
-  for (const key of Object.keys(source).sort()) {
-    ordered[key] = stableObject(source[key]);
-  }
-  return ordered;
 }
 
 function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {

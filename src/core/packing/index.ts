@@ -15,8 +15,8 @@ import {
   sourcePolicyDecision,
   sourcePolicyPrunesDirectory
 } from "../source-policy.js";
+import { BUNDLE_SCHEMA, computePackArtifactId } from "./artifact-id.js";
 
-const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_MANIFEST = "skill-suitcase-bundle.json";
 const BUNDLE_ROOT = ".skill-suitcase";
 
@@ -288,45 +288,8 @@ function buildArtifactRecord({
 
   return {
     ...artifact,
-    id: computeArtifactId(artifact)
+    id: computePackArtifactId(artifact)
   };
-}
-
-function computeArtifactId(artifact: Omit<PackArtifact, "id">): string {
-  const stableArtifact = {
-    source: artifact.source,
-    target: artifact.target,
-    action: artifact.action,
-    planned: artifact.planned.map((item) => ({
-      skill: item.skill,
-      action: item.action,
-      variant: item.variant,
-      sourcePath: item.sourcePath,
-      destination: item.destination,
-      evidence: [...item.evidence]
-    })),
-    blocked: artifact.blocked.map((item) => ({
-      skill: item.skill,
-      action: item.action,
-      target: item.target,
-      reason: item.reason,
-      variant: item.variant,
-      sourcePath: item.sourcePath,
-      evidence: [...item.evidence]
-    })),
-    files: artifact.files.map((item) => ({
-      skill: item.skill,
-      relativePath: item.relativePath,
-      destination: item.destination,
-      sha256: item.sha256,
-      bytes: item.bytes
-    })),
-    fileHashes: artifact.fileHashes,
-    summary: artifact.summary,
-    schema: BUNDLE_SCHEMA
-  };
-
-  return createHash("sha256").update(JSON.stringify(stableObject(stableArtifact))).digest("hex");
 }
 
 async function writeBundle({ outputPath, sourceRoot, manifest, artifact, manifestPath, files }: WriteBundleInput): Promise<void> {
