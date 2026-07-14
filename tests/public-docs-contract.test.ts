@@ -105,7 +105,69 @@ const NPX_VALUE_OPTIONS = new Set([
 ]);
 const PNPM_RUNNER_VALUE_OPTIONS = new Set(["--allow-build", "--package", "--reporter"]);
 const YARN_RUNNER_VALUE_OPTIONS = new Set(["-p", "--package"]);
+const NO_WRAPPER_FLAG_OPTIONS = new Set<string>();
+const NO_WRAPPER_OPTIONAL_VALUE_OPTIONS = new Map<string, RegExp>();
 const NO_WRAPPER_VALUE_OPTIONS = new Set<string>();
+const WRAPPER_FLAG_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+  command: new Set(["-p"]),
+  env: new Set(["-i", "-v", "--debug", "--ignore-environment"]),
+  exec: new Set(["-c", "-l"]),
+  sudo: new Set([
+    "-A",
+    "-b",
+    "-E",
+    "-H",
+    "-n",
+    "-P",
+    "-S",
+    "--askpass",
+    "--background",
+    "--non-interactive",
+    "--set-home",
+    "--stdin"
+  ]),
+  timeout: new Set(["-f", "-p", "-v", "--foreground", "--preserve-status", "--verbose"]),
+  time: new Set(["-a", "-p", "-v", "--append", "--portability", "--verbose"]),
+  watch: new Set([
+    "-b",
+    "-e",
+    "-g",
+    "-p",
+    "-t",
+    "-w",
+    "-x",
+    "--beep",
+    "--chgexit",
+    "--errexit",
+    "--exec",
+    "--no-title",
+    "--no-wrap",
+    "--precise"
+  ]),
+  xargs: new Set([
+    "-0",
+    "-o",
+    "-p",
+    "-r",
+    "-t",
+    "-x",
+    "--exit",
+    "--interactive",
+    "--no-run-if-empty",
+    "--null",
+    "--open-tty",
+    "--verbose"
+  ])
+};
+const WRAPPER_OPTIONAL_VALUE_OPTIONS: Readonly<Record<string, ReadonlyMap<string, RegExp>>> = {
+  sudo: new Map([
+    ["--preserve-env", /^[A-Za-z_][A-Za-z0-9_]*(?:,[A-Za-z_][A-Za-z0-9_]*)*$/]
+  ]),
+  watch: new Map([
+    ["-d", /^(?:1|permanent)$/],
+    ["--differences", /^(?:1|permanent)$/]
+  ])
+};
 const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   env: new Set(["-a", "-C", "-u", "--argv0", "--chdir", "--unset"]),
   exec: new Set(["-a"]),
@@ -916,7 +978,39 @@ function wrapperOptionValueMode(token: string, valueOptions: ReadonlySet<string>
   return null;
 }
 
+function isSupportedWrapperOption(
+  token: string,
+  flagOptions: ReadonlySet<string>,
+  optionalValueOptions: ReadonlyMap<string, RegExp>,
+  valueOptions: ReadonlySet<string>
+): boolean {
+  const equalsIndex = token.indexOf("=");
+  const option = equalsIndex < 0 ? token : token.slice(0, equalsIndex);
+  if (token.startsWith("--")) {
+    const optionalValue = optionalValueOptions.get(option);
+    if (optionalValue !== undefined) {
+      return equalsIndex < 0 || optionalValue.test(token.slice(equalsIndex + 1));
+    }
+    return valueOptions.has(option) || (equalsIndex < 0 && flagOptions.has(token));
+  }
+  if (!/^-[^-]/.test(token)) return false;
+
+  for (let index = 1; index < token.length; index += 1) {
+    const shortOption = `-${token[index] ?? ""}`;
+    const optionalValue = optionalValueOptions.get(shortOption);
+    if (optionalValue !== undefined) {
+      if (index === token.length - 1) return true;
+      return optionalValue.test(token.slice(index + 1).replace(/^=/, ""));
+    }
+    if (valueOptions.has(shortOption)) return true;
+    if (!flagOptions.has(shortOption)) return false;
+  }
+  return true;
+}
+
 function wrapperCommandIndex(executable: string, words: Word[]): number | null {
+  const flagOptions = WRAPPER_FLAG_OPTIONS[executable] ?? NO_WRAPPER_FLAG_OPTIONS;
+  const optionalValueOptions = WRAPPER_OPTIONAL_VALUE_OPTIONS[executable] ?? NO_WRAPPER_OPTIONAL_VALUE_OPTIONS;
   const valueOptions = WRAPPER_VALUE_OPTIONS[executable] ?? NO_WRAPPER_VALUE_OPTIONS;
   let index = 1;
 
@@ -927,6 +1021,10 @@ function wrapperCommandIndex(executable: string, words: Word[]): number | null {
       break;
     }
     if (!token.startsWith("-") || token === "-") break;
+    assert.ok(
+      isSupportedWrapperOption(token, flagOptions, optionalValueOptions, valueOptions),
+      `unsupported ${executable} wrapper option: ${token}`
+    );
     const valueMode = wrapperOptionValueMode(token, valueOptions);
     index += valueMode === "separate" ? 2 : 1;
   }
@@ -1520,6 +1618,44 @@ test("launcher normalization covers wrappers, runners, paths, and command string
       source
     );
   }
+
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("env --definitely-invalid skill-suitcase status --source . --json")
+    ),
+    /unsupported env wrapper option: --definitely-invalid/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("env -0 skill-suitcase status --source . --json")
+    ),
+    /unsupported env wrapper option: -0/
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("env -i -u HOME skill-suitcase status --source . --json")
+    ),
+    1
+  );
+  for (const source of [
+    "sudo --preserve-env=HOME,PATH skill-suitcase status --source . --json",
+    "timeout -f -p 5 skill-suitcase status --source . --json",
+    "timeout -v 5 skill-suitcase status --source . --json",
+    "watch -d1 skill-suitcase status --source . --json",
+    "watch --differences=permanent skill-suitcase status --source . --json"
+  ]) {
+    assert.equal(validateCliExamples("fixture.md", markdownFixture(source)), 1, source);
+  }
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("watch --differences=sometimes skill-suitcase status --source . --json")
+    ),
+    /unsupported watch wrapper option: --differences=sometimes/
+  );
 
   assert.equal(validateCliExamples("fixture.md", markdownFixture("node \"$CLI\" status --source . --json")), 1);
   assert.equal(
