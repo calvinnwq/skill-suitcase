@@ -52,6 +52,7 @@ const EXECUTION_WRAPPERS = new Set([
   "sudo",
   "timeout",
   "time",
+  "watch",
   "xargs"
 ]);
 const SHELL_EXECUTORS = new Set([
@@ -78,6 +79,7 @@ const NODE_VALUE_OPTIONS = new Set([
   "--require",
   "--trace-event-categories"
 ]);
+const NODE_RUNTIME_FLAG_OPTIONS = new Set(["--enable-source-maps", "--no-warnings"]);
 const NPM_EXEC_VALUE_OPTIONS = new Set([
   "-C",
   "-w",
@@ -131,6 +133,7 @@ const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   ]),
   timeout: new Set(["-k", "-s", "--kill-after", "--signal"]),
   time: new Set(["-f", "-o", "--format", "--output"]),
+  watch: new Set(["-n", "--interval"]),
   xargs: new Set([
     "-E",
     "-I",
@@ -346,17 +349,53 @@ function structuredCommandExamples(
 
 function textCommandExamples(contents: string): CommandExample[] {
   if (!hasCliReference(contents)) return [];
-  return contents
-    .split(/\r?\n/)
-    .filter((line) => hasCliReference(line) && !plainTextCliProse(line))
-    .map((line) => ({ block: false, contents: line }));
+  const lines = contents.split(/\r?\n/);
+  const examples: CommandExample[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const source = [lines[index] ?? ""];
+    while (posixLineState(source.at(-1) ?? "").continuation && index + 1 < lines.length) {
+      index += 1;
+      source.push(lines[index] ?? "");
+    }
+    const command = source.join("\n");
+    if (hasCliReference(command) && !plainTextCliProse(command)) {
+      examples.push({ block: false, contents: command });
+    }
+  }
+  return examples;
+}
+
+function posixLineState(line: string): { comment: boolean; continuation: boolean } {
+  let quote: "\"" | "'" | null = null;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? "";
+    if (quote === "'") {
+      if (character === "'") quote = null;
+      continue;
+    }
+    if (character === "\\") {
+      if (index === line.length - 1) return { comment: false, continuation: true };
+      const escaped = line[index + 1] ?? "";
+      if (quote === null || /[$`"\\]/.test(escaped)) index += 1;
+      continue;
+    }
+    if (quote === "\"") {
+      if (character === "\"") quote = null;
+      continue;
+    }
+    if (character === "#" && (index === 0 || /[\s;&|()]/.test(line[index - 1] ?? ""))) {
+      return { comment: true, continuation: false };
+    }
+    if (character === "\"" || character === "'") quote = character;
+  }
+  return { comment: false, continuation: false };
 }
 
 function plainTextCliProse(line: string): boolean {
   const trimmed = line.trim();
   const match = trimmed.match(/^skill-suitcase\s+(\S+)\s+.+[.!?]$/);
   if (match === null || !PUBLIC_COMMANDS.has(match[1] ?? "")) return false;
-  return !/\s\.$/.test(trimmed) && !/[;&|`]/.test(line);
+  return !posixLineState(line).comment && !/\s\.$/.test(trimmed) && !/[;&|`]/.test(line);
 }
 
 function javascriptCommandExamples(path: string, contents: string): CommandExample[] {
@@ -368,6 +407,10 @@ function javascriptCommandExamples(path: string, contents: string): CommandExamp
     if (!ts.isTemplateExpression(node)) return null;
     let value = node.head.text;
     for (const span of node.templateSpans) {
+      if (ts.isIdentifier(span.expression) && span.expression.text.toLowerCase() === "cli") {
+        value += `$CLI${span.literal.text}`;
+        continue;
+      }
       const precedingToken = value
         .trimEnd()
         .replace(/["']$/, "")
@@ -718,6 +761,7 @@ function nodeEntrypointIndex(words: Word[]): number | null {
   for (let index = 1; index < words.length; index += 1) {
     const token = words[index]?.value ?? "";
     if (token === "--") return index + 1 < words.length ? index + 1 : null;
+    if (nodeOptionPreventsCliLaunch(token)) return null;
     if (token.startsWith("--") && token.includes("=")) {
       const option = token.slice(0, token.indexOf("="));
       if (!NODE_VALUE_OPTIONS.has(option)) return null;
@@ -728,10 +772,16 @@ function nodeEntrypointIndex(words: Word[]): number | null {
       index += 1;
       continue;
     }
+    if (NODE_RUNTIME_FLAG_OPTIONS.has(token)) continue;
     if (token.startsWith("-")) return null;
     return index;
   }
   return null;
+}
+
+function nodeOptionPreventsCliLaunch(token: string): boolean {
+  const option = token.split("=", 1)[0] ?? token;
+  return /^(?:-[cehipv]|--(?:check|completion-bash|eval|help|interactive|print|run|test|v8-options|version|watch)(?:-|$))/.test(option);
 }
 
 function packageRunnerCommandIndex(
@@ -1218,6 +1268,7 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     ["fixture.js", "const command = `skill-suitcase bogus --source ${root} --json`;"],
     ["fixture.js", "const command = `skill-suitcase bogus --source=${root} --json`;"],
     ["fixture.js", "const command = `skill-suitcase bogus --source \"${root}\" --json`;"],
+    ["fixture.js", "const command = `${CLI} bogus --json`;"],
     ["fixture.css", ":root { --example: 'skill-suitcase bogus --json'; }"],
     ["fixture.txt", "skill-suitcase bogus --json"]
   ] as const;
@@ -1250,6 +1301,17 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
       "skill-suitcase status reports target state.\nskill-suitcase status --source . --json"
     ),
     1
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.txt",
+      "skill-suitcase status \\\n  --source . \\\n  --json"
+    ),
+    1
+  );
+  assert.throws(
+    () => validateCliExamples("fixture.txt", "skill-suitcase status --source . # Show status."),
+    /without --json/
   );
   assert.equal(validateCliExamples("fixture.yaml", "command: >\n  skill-suitcase status --source .\n  --json"), 1);
   assert.equal(validateCliExamples(
@@ -1322,6 +1384,7 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "nohup skill-suitcase bogus --json",
     "nice -n 5 skill-suitcase bogus --json",
     "timeout -sTERM 30 skill-suitcase bogus --json",
+    "watch skill-suitcase bogus --json",
     "xargs -n1 skill-suitcase bogus --json",
     "/usr/local/bin/skill-suitcase bogus --json",
     "node dist/src/cli.js bogus --json",
@@ -1360,6 +1423,13 @@ test("launcher normalization covers wrappers, runners, paths, and command string
   }
 
   assert.equal(validateCliExamples("fixture.md", markdownFixture("node \"$CLI\" status --source . --json")), 1);
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("node --no-warnings --enable-source-maps dist/src/cli.js status --source . --json")
+    ),
+    1
+  );
   assert.equal(
     validateCliExamples(
       "fixture.md",
