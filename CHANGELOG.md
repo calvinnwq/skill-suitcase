@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.17.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.16.0...v0.17.0) (2026-07-14)
+
+
+### Features
+
+* add public installation and getting-started guides ([#83](https://github.com/calvinnwq/skill-suitcase/issues/83)) ([d49fda0](https://github.com/calvinnwq/skill-suitcase/commit/d49fda0da150589e118899ec5e791f43d366a3f3))
+* add writable Hermes target support ([#86](https://github.com/calvinnwq/skill-suitcase/issues/86)) ([ab09cea](https://github.com/calvinnwq/skill-suitcase/commit/ab09cea3e1c86efd0ce3d5cf031a0b0b495d509e))
+* **core:** add categorized Hermes external skill roots ([#89](https://github.com/calvinnwq/skill-suitcase/issues/89)) ([825ae7e](https://github.com/calvinnwq/skill-suitcase/commit/825ae7e7de2cac9522b5630cd2433845da8251de))
+* **docs:** add static command and safety guide site ([#84](https://github.com/calvinnwq/skill-suitcase/issues/84)) ([a8bf48b](https://github.com/calvinnwq/skill-suitcase/commit/a8bf48be7ca86c7d83b6c1f038f24ac95f47eb02))
+* ship portable sample catalog ([#82](https://github.com/calvinnwq/skill-suitcase/issues/82)) ([3885c0e](https://github.com/calvinnwq/skill-suitcase/commit/3885c0eda4cda38f2c4ab956113057fef974e11d))
+
+
+### Bug Fixes
+
+* **docs:** make operator skill root snippets copy-safe ([#87](https://github.com/calvinnwq/skill-suitcase/issues/87)) ([80335a9](https://github.com/calvinnwq/skill-suitcase/commit/80335a959aa4ea9110e10e908cb19d947c081a59))
+
 ## [0.16.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.15.0...v0.16.0) (2026-07-12)
 
 

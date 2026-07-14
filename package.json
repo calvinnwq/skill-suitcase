@@ -1,6 +1,6 @@
 {
   "name": "skill-suitcase",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Skill install planner and transactional installer for portable agent skill catalogs.",
   "license": "MIT",
   "author": "Calvin Ng",
