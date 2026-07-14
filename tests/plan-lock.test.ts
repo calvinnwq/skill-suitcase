@@ -34,6 +34,48 @@ test("buildPlanLock output is deterministic for the same source and plan context
   assert.deepEqual(Object.keys(first.fileHashes).sort(), ["gnhf-postflight", "office-hours", "skillify"]);
 });
 
+test("buildPlanLock plans the explicit assignment path layout", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-plan-lock-path-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await mkdir(path.join(sourceRoot, "skills", "hello-hermes"), { recursive: true });
+  await writeFile(path.join(sourceRoot, "skills", "hello-hermes", "SKILL.md"), "# Hello\n");
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - hello-hermes
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      hello-hermes: productivity
+assignmentPaths:
+  hermes-local:
+    kind: hermes-skills-root
+    assignment: hermes
+    path: /path/to/hermes/skills
+  hermes-external:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: /path/to/hermes
+    path: /path/to/hermes/external
+compatibility:
+  hello-hermes:
+    agents:
+      - hermes
+`);
+
+  const lock = await buildPlanLock({
+    source: sourceRoot,
+    target: "hermes",
+    assignmentPath: "hermes-external",
+    sourceCommit: "deadbeef"
+  });
+
+  assert.equal(lock.assignmentPath, "hermes-external");
+  assert.equal(lock.planEntries[0]?.destination, path.join("productivity", "hello-hermes"));
+});
+
 test("assessPlanLock detects source file hash drift", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-plan-lock-stale-"));
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));

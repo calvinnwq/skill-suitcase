@@ -109,6 +109,39 @@ compatibility:
   assert.equal(result.planned[0]?.destination, path.join("productivity", "hello-hermes"));
 });
 
+test("assignment-path planning uses the resolved assignment compatibility", async () => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-path-compatibility-"));
+  await mkdir(path.join(source, "skills", "hello-hermes"), { recursive: true });
+  await writeFile(path.join(source, "skills", "hello-hermes", "SKILL.md"), "# Hello\n");
+  await writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - hello-hermes
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      hello-hermes: productivity
+assignmentPaths:
+  hermes-profile:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: /path/to/hermes
+    path: /path/to/hermes/skill-suitcase/skills
+compatibility:
+  hello-hermes:
+    agents:
+      - hermes
+`);
+
+  const result = await plan({ source, target: "hermes-profile" });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.blocked, []);
+  assert.equal(result.planned[0]?.destination, path.join("productivity", "hello-hermes"));
+});
+
 test("unknown targets return a machine-readable error", async () => {
   const result = await plan({ source: fixtureSource, target: "unknown" });
 

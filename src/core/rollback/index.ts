@@ -209,7 +209,7 @@ export async function rollback({ receipt }: RollbackInput): Promise<RollbackResu
       // a safe no-op that leaves the link and its source untouched.
       const appliedSymlink = parseAppliedSymlinkRollback(record, installRoot, receiptDirectory);
       if (appliedSymlink.kind === "apply-created") {
-        const removal = await removeAppliedSymlink(appliedSymlink);
+        const removal = await removeAppliedSymlink(appliedSymlink, installRoot);
         if (removal.kind === "removed") {
           result.summary.removed += 1;
           removeReceiptInstallRecord(installs, skill, record);
@@ -657,11 +657,20 @@ function symlinkRecordSourcePath(record: ReceiptInstallRecord): string | null {
  * broken link, a missing target) is refused as drift so rollback can never
  * delete a real directory it did not capture as rollback state.
  */
-async function removeAppliedSymlink(rollback: { targetPath: string; expectedSourcePath: string }): Promise<
+async function removeAppliedSymlink(
+  rollback: { targetPath: string; expectedSourcePath: string },
+  installRoot: string
+): Promise<
   | { kind: "removed" }
   | { kind: "refused"; message: string }
   | { kind: "failed"; message: string }
 > {
+  if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, rollback.targetPath))) {
+    return {
+      kind: "refused",
+      message: `Refusing to remove ${rollback.targetPath}: its parent is not a real directory under ${installRoot}.`
+    };
+  }
   const classification = await classifySymlinkInstall({
     targetPath: rollback.targetPath,
     expectedSourcePath: rollback.expectedSourcePath
@@ -670,6 +679,12 @@ async function removeAppliedSymlink(rollback: { targetPath: string; expectedSour
     return {
       kind: "refused",
       message: `Refusing to remove ${rollback.targetPath}: expected a symlink to ${rollback.expectedSourcePath} but found ${classification.state}.`
+    };
+  }
+  if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, rollback.targetPath))) {
+    return {
+      kind: "refused",
+      message: `Refusing to remove ${rollback.targetPath}: its parent is not a real directory under ${installRoot}.`
     };
   }
   try {
@@ -683,6 +698,34 @@ async function removeAppliedSymlink(rollback: { targetPath: string; expectedSour
       kind: "failed",
       message: `Failed to remove symlink ${rollback.targetPath}: ${errorMessage(error)}`
     };
+  }
+}
+
+async function symlinkParentIsRealDirectoryUnderInstallRoot(
+  installRoot: string,
+  targetPath: string
+): Promise<boolean> {
+  const parentPath = path.dirname(targetPath);
+  if (!isPathInsideOrSame(installRoot, parentPath)) {
+    return false;
+  }
+  try {
+    if (path.resolve(parentPath) !== path.resolve(installRoot)) {
+      const parentInfo = await lstat(parentPath);
+      if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink()) {
+        return false;
+      }
+      if (await pathHasSymlinkComponent(installRoot, parentPath)) {
+        return false;
+      }
+    }
+    const [resolvedInstallRoot, resolvedParentPath] = await Promise.all([
+      realpath(installRoot),
+      realpath(parentPath)
+    ]);
+    return isPathInsideOrSame(resolvedInstallRoot, resolvedParentPath);
+  } catch {
+    return false;
   }
 }
 

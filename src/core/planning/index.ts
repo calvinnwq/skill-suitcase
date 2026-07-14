@@ -79,7 +79,10 @@ export async function plan({ source, target, skills, assignmentPath }: PlannerIn
   const selectedSkills = skills === undefined ? null : new Set(skills);
   const plannedSkills = resolveAssignmentSkills(manifest, assignment)
     .filter((skillName) => selectedSkills === null || selectedSkills.has(skillName));
-  const compatibilityTargets = targetCompatibilityNames(manifest, target);
+  const compatibilityTargets = targetCompatibilityNames(
+    targetContext.assignment,
+    targetContext.compatibilityKinds
+  );
   const planned: PlanItem[] = [];
   const blocked: PlanItem[] = [];
   const errors: PlanError[] = [];
@@ -191,25 +194,12 @@ function resolveAssignmentSkills(manifest: Catalog, assignment: Catalog["assignm
   return skills;
 }
 
-function targetCompatibilityNames(manifest: Catalog, target: string): string[] {
-  const names = new Set<string>([target]);
-  const assignmentPaths = manifest.assignmentPaths ?? {};
-
-  if (!isRecord(assignmentPaths)) {
-    return [...names];
-  }
-
-  for (const assignmentPath of Object.values(assignmentPaths)) {
-    if (!isRecord(assignmentPath)) {
-      continue;
-    }
-    if (normalizeValue(assignmentPath.assignment) !== target) {
-      continue;
-    }
-
+function targetCompatibilityNames(assignment: string, kinds: Array<string | null>): string[] {
+  const names = new Set<string>([assignment]);
+  for (const kind of kinds) {
     for (const name of platformCompatibilityNames({
-      assignment: target,
-      kind: normalizeValue(assignmentPath.kind)
+      assignment,
+      kind
     })) {
       names.add(name);
     }
@@ -281,13 +271,14 @@ function resolvePlanTargetContext(
   manifest: Catalog,
   target: string,
   assignmentPathId: string | undefined
-): { assignment: string; categorized: boolean; error?: PlanError } {
+): { assignment: string; categorized: boolean; compatibilityKinds: Array<string | null>; error?: PlanError } {
   const explicitPath = assignmentPathId ?? target;
   const direct = manifest.assignmentPaths?.[explicitPath];
   if (isRecord(direct)) {
     return {
       assignment: normalizeValue(direct.assignment) ?? target,
-      categorized: normalizeValue(direct.kind) === "hermes-external-skills-root"
+      categorized: normalizeValue(direct.kind) === "hermes-external-skills-root",
+      compatibilityKinds: [normalizeValue(direct.kind)]
     };
   }
 
@@ -301,6 +292,7 @@ function resolvePlanTargetContext(
     return {
       assignment: target,
       categorized: false,
+      compatibilityKinds: [],
       error: {
         code: "ambiguous_assignment_path_layout",
         message: `Assignment ${target} has target paths with incompatible destination layouts.`
@@ -309,7 +301,10 @@ function resolvePlanTargetContext(
   }
   return {
     assignment: target,
-    categorized: matching.length > 0 && normalizeValue(matching[0]?.kind) === "hermes-external-skills-root"
+    categorized: matching.length > 0 && normalizeValue(matching[0]?.kind) === "hermes-external-skills-root",
+    compatibilityKinds: matching.length === 0
+      ? [null]
+      : matching.map((entry) => normalizeValue(entry.kind))
   };
 }
 

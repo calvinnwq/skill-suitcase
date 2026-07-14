@@ -20,7 +20,7 @@ export async function validateHermesExternalRoot({
 }: {
   home: string;
   installRoot: string;
-  planned: Array<{ skill: string; destination: string }>;
+  planned: Array<{ skill: string; destination: string; sourcePath?: string }>;
 }): Promise<HermesExternalRootFinding[]> {
   const findings: HermesExternalRootFinding[] = [];
   const normalizedHome = path.resolve(home);
@@ -34,7 +34,13 @@ export async function validateHermesExternalRoot({
     filesystemComparisonPath(canonicalRoot),
     filesystemComparisonPath(canonicalLocalRoot)
   ]);
-  const plannedSkills = new Set(planned.map((item) => item.skill));
+  const plannedIdentities = await Promise.all(planned.map(async (item) => ({
+    ...item,
+    identity: item.sourcePath === undefined
+      ? item.skill
+      : await readLocalSkillIdentity(item.sourcePath, item.skill) ?? item.skill
+  })));
+  const plannedSkills = new Set(plannedIdentities.map((item) => item.identity));
 
   findings.push(...await validateRegistration(normalizedHome, normalizedRoot, plannedSkills));
 
@@ -59,7 +65,7 @@ export async function validateHermesExternalRoot({
   }
 
   const plannedDestinations = new Map(
-    planned.map((item) => [path.resolve(normalizedRoot, item.destination), item.skill])
+    plannedIdentities.map((item) => [path.resolve(normalizedRoot, item.destination), item.identity])
   );
   for (const skill of await findSkillShadows(normalizedRoot, plannedSkills, plannedDestinations)) {
     findings.push({

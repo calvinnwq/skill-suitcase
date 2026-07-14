@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -786,6 +786,69 @@ test("rollback removes an apply --mode symlink install and leaves the catalog so
   // The receipt no longer claims the removed install.
   const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as { installs: Record<string, unknown> };
   assert.equal(Object.prototype.hasOwnProperty.call(receipt.installs, "office-hours"), false);
+});
+
+test("rollback removes an apply-created symlink through a symlinked install root", async (t) => {
+  const { targetRoot, targetSkill, receiptPath } = await createAppliedSymlink(t);
+  const aliasRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-root-alias-"));
+  const alias = path.join(aliasRoot, "target");
+  t.after(() => rm(aliasRoot, { recursive: true, force: true }));
+  await symlink(targetRoot, alias);
+
+  const result = await rollback({ receipt: path.join(alias, path.basename(receiptPath)) });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.removed, 1);
+  await assert.rejects(lstat(targetSkill), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+});
+
+test("rollback refuses an apply-created symlink under a replaced category parent", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-category-source-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-category-target-"));
+  const escapedRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-category-escaped-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(escapedRoot, { recursive: true, force: true }));
+  const sourceSkill = path.join(sourceRoot, "office-hours");
+  const category = path.join(targetRoot, "productivity");
+  const targetSkill = path.join(category, "office-hours");
+  const escapedCategory = path.join(escapedRoot, "productivity");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(category, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "# Source\n");
+  await symlink(sourceSkill, targetSkill, "dir");
+  await upsertAndWriteReceipt({
+    installRoot: targetRoot,
+    skillName: "office-hours",
+    installRecord: {
+      skill: "office-hours",
+      agent: "hermes",
+      target: "hermes",
+      mode: "symlink",
+      source: { path: sourceSkill },
+      sourcePath: sourceSkill,
+      targetPath: targetSkill,
+      destination: path.join("productivity", "office-hours"),
+      sourceHash: "0000000000000000000000000000000000000000000000000000000000000000",
+      rollback: {
+        schema: "calvinnwq.skills.symlink-rollback.v0",
+        status: "available",
+        mode: "symlink",
+        targetPath: targetSkill,
+        created: true,
+        previous: { kind: "missing" }
+      }
+    }
+  });
+  await rename(category, escapedCategory);
+  await symlink(escapedCategory, category);
+
+  const result = await rollback({ receipt: path.join(targetRoot, RECEIPT_FILE) });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(result.summary.refused, 1);
+  assert.equal((await lstat(path.join(escapedCategory, "office-hours"))).isSymbolicLink(), true);
 });
 
 test("rollback removes an apply-created symlink after idempotent re-apply", async (t) => {

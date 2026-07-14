@@ -65,7 +65,7 @@ export async function buildPlanLock({
   sourceCommit
 }: PlanLockInput): Promise<PlanLockRecord> {
   const { sourceRoot, manifest } = await loadCatalog(source);
-  const planResult: PlanResult = await plan({ source: sourceRoot, target });
+  const planResult: PlanResult = await plan({ source: sourceRoot, target, assignmentPath });
 
   if (!planResult.ok) {
     throw new Error(

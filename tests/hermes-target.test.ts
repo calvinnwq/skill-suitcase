@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { validateHermesExternalRoot } from "../src/core/hermes-external-root.js";
 import { apply } from "../src/apply.js";
+import { reconcile } from "../src/reconcile.js";
 import { repair } from "../src/repair.js";
 
 const cliPath = path.join(process.cwd(), "dist", "src", "cli.js");
@@ -619,6 +620,63 @@ test("categorized Hermes registration requires the owned root before first mater
   assert.equal(existingRootFindings.some((finding) => finding.code === "hermes_external_root_unregistered"), false);
 });
 
+test("categorized Hermes reconcile refuses a replaced category parent", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-reconcile-parent-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const source = path.join(sandbox, "catalog");
+  const sourceSkill = path.join(source, "skills", "hello-hermes");
+  const hermesHome = path.join(sandbox, "hermes");
+  const externalRoot = path.join(sandbox, "external");
+  const category = path.join(externalRoot, "productivity");
+  const escapedCategory = path.join(sandbox, "escaped-category");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(path.join(category, "hello-hermes"), { recursive: true });
+  await mkdir(path.join(hermesHome, "skills"), { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: hello-hermes\n---\n# Catalog\n");
+  await writeFile(path.join(category, "hello-hermes", "SKILL.md"), "---\nname: hello-hermes\n---\n# Existing\n");
+  await writeFile(path.join(hermesHome, "config.yaml"), `skills:\n  external_dirs: ${externalRoot}\n`);
+  await writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - hello-hermes
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      hello-hermes: productivity
+assignmentPaths:
+  hermes:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: ${hermesHome}
+    path: ${externalRoot}
+compatibility:
+  hello-hermes:
+    agents:
+      - hermes
+`);
+
+  const result = await reconcile({
+    source,
+    target: "hermes",
+    skills: ["hello-hermes"],
+    apply: true,
+    __test: {
+      beforeMutationForSkill: async () => {
+        await rename(category, escapedCategory);
+        await symlink(escapedCategory, category);
+      }
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    await readFile(path.join(escapedCategory, "hello-hermes", "SKILL.md"), "utf8"),
+    "---\nname: hello-hermes\n---\n# Existing\n"
+  );
+});
+
 test("categorized Hermes root overlap follows the actual volume case semantics", async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-case-overlap-"));
   t.after(() => rm(sandbox, { recursive: true, force: true }));
@@ -702,4 +760,33 @@ test("earlier external roots cannot contain or shadow the managed root", async (
     planned: [{ skill: "hello-hermes", destination: path.join("productivity", "hello-hermes") }]
   });
   assert.equal(managedShadowFindings.some((finding) => finding.code === "hermes_managed_skill_shadow"), true);
+});
+
+test("Hermes shadow validation uses source metadata identity", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-source-identity-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const hermesHome = path.join(sandbox, "hermes");
+  const externalRoot = path.join(sandbox, "external");
+  const sourceSkill = path.join(sandbox, "catalog", "skills", "manifest-alias");
+  const localSkill = path.join(hermesHome, "skills", "actual-name");
+  await mkdir(externalRoot, { recursive: true });
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(localSkill, { recursive: true });
+  await writeFile(path.join(hermesHome, "config.yaml"), `skills:\n  external_dirs: ${externalRoot}\n`);
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: actual-name\n---\n# Source\n");
+  await writeFile(path.join(localSkill, "SKILL.md"), "---\nname: actual-name\n---\n# Local\n");
+
+  const findings = await validateHermesExternalRoot({
+    home: hermesHome,
+    installRoot: externalRoot,
+    planned: [{
+      skill: "manifest-alias",
+      sourcePath: sourceSkill,
+      destination: path.join("productivity", "manifest-alias")
+    }]
+  });
+
+  assert.equal(findings.some((finding) =>
+    finding.code === "hermes_local_skill_shadow" && finding.skill === "actual-name"
+  ), true);
 });
