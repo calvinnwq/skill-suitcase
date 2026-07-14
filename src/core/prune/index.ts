@@ -292,7 +292,12 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
     receiptHash,
     candidates: candidates.map(({ quarantinePath: _ignored, ...candidate }) => candidate)
   })) : null;
-  const quarantineRoot = id === null || installRoot === null ? null : path.join(installRoot, `.skill-suitcase-prune-${id.slice(0, 16)}`);
+  const quarantineRoot = id === null || installRoot === null
+    ? null
+    : path.join(
+      categorizedExternalRoot ? path.join(installRoot, ".archive") : installRoot,
+      `.skill-suitcase-prune-${id.slice(0, 16)}`
+    );
   const finalizedCandidates = candidates.map((candidate) => ({
     ...candidate,
     quarantinePath: candidate.kind === "directory" && quarantineRoot !== null
@@ -483,6 +488,7 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
   let ownsQuarantineRoot = false;
   let receiptReplaced = false;
   try {
+    await ensureQuarantineParent(quarantineRoot, installRoot);
     await mkdir(quarantineRoot, { recursive: false });
     ownsQuarantineRoot = true;
     await mkdir(path.join(quarantineRoot, "quarantine"), { recursive: false });
@@ -603,6 +609,25 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
       receiptBackupPath: retainedReceiptBackupPath
     };
   }
+}
+
+async function ensureQuarantineParent(quarantineRoot: string, installRoot: string): Promise<void> {
+  const root = path.resolve(installRoot);
+  const parent = path.resolve(path.dirname(quarantineRoot));
+  if (parent === root) return;
+  if (path.dirname(parent) !== root) {
+    throw new Error(`Prune quarantine parent ${parent} must be a direct child of ${root}.`);
+  }
+  try {
+    const info = await lstat(parent);
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error(`Prune quarantine parent ${parent} must be a real directory.`);
+    }
+  } catch (error) {
+    if (!isMissingPathError(error)) throw error;
+    await mkdir(parent, { recursive: false });
+  }
+  await assertNoSymlinkedParentComponents(quarantineRoot, root);
 }
 
 async function revalidateAssignments(input: PruneInput, planned: PlannedPrune, skills: string[]): Promise<void> {

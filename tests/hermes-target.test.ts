@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { isCaseInsensitiveFilesystem } from "../src/core/filesystem-comparison.js";
+import { HERMES_EXCLUDED_SKILL_DIRECTORIES } from "../src/core/hermes-categories.js";
 import { expandHermesHomePrefix, validateHermesExternalRoot } from "../src/core/hermes-external-root.js";
 import { computePackArtifactId } from "../src/core/packing/artifact-id.js";
 import { apply } from "../src/apply.js";
@@ -1613,6 +1614,37 @@ test("categorized Hermes reconcile rollback rejects a symlinked archive before a
   await assert.rejects(readFile(path.join(attackedArchive, path.basename(backupPath), "SKILL.md"), "utf8"), /ENOENT/);
 });
 
+test("categorized Hermes prune quarantines removed skills under the excluded archive", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  const initial = await apply({ source: fixture.source, target: "hermes", artifact: fixture.artifactPath });
+  assert.equal(initial.ok, true);
+  await fixture.writeManifest(false);
+  const planned = await prune({
+    source: fixture.source,
+    target: "hermes",
+    skills: ["hello-hermes"],
+    dryRun: true
+  });
+  assert.ok(planned.plan.id);
+  assert.ok(planned.plan.quarantineRoot);
+  assert.equal(path.dirname(planned.plan.quarantineRoot), path.join(fixture.externalRoot, ".archive"));
+
+  const result = await prune({
+    source: fixture.source,
+    target: "hermes",
+    skills: ["hello-hermes"],
+    planId: planned.plan.id,
+    apply: true
+  });
+
+  assert.equal(result.ok, true);
+  await assert.rejects(readFile(path.join(fixture.targetSkill, "SKILL.md"), "utf8"), /ENOENT/);
+  assert.deepEqual(await findHermesSkillIndexes(fixture.externalRoot), []);
+  const quarantinePath = result.candidates[0]?.quarantinePath;
+  assert.ok(quarantinePath);
+  assert.equal(await readFile(path.join(quarantinePath, "SKILL.md"), "utf8"), "---\nname: hello-hermes\n---\n# Catalog\n");
+});
+
 test("categorized Hermes prune retains quarantine when rollback parent is replaced", async (t) => {
   const fixture = await createCategorizedRecoveryFixture(t);
   const initial = await apply({ source: fixture.source, target: "hermes", artifact: fixture.artifactPath });
@@ -1897,3 +1929,20 @@ test("Hermes external roots reject duplicate planned metadata identities", async
     skill: "shared-name"
   }]);
 });
+
+async function findHermesSkillIndexes(root: string): Promise<string[]> {
+  const found: string[] = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    const entries = await readdir(current, { withFileTypes: true });
+    if (entries.some((entry) => entry.isFile() && entry.name === "SKILL.md")) {
+      found.push(path.relative(root, path.join(current, "SKILL.md")));
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || HERMES_EXCLUDED_SKILL_DIRECTORIES.has(entry.name)) continue;
+      pending.push(path.join(current, entry.name));
+    }
+  }
+  return found.sort();
+}
