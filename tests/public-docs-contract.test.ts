@@ -346,7 +346,17 @@ function structuredCommandExamples(
 
 function textCommandExamples(contents: string): CommandExample[] {
   if (!hasCliReference(contents)) return [];
-  return [{ block: true, contents }];
+  return contents
+    .split(/\r?\n/)
+    .filter((line) => hasCliReference(line) && !plainTextCliProse(line))
+    .map((line) => ({ block: false, contents: line }));
+}
+
+function plainTextCliProse(line: string): boolean {
+  const trimmed = line.trim();
+  const match = trimmed.match(/^skill-suitcase\s+(\S+)\s+.+[.!?]$/);
+  if (match === null || !PUBLIC_COMMANDS.has(match[1] ?? "")) return false;
+  return !/\s\.$/.test(trimmed) && !/[;&|`]/.test(line);
 }
 
 function javascriptCommandExamples(path: string, contents: string): CommandExample[] {
@@ -1231,6 +1241,16 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
     0
   );
   assert.equal(validateCliExamples("fixture.css", ":root { --description: 'Run skill-suitcase bogus --json'; }"), 0);
+  assert.equal(validateCliExamples("fixture.txt", "skill-suitcase"), 0);
+  assert.equal(validateCliExamples("fixture.txt", "skill-suitcase status reports target state."), 0);
+  assert.equal(validateCliExamples("fixture.txt", "skill-suitcase status requires --source and --json."), 0);
+  assert.equal(
+    validateCliExamples(
+      "fixture.txt",
+      "skill-suitcase status reports target state.\nskill-suitcase status --source . --json"
+    ),
+    1
+  );
   assert.equal(validateCliExamples("fixture.yaml", "command: >\n  skill-suitcase status --source .\n  --json"), 1);
   assert.equal(validateCliExamples(
     "fixture.yaml",
@@ -1550,6 +1570,17 @@ test("dialect normalization validates PowerShell and Fish examples", () => {
   );
   assert.equal(
     validateCliExamples("fixture.md", markdownFixture('$CLI = "skill-suitcase"', "powershell")),
+    0
+  );
+  assert.equal(
+    validateCliExamples(
+      "fixture.md",
+      markdownFixture("$command = 'skill-suitcase status --source . --json'", "powershell")
+    ),
+    0
+  );
+  assert.equal(
+    validateCliExamples("fixture.md", markdownFixture("$command = 'skill-suitcase'", "powershell")),
     0
   );
   assert.equal(
