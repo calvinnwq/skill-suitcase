@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
@@ -34,6 +34,9 @@ type ReconcileInput = {
     failAfterBackup?: boolean;
     failAfterBackupForSkill?: string;
     failBeforeReceipt?: boolean;
+    beforeMutationForSkill?: (skill: string) => Promise<void> | void;
+    beforeFailureRecoveryForSkill?: (skill: string) => Promise<void> | void;
+    afterStagingForSkill?: (skill: string, stagingPath: string) => Promise<void> | void;
   };
 };
 
@@ -454,7 +457,7 @@ async function planReconcile(input: ReconcileInput, selectedSkills: string[]): P
       entries: skillEntries.sort(compareEntries),
       backup: {
         strategy: "rename-target-directory",
-        backupPathTemplate: backupPathTemplate(path.dirname(statusItem.targetPath), skill)
+        backupPathTemplate: backupPathTemplate(diffResult.installRoot, statusItem.targetPath, skill)
       }
     };
     if (planned.variant !== undefined) {
@@ -513,24 +516,34 @@ async function executeReconcileLocked(
   const sourcePolicy = manifest.sourcePolicy;
 
   for (const candidate of plan.candidates) {
-    const backupPath = path.join(path.dirname(candidate.targetPath), `.${candidate.skill}.suitcase-pre-reconcile-${uniqueSuffix()}`);
-    const tmpPath = path.join(path.dirname(candidate.targetPath), `.${candidate.skill}.suitcase-reconcile-next-${uniqueSuffix()}`);
+    const transactionDirectory = transactionDirectoryForTarget(candidate.targetPath, installRoot);
+    const backupPath = path.join(transactionDirectory, `.${candidate.skill}.suitcase-pre-reconcile-${uniqueSuffix()}`);
+    const tmpPath = path.join(transactionDirectory, `.${candidate.skill}.suitcase-reconcile-next-${uniqueSuffix()}`);
     let copied = false;
     let backedUp = false;
     let installed = false;
 
     try {
+      await input.__test?.beforeMutationForSkill?.(candidate.skill);
+      await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
+      await ensureTransactionDirectory(transactionDirectory, installRoot);
+      await assertTargetParentInsideInstallRoot(tmpPath, installRoot);
       await assertSourcePolicyAllowsSource(candidate.sourcePath, sourcePolicy);
       await copyTree(candidate.sourcePath, tmpPath, sourcePolicy);
       copied = true;
+      await input.__test?.afterStagingForSkill?.(candidate.skill, tmpPath);
       if (!(await treesMatch(candidate.sourcePath, tmpPath, sourcePolicy))) {
         throw new Error(`Temporary reconcile copy for ${candidate.skill} does not match catalog source.`);
       }
+      await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
+      await assertTargetParentInsideInstallRoot(backupPath, installRoot);
       await rename(candidate.targetPath, backupPath);
       backedUp = true;
       if (input.__test?.failAfterBackup === true || input.__test?.failAfterBackupForSkill === candidate.skill) {
         throw new Error("Injected failure after backup.");
       }
+      await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
+      await assertTargetParentInsideInstallRoot(tmpPath, installRoot);
       await rename(tmpPath, candidate.targetPath);
       installed = true;
       copied = false;
@@ -554,6 +567,7 @@ async function executeReconcileLocked(
         },
         sourcePath: candidate.sourcePath,
         targetPath: candidate.targetPath,
+        destination: path.relative(installRoot, candidate.targetPath),
         sourceHash: await hashDirectory(candidate.sourcePath, sourcePolicy),
         installedFiles,
         priorState: {
@@ -594,23 +608,44 @@ async function executeReconcileLocked(
         backupPath
       });
     } catch (error) {
-      if (installed) {
-        await removePath(candidate.targetPath);
-      }
-      if (backedUp) {
-        await restorePath(backupPath, candidate.targetPath);
+      await input.__test?.beforeFailureRecoveryForSkill?.(candidate.skill);
+      const recoveryErrors: string[] = [];
+      const retainedBackups: ReconciledBackup[] = [];
+      const candidateRecoveryErrors = await recoverReconciledTarget({
+        targetPath: candidate.targetPath,
+        backupPath,
+        installed,
+        backedUp,
+        installRoot
+      });
+      recoveryErrors.push(...candidateRecoveryErrors);
+      if (backedUp && candidateRecoveryErrors.length > 0) {
+        retainedBackups.push({ skill: candidate.skill, targetPath: candidate.targetPath, backupPath });
       }
       if (copied) {
-        await removePath(tmpPath);
+        try {
+          await assertTargetParentInsideInstallRoot(tmpPath, installRoot);
+          await removePath(tmpPath);
+        } catch (cleanupError) {
+          recoveryErrors.push(`Temporary reconcile copy retained at ${tmpPath}: ${errorMessage(cleanupError)}`);
+        }
       }
       const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
       for (const completed of backups.reverse()) {
-        await removePath(completed.targetPath);
-        await restorePath(completed.backupPath, completed.targetPath);
+        const completedRecoveryErrors = await recoverReconciledTarget({
+          targetPath: completed.targetPath,
+          backupPath: completed.backupPath,
+          installed: true,
+          backedUp: true,
+          installRoot
+        });
+        recoveryErrors.push(...completedRecoveryErrors);
+        if (completedRecoveryErrors.length > 0) retainedBackups.push(completed);
       }
       reconciledSkills.length = 0;
       reconciledFiles = 0;
       backups.length = 0;
+      backups.push(...retainedBackups);
       receiptPathWritten = null;
       return {
         ...plan,
@@ -632,6 +667,10 @@ async function executeReconcileLocked(
             skill: candidate.skill,
             path: candidate.targetPath
           }),
+          ...recoveryErrors.map((message) => reconcileError({
+            code: "reconcile_recovery_failed",
+            message
+          })),
           ...receiptRollbackComplete ? [] : [reconcileError({
             code: "receipt_rollback_failed",
             message: "Receipt rollback was incomplete after reconcile failed."
@@ -679,6 +718,89 @@ async function executeReconcileLocked(
     receiptPath: receiptPathWritten,
     postReconcileStatus
   };
+}
+
+async function assertTargetParentInsideInstallRoot(targetPath: string, installRoot: string): Promise<void> {
+  const lexicalRoot = path.resolve(installRoot);
+  const lexicalParent = path.resolve(path.dirname(targetPath));
+  if (!isSameOrInsidePath(lexicalParent, lexicalRoot)) {
+    throw new Error(`Target parent ${lexicalParent} escapes install root ${lexicalRoot}.`);
+  }
+  let current = lexicalRoot;
+  for (const part of path.relative(lexicalRoot, lexicalParent).split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    const info = await lstat(current);
+    if (info.isSymbolicLink()) {
+      throw new Error(`Target parent component ${current} is a symlink.`);
+    }
+    if (!info.isDirectory()) {
+      throw new Error(`Target parent component ${current} is not a directory.`);
+    }
+  }
+  const [resolvedRoot, resolvedParent] = await Promise.all([
+    realpath(installRoot),
+    realpath(path.dirname(targetPath))
+  ]);
+  if (!isSameOrInsidePath(resolvedParent, resolvedRoot)) {
+    throw new Error(`Target parent ${path.dirname(targetPath)} resolves outside install root ${installRoot}.`);
+  }
+}
+
+async function ensureTransactionDirectory(transactionDirectory: string, installRoot: string): Promise<void> {
+  try {
+    const info = await lstat(transactionDirectory);
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error(`Transaction directory ${transactionDirectory} must be a real directory.`);
+    }
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+    await mkdir(transactionDirectory, { recursive: false });
+  }
+  await assertTargetParentInsideInstallRoot(path.join(transactionDirectory, ".transaction-check"), installRoot);
+}
+
+function transactionDirectoryForTarget(targetPath: string, installRoot: string): string {
+  return path.dirname(path.relative(installRoot, targetPath)) === "."
+    ? path.dirname(targetPath)
+    : path.join(installRoot, ".archive");
+}
+
+async function recoverReconciledTarget({
+  targetPath,
+  backupPath,
+  installed,
+  backedUp,
+  installRoot
+}: {
+  targetPath: string;
+  backupPath: string;
+  installed: boolean;
+  backedUp: boolean;
+  installRoot: string;
+}): Promise<string[]> {
+  const errors: string[] = [];
+  let targetReady = true;
+  if (installed) {
+    try {
+      await assertTargetParentInsideInstallRoot(targetPath, installRoot);
+      await removePath(targetPath);
+    } catch (error) {
+      targetReady = false;
+      errors.push(`Could not safely remove failed reconcile target ${targetPath}: ${errorMessage(error)}`);
+    }
+  }
+  if (backedUp && targetReady) {
+    try {
+      await assertTargetParentInsideInstallRoot(targetPath, installRoot);
+      await assertTargetParentInsideInstallRoot(backupPath, installRoot);
+      await restorePath(backupPath, targetPath);
+    } catch (error) {
+      errors.push(`Could not restore ${targetPath}; backup retained at ${backupPath}: ${errorMessage(error)}`);
+    }
+  } else if (backedUp) {
+    errors.push(`Backup retained at ${backupPath} because ${targetPath} could not be safely cleared.`);
+  }
+  return errors;
 }
 
 function postStatusCurrentErrors({
@@ -933,8 +1055,8 @@ function refusedSkillsFromErrors(errors: ReconcileError[]): string[] {
   )].sort();
 }
 
-function backupPathTemplate(installRoot: string, skill: string): string {
-  return path.join(installRoot, `.${skill}.suitcase-pre-reconcile-<timestamp>`);
+function backupPathTemplate(installRoot: string, targetPath: string, skill: string): string {
+  return path.join(transactionDirectoryForTarget(targetPath, installRoot), `.${skill}.suitcase-pre-reconcile-<timestamp>`);
 }
 
 type DirectoryTreeValidationResult =
@@ -1348,19 +1470,11 @@ async function readOptionalText(filePath: string): Promise<string | null> {
 }
 
 async function removePath(targetPath: string): Promise<void> {
-  try {
-    await rm(targetPath, { recursive: true, force: true });
-  } catch {
-    // best effort cleanup only
-  }
+  await rm(targetPath, { recursive: true, force: true });
 }
 
 async function restorePath(from: string, to: string): Promise<void> {
-  try {
-    await rename(from, to);
-  } catch {
-    // best effort restore only
-  }
+  await rename(from, to);
 }
 
 function reconcileError({

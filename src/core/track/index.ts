@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { diff } from "../diffing/index.js";
 import type { TargetOverrides } from "../catalog/index.js";
@@ -22,6 +22,10 @@ type TrackInput = {
   target: string;
   skills?: string[];
   targetOverrides?: TargetOverrides | undefined;
+  __test?: {
+    beforeTargetInspectionForSkill?: (skill: string) => Promise<void> | void;
+    beforeReceiptWriteForSkill?: (skill: string) => Promise<void> | void;
+  };
 };
 
 type TrackError = {
@@ -38,7 +42,7 @@ type DiffForTrack = {
   assignment: string | null;
   installRoot: string | null;
   readOnly?: boolean;
-  planned: Array<{ skill: string; sourcePath: string; variant?: string }>;
+  planned: Array<{ skill: string; sourcePath: string; destination: string; variant?: string }>;
   blocked: Array<{ skill: string; reason?: string }>;
   entries: Array<{
     action: "create" | "update" | "unchanged" | "extra" | "missing" | "blocked";
@@ -99,7 +103,7 @@ export type TrackResult = {
   errors: TrackError[];
 };
 
-export async function track({ source, target, skills, targetOverrides }: TrackInput): Promise<TrackResult> {
+export async function track({ source, target, skills, targetOverrides, __test }: TrackInput): Promise<TrackResult> {
   if (!source) {
     throw new Error("source is required");
   }
@@ -166,7 +170,13 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
   const records: TrackRecord[] = [];
 
   for (const planned of plannedForTrack) {
-    const targetPath = path.join(installRoot, planned.skill);
+    const targetPath = path.join(installRoot, planned.destination);
+    await __test?.beforeTargetInspectionForSkill?.(planned.skill);
+    const initialParentValidation = await validateCategorizedTargetParent(targetPath, installRoot, planned.skill);
+    if (!initialParentValidation.ok) {
+      errors.push(initialParentValidation.error);
+      continue;
+    }
     const classification = await classifySymlinkInstall({
       targetPath,
       expectedSourcePath: planned.sourcePath
@@ -212,6 +222,11 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
       continue;
     }
 
+    const readParentValidation = await validateCategorizedTargetParent(targetPath, installRoot, planned.skill);
+    if (!readParentValidation.ok) {
+      errors.push(readParentValidation.error);
+      continue;
+    }
     const installedFiles = await readInstalledFiles(targetPath, planned.skill);
     if (!installedFiles.ok) {
       errors.push(installedFiles.error);
@@ -264,6 +279,7 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
       },
       sourcePath: record.sourcePath,
       targetPath: record.targetPath,
+      destination: path.relative(installRoot, record.targetPath),
       sourceHash: record.sourceHash,
       installedFiles: record.installedFiles,
       priorState: {
@@ -280,6 +296,27 @@ export async function track({ source, target, skills, targetOverrides }: TrackIn
       installRecord.version = record.version;
     }
     installRecords.push({ skill: record.skill, record: buildInstallRecord(installRecord) });
+  }
+
+  for (const record of records) {
+    await __test?.beforeReceiptWriteForSkill?.(record.skill);
+    const parentValidation = await validateCategorizedTargetParent(record.targetPath, installRoot, record.skill);
+    if (!parentValidation.ok) {
+      errors.push(parentValidation.error);
+    }
+  }
+
+  if (errors.length > 0) {
+    return failure({
+      source: diffResult.source,
+      target,
+      assignment: diffResult.assignment,
+      installRoot,
+      planned: plannedForTrack.length,
+      blocked: blockedForTrack,
+      selected: selectedSkills,
+      errors
+    });
   }
 
   try {
@@ -602,6 +639,60 @@ async function validateTargetTree(targetPath: string, skill: string): Promise<Ta
   }
 
   return validateTargetTreeEntries(targetPath, skill, targetPath);
+}
+
+async function validateCategorizedTargetParent(
+  targetPath: string,
+  installRoot: string,
+  skill: string
+): Promise<TargetTreeValidationResult> {
+  const lexicalRoot = path.resolve(installRoot);
+  const lexicalParent = path.resolve(path.dirname(targetPath));
+  const relativeParent = path.relative(lexicalRoot, lexicalParent);
+  if (relativeParent === "") {
+    return { ok: true };
+  }
+  if (relativeParent.startsWith("..") || path.isAbsolute(relativeParent)) {
+    return unsafeTargetParent(targetPath, skill, `Target parent ${lexicalParent} escapes install root ${lexicalRoot}.`);
+  }
+
+  try {
+    let current = lexicalRoot;
+    for (const part of relativeParent.split(path.sep).filter(Boolean)) {
+      current = path.join(current, part);
+      const info = await lstat(current);
+      if (info.isSymbolicLink()) {
+        throw new Error(`Target parent component ${current} is a symlink.`);
+      }
+      if (!info.isDirectory()) {
+        throw new Error(`Target parent component ${current} is not a directory.`);
+      }
+    }
+    const [resolvedRoot, resolvedParent] = await Promise.all([
+      realpath(lexicalRoot),
+      realpath(lexicalParent)
+    ]);
+    const relativeResolvedParent = path.relative(resolvedRoot, resolvedParent);
+    if (relativeResolvedParent.startsWith("..") || path.isAbsolute(relativeResolvedParent)) {
+      throw new Error(`Target parent ${lexicalParent} resolves outside install root ${lexicalRoot}.`);
+    }
+  } catch (error) {
+    return unsafeTargetParent(targetPath, skill, errorMessage(error));
+  }
+
+  return { ok: true };
+}
+
+function unsafeTargetParent(targetPath: string, skill: string, reason: string): TargetTreeValidationResult {
+  return {
+    ok: false,
+    error: trackError({
+      code: "unsafe_target_path",
+      message: `Target directory for ${skill} cannot be tracked safely: ${reason}`,
+      skill,
+      path: targetPath
+    })
+  };
 }
 
 async function validateTargetTreeEntries(

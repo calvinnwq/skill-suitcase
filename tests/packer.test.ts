@@ -4,6 +4,7 @@ import { access, chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile }
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { isCaseInsensitiveFilesystem } from "../src/core/filesystem-comparison.js";
 import { pack } from "../src/packer.js";
 
 const fixtureSource = path.join(process.cwd(), "tests", "fixtures", "skills-catalog");
@@ -216,6 +217,72 @@ test("pack writes an explicit staging bundle under managed artifact storage", as
   assert.equal(manifest.source.repo, result.source);
 
   await access(path.join(result.bundle.artifactPath, "skills", "office-hours", "SKILL.md"));
+});
+
+test("pack refuses bundle paths that alias on its output filesystem", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-pack-output-alias-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const source = path.join(sandbox, "catalog");
+  const output = path.join(sandbox, "output");
+  const externalRoot = path.join(sandbox, "external");
+  const hermesHome = path.join(sandbox, "hermes");
+  await mkdir(path.join(source, "variants", "upper"), { recursive: true });
+  await mkdir(path.join(source, "variants", "lower"), { recursive: true });
+  await mkdir(output);
+  await writeFile(path.join(source, "variants", "upper", "SKILL.md"), "# Upper\n");
+  await writeFile(path.join(source, "variants", "lower", "SKILL.md"), "# Lower\n");
+  await writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - Foo
+      - foo
+
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      Foo: Product
+      foo: product
+
+assignmentPaths:
+  hermes:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: ${hermesHome}
+    path: ${externalRoot}
+
+compatibility:
+  Foo:
+    agents:
+      - hermes
+  foo:
+    agents:
+      - hermes
+
+variants:
+  Foo:
+    canonical:
+      source: variants/upper
+      agents:
+        - hermes
+  foo:
+    canonical:
+      source: variants/lower
+      agents:
+        - hermes
+`);
+
+  const result = await pack({ source, target: "hermes", output });
+  const caseInsensitive = await isCaseInsensitiveFilesystem(output);
+  assert.equal(result.ok, !caseInsensitive);
+  assert.equal(
+    result.errors.some((error) => error.code === "duplicate_bundle_path"),
+    caseInsensitive
+  );
+  if (caseInsensitive) {
+    await assert.rejects(() => access(path.join(output, ".skill-suitcase")));
+  }
 });
 
 test("pack preserves executable file modes in artifact storage", async (t) => {

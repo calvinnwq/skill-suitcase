@@ -41,6 +41,7 @@ export type ReceiptInstallRecord = {
   source?: string | { path: string } | null;
   sourcePath?: string;
   targetPath?: string;
+  destination?: string;
   target?: string;
   version?: string;
   variant?: string;
@@ -882,6 +883,7 @@ export function buildInstallRecord(
     source,
     sourcePath,
     targetPath,
+    destination,
     version,
     variant,
     sourceCommit,
@@ -904,6 +906,9 @@ export function buildInstallRecord(
   }
   if (targetPath !== undefined) {
     record.targetPath = targetPath as string;
+  }
+  if (destination !== undefined) {
+    record.destination = destination as string;
   }
   if (version !== undefined) {
     record.version = version as string;
@@ -1084,7 +1089,7 @@ function assertReceiptInstallRecord(installRecord: unknown): asserts installReco
     throw new Error("installRecord must include version, sourceCommit, or sourceHash.");
   }
 
-  const invalidScalarField = ["target", "version", "variant", "sourceCommit", "sourceHash"].find((field) => {
+  const invalidScalarField = ["target", "destination", "version", "variant", "sourceCommit", "sourceHash"].find((field) => {
     const value = installRecord[field];
     if (value === undefined || value === null) {
       return false;

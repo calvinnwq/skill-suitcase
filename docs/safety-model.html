@@ -124,8 +124,11 @@
               target-side ownership record, schema
               <code>calvinnwq.skills.receipt.v0</code>. A managed install record
               captures the skill, target path, source path and provenance, install
-              mode, version and content hashes, installed-file hashes, and rollback
-              metadata when available.
+              mode, relative destination, version and content hashes,
+              installed-file hashes, and rollback metadata when available. Flat
+              legacy records without <code>destination</code> remain valid;
+              categorized Hermes ownership requires
+              <code>&lt;category&gt;/&lt;skill&gt;</code>.
             </p>
             <p>
               Receipt updates use atomic replacement and a receipt-local
@@ -136,6 +139,28 @@
               <code>.skills-sync.json</code> receipt rather than migrating
               ownership implicitly.
             </p>
+          </section>
+
+          <section>
+            <h2>Categorized Hermes boundary</h2>
+            <p>
+              <code>hermes-external-skills-root</code> materializes assigned
+              skills beneath one Skill Suitcase-owned external root while leaving
+              <code>&lt;home&gt;/skills</code> untouched. One receipt at the external
+              root owns every categorized destination.
+            </p>
+            <div class="callout" data-kind="boundary">
+              <p class="callout-label">Preconditions</p>
+              <p>
+                The root must already exist, be registered in Hermes
+                <code>skills.external_dirs</code>, and not overlap the local skills
+                tree or an earlier external root. Local, earlier external, and
+                owned-root skill identities must not shadow a plan, planned
+                identities must be unique, and category symlinks are refused.
+                Skill Suitcase validates these conditions before live target work
+                and revalidates containment during mutation and rollback.
+              </p>
+            </div>
           </section>
 
           <section>

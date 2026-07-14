@@ -4,6 +4,7 @@ import { readTextFile } from "../../adapters/filesystem.js";
 import { DEFAULT_SKILLS_DIRECTORY, DEFAULT_SUITCASE_MANIFEST_FILE } from "../../config/defaults.js";
 import { type Catalog } from "../catalog/index.js";
 import { parseSuitcaseManifest } from "../catalog/suitcase-manifest.js";
+import { isHermesCategorySegment } from "../hermes-categories.js";
 import { resolvePlatformAdapter } from "../platform-adapters.js";
 
 type ImportFindingLevel = "error" | "warning";
@@ -414,6 +415,10 @@ function validateManifestShape(
         );
       }
     }
+
+    if (kind === "hermes-external-skills-root" && assignment !== null) {
+      validateImportedCategorizedAssignment(manifest, assignment, findings);
+    }
   }
 
   for (const skillName of Object.keys(manifest.compatibility).sort()) {
@@ -425,6 +430,41 @@ function validateManifestShape(
           `compatibility.${skillName}`
         )
       );
+    }
+  }
+}
+
+function validateImportedCategorizedAssignment(
+  manifest: Catalog,
+  assignmentName: string,
+  findings: ImportFinding[]
+): void {
+  const assignment = manifest.assignments[assignmentName];
+  if (assignment === undefined) return;
+  const assignedSkills = new Set<string>();
+  for (const suitcaseName of assignment.suitcases) {
+    for (const skill of manifest.suitcases[suitcaseName]?.skills ?? []) assignedSkills.add(skill);
+  }
+  const categories = assignment.categories ?? {};
+  for (const skill of [...assignedSkills].sort()) {
+    const category = categories[skill]?.trim() ?? "";
+    if (category.length === 0 || !isHermesCategorySegment(category)) {
+      findings.push(error(
+        category.length === 0 ? "missing_skill_category" : "invalid_skill_category",
+        category.length === 0
+          ? `Categorized assignment ${assignmentName} requires a category for ${skill}.`
+          : `Category for ${skill} must be one safe plain path segment.`,
+        `assignments.${assignmentName}.categories.${skill}`
+      ));
+    }
+  }
+  for (const skill of Object.keys(categories).sort()) {
+    if (!assignedSkills.has(skill)) {
+      findings.push(error(
+        "unknown_category_skill",
+        `Categorized assignment ${assignmentName} declares unassigned skill ${skill}.`,
+        `assignments.${assignmentName}.categories.${skill}`
+      ));
     }
   }
 }

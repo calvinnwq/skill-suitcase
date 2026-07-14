@@ -42,6 +42,7 @@ test("parses the skills repo suitcase manifest shape", async () => {
     "openclaw-builder"
   ]);
   assert.equal(codexGlobal.assignment, "codex");
+  assert.deepEqual(openclawAssignment.categories, {});
   assert.equal(portableCore.title, "Portable Core");
   assert.equal(portableCore.description, "Skills that are intended to travel across supported agent runtimes.");
   assert.deepEqual(portableCore.suitcases, ["core"]);

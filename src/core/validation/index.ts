@@ -2,6 +2,7 @@ import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { type Catalog, loadCatalog } from "../catalog/index.js";
 import { loadUpstreamLock } from "../upstream/index.js";
+import { isHermesCategorySegment } from "../hermes-categories.js";
 import { type ContractReport, scoreSkillContract } from "./skillify-contract.js";
 
 type FindingLevel = "error" | "warning";
@@ -182,6 +183,10 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
         )
       );
     }
+
+    if (assignmentPath.kind === "hermes-external-skills-root" && assignmentPath.assignment) {
+      validateCategorizedAssignment(manifest, assignmentPath.assignment, findings);
+    }
   }
 
   const upstream = await loadUpstreamLock(sourceRoot);
@@ -243,6 +248,41 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
     findings,
     contracts
   };
+}
+
+function validateCategorizedAssignment(manifest: Catalog, assignmentName: string, findings: Finding[]): void {
+  const assignment = manifest.assignments[assignmentName];
+  if (assignment === undefined) return;
+  const assignedSkills = new Set<string>();
+  for (const suitcaseName of assignment.suitcases) {
+    for (const skill of manifest.suitcases[suitcaseName]?.skills ?? []) assignedSkills.add(skill);
+  }
+  const categories = assignment.categories ?? {};
+  for (const skill of [...assignedSkills].sort()) {
+    const category = categories[skill]?.trim() ?? "";
+    if (category.length === 0) {
+      findings.push(error(
+        "missing_skill_category",
+        `Categorized assignment ${assignmentName} requires a category for ${skill}.`,
+        `assignments.${assignmentName}.categories.${skill}`
+      ));
+    } else if (!isHermesCategorySegment(category)) {
+      findings.push(error(
+        "invalid_skill_category",
+        `Category for ${skill} must be one Hermes-discoverable safe plain path segment.`,
+        `assignments.${assignmentName}.categories.${skill}`
+      ));
+    }
+  }
+  for (const skill of Object.keys(categories).sort()) {
+    if (!assignedSkills.has(skill)) {
+      findings.push(error(
+        "unknown_category_skill",
+        `Categorized assignment ${assignmentName} declares unassigned skill ${skill}.`,
+        `assignments.${assignmentName}.categories.${skill}`
+      ));
+    }
+  }
 }
 
 type SkillifySkipPolicy = Catalog["validationPolicy"]["skillify"]["skip"];

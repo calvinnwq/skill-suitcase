@@ -76,6 +76,13 @@
                 <tr><td>symlink_source_escape</td><td>the requested link would leave the approved catalog root</td></tr>
                 <tr><td>symlink_target_conflict</td><td>the live target shape cannot be replaced implicitly</td></tr>
                 <tr><td>receipt_lock_failed</td><td>a mutating workflow could not acquire or use the serialized receipt transaction lock; retry after the concurrent workflow finishes</td></tr>
+                <tr><td>missing_skill_category / invalid_skill_category</td><td>a categorized Hermes assignment needs one safe category segment for every selected skill</td></tr>
+                <tr><td>ambiguous_assignment_path_layout</td><td>one assignment has both flat and categorized paths; select an explicit assignment path ID</td></tr>
+                <tr><td>hermes_external_root_unregistered</td><td>the categorized root must already exist and resolve from <code>&lt;home&gt;/config.yaml</code> <code>skills.external_dirs</code></td></tr>
+                <tr><td>hermes_external_root_local_overlap / hermes_external_root_precedence_overlap</td><td>the owned root overlaps the local skills tree or an earlier configured external root</td></tr>
+                <tr><td>hermes_local_skill_shadow / hermes_external_skill_shadow / hermes_managed_skill_shadow / hermes_planned_skill_identity_conflict</td><td>a local, earlier external, owned-root, or duplicate planned <code>SKILL.md</code> identity would change which skill Hermes resolves</td></tr>
+                <tr><td>hermes_shadow_directory_symlink / external_category_symlink / external_destination_escape</td><td>categorized containment cannot be proven because traversal reached a symlink or escaped the owned root</td></tr>
+                <tr><td>artifact_destination_mismatch</td><td>the artifact's categorized destination differs from the current assignment; review and repack</td></tr>
               </tbody>
             </table>
             <p>
@@ -88,6 +95,14 @@
 
           <section>
             <h2>Situations that trip people up</h2>
+            <h3>A categorized Hermes root is refused</h3>
+            <p>
+              Create the approved root and register its exact path under
+              <code>skills.external_dirs</code> before Hermes reads it. Do not add
+              the path automatically. Inspect local skills and every earlier
+              configured external root for identity shadows or overlap, then
+              rerun <code>plan</code>, <code>status</code>, and <code>diff</code>.
+            </p>
             <h3>Prune refuses a legacy receipt</h3>
             <p>
               <code>prune</code> requires the modern

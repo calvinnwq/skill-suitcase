@@ -63,6 +63,20 @@ Available overrides are:
 These overrides are accepted by `targets`, `status`, `diff`, `pack`, `apply`,
 `track`, `reconcile`, `repair`, `prune`, and `import-target`.
 For Hermes, use `--hermes-skills "$HOME/.hermes/skills"` for the default profile or point it at `$HOME/.hermes/profiles/<name>/skills` for a named profile.
+For `hermes-external-skills-root`, `--hermes-skills` overrides only the dedicated
+external-root `path`; the manifest's explicit `home` still identifies the
+read-only `config.yaml` and local `$HERMES_HOME/skills` collision boundary.
+Create that root, then register its exact path in Hermes `skills.external_dirs`
+before `status`, `diff`, or a live target mutation. Skill Suitcase reports
+`hermes_external_root_unregistered` and never creates the root or edits the file
+for you.
+The adapter also fails closed when the root overlaps `<home>/skills`, a local or
+earlier external skill shadows a planned `SKILL.md` identity, an earlier root
+overlaps the owned root, planned identities are duplicated, or a traversed
+category is a symlink.
+The resolved destination is preserved through plan locks, artifacts, apply,
+status, diff, receipts, track, reconcile, repair, import-target, prune, and
+rollback while the single receipt remains at the external root.
 
 ### `plan`
 
@@ -71,8 +85,14 @@ skill-suitcase plan --source "$SRC" --target codex --json
 ```
 
 Resolves the selected assignment and emits each skill's action, variant, source
-path, evidence, and any blocked reason. It does not resolve target install paths,
+path, relative destination, evidence, and any blocked reason.
+It does not resolve target install paths,
 choose install modes, hash content, or read/write live targets.
+Flat targets use the skill name as the destination; categorized Hermes targets
+use `<category>/<skill>`.
+If an assignment is exposed through both flat and categorized paths, select an
+explicit assignment path ID as `--target`; assignment-only planning returns
+`ambiguous_assignment_path_layout`.
 
 ### `diff`
 
@@ -86,6 +106,7 @@ skill-suitcase diff \
 
 Compares catalog source with the live modeled target. File actions are
 `create`, `update`, `unchanged`, `extra`, `missing`, or `blocked`.
+Planned entries retain the relative destination used beneath the install root.
 Source-policy failures, blocked variants, and read-only targets are reported.
 `diff` does not run the Git source-hygiene check; `pack`, plan-lock creation,
 and `apply` enforce the untracked-source materialization gate.
@@ -102,7 +123,9 @@ skill-suitcase status \
 ```
 
 Classifies planned installs using catalog content, live content, receipts, and
-install mode. States include:
+install mode.
+Each status entry reports its resolved relative destination.
+States include:
 
 - `current`: for copy installs, receipt-owned target files still match the receipt and the receipt hash/version match catalog source; preserved target extras outside `installedFiles` do not make the skill dirty; for symlink installs, the live link points to the selected catalog source and `sourcePolicy.exclude` is empty (the stored receipt version/hash is not revalidated on that path)
 - `missing`: planned target is absent
@@ -170,10 +193,13 @@ skill-suitcase pack \
 Dry-run reports the bundle plan. With `--output`, pack writes an immutable
 bundle below the explicit directory and returns its artifact manifest. It does
 not touch the live target. The manifest records source provenance, selected
-skills, file hashes, planned target entries, and blocked entries.
+skills, file hashes, planned target entries, resolved destinations, and blocked
+entries.
+Each staged file is stored beneath `skills/<destination>/`, and destination
+metadata participates in the artifact ID.
 
-Pack refuses output beneath an absolute manifest-declared install root.
-The shipped guard checks manifest paths only: it does not account for CLI target overrides and does not expand home-relative strings such as `~`, so it is not a substitute for choosing a safe output.
+Pack refuses output beneath an absolute resolved install root, including CLI target overrides.
+The shipped guard does not expand home-relative strings such as `~`, so it is not a substitute for choosing a safe output.
 Pack also refuses selected untracked, non-ignored source files, `sourcePolicy.deny` matches, and provider-managed read-only targets.
 Git-ignored regular files may still be materialized unless `sourcePolicy` excludes or denies them, so inspect the staged artifact.
 Always use a temporary output directory outside both the catalog and every resolved target root so staging does not dirty either workspace.
@@ -205,9 +231,13 @@ const assessment = await assessPlanLock({
 // assessment: { valid: boolean, reasons: string[], current: lock | null }
 ```
 
-`buildPlanLock` returns schema `calvinnwq.skills.plan-lock.v0` with source provenance, target and assignment identity, selected skills, planned entries, per-file hashes, and a deterministic `planId`.
+`buildPlanLock` returns schema `calvinnwq.skills.plan-lock.v0` with source
+provenance, target and assignment identity, selected skills, planned entries
+including resolved destinations, per-file hashes, and a deterministic `planId`.
 It refuses selected untracked, non-ignored source files through a thrown error; ignored regular files can still enter the lock hashes.
 `assessPlanLock` rebuilds current facts and returns drift reason strings such as `source_commit_changed`, `plan_entries_changed`, or `file_hashes_changed`.
+For backward compatibility, a flat v0 lock without `destination` is assessed as
+if every entry used its skill name.
 The lock does not resolve or bind a target install root, local target overrides, or copy versus symlink mode; approve those apply-time choices separately.
 The module does not write the lock file itself.
 
@@ -242,6 +272,11 @@ Lock mode reassesses the current plan and file hashes against the lock.
 Artifact mode validates artifact schema, source/target metadata, and staging provenance, but ordinary missing/behind writes are rebuilt from current catalog source.
 Artifact `fileHashes` are enforced only for the dirty-behind update exception.
 A tracked catalog change or newly planned skill after packing may therefore be written by artifact apply without matching the staged bytes/plan.
+Categorized destinations are an additional approval invariant:
+`artifact_destination_mismatch` refuses apply when the staged destination no
+longer matches the current plan.
+Existing flat v0 artifacts without destination metadata remain valid and use
+the skill name as their destination.
 Neither approval input binds local target overrides, the resolved install root, or `--mode`; approve the exact source, target path, and copy/symlink mode at invocation time.
 Re-run `pack` immediately before artifact apply and inspect the current `diff`; do not use an older artifact as byte-for-byte authorization.
 
@@ -372,6 +407,8 @@ Reverses recorded apply, reconcile, or repair state. Rollback first verifies
 that current target bytes still match the applied receipt; drift is a refusal,
 not something it overwrites. The current rollback command does not restore
 promotions.
+For categorized Hermes records, rollback uses the recorded nested target and
+destination while refusing category-parent symlinks or containment escapes.
 The receipt may be addressed through a valid symlinked install-root or parent
 alias. Rollback resolves that alias for containment checks, still refuses a
 symlinked target leaf, and does not create parents for a missing receipt path.
@@ -454,6 +491,7 @@ const installRecord = buildInstallRecord({
   mode: "copy",
   sourcePath: "/path/to/skills-catalog/skills/my-skill",
   targetPath: "/target/root/my-skill",
+  destination: "my-skill",
   version: "1.2.0",
   installedFiles
 });
@@ -474,6 +512,9 @@ Use `withReceiptLock` to serialize a multi-step transaction, and pass its callba
 Writers can report `ReceiptMutation` values through `onWritten`; `rollbackReceiptMutations` reverses only those writes and returns `false` rather than overwriting a conflicting concurrent update.
 The lock is released when its callback ends, and orphaned locks from terminated processes are recovered automatically.
 Custom receipt paths must remain inside `installRoot`, and multiple installs for one skill are represented as an array under that skill name.
+Managed workflows write each install's relative `destination`.
+Flat legacy records without that field remain valid, while categorized Hermes
+ownership requires it to match `<category>/<skill>`.
 
 ## Common Refusal Codes
 
@@ -496,6 +537,23 @@ codes include:
 - `symlink_target_conflict`: live target shape cannot be replaced implicitly
 - `receipt_lock_failed`: a mutating workflow could not acquire or use the
   serialized receipt transaction lock
+- `missing_skill_category` / `invalid_skill_category`: a categorized Hermes
+  assignment lacks one safe category segment for a selected skill
+- `ambiguous_assignment_path_layout`: one assignment is exposed through both
+  flat and categorized paths without an explicit path selection
+- `hermes_external_root_unregistered`: the categorized root does not both exist
+  and resolve from Hermes `skills.external_dirs`
+- `hermes_external_root_local_overlap` /
+  `hermes_external_root_precedence_overlap`: the owned root overlaps the local
+  skills tree or an earlier external root
+- `hermes_local_skill_shadow` / `hermes_external_skill_shadow` /
+  `hermes_managed_skill_shadow` / `hermes_planned_skill_identity_conflict`: a
+  higher-precedence, duplicate, or misplaced `SKILL.md` identity would make
+  Hermes resolve a different skill
+- `hermes_shadow_directory_symlink` / `external_category_symlink` /
+  `external_destination_escape`: safe categorized containment cannot be proven
+- `artifact_destination_mismatch`: an artifact's approved categorized
+  destination differs from the current plan
 - state-specific repair/reconcile/prune/import refusals when the selected skill does
   not meet that workflow's ownership and drift contract
 

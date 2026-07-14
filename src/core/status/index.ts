@@ -30,6 +30,11 @@ import {
   sourcePolicyPrunesDirectory,
   type SourcePolicy
 } from "../source-policy.js";
+import { validateHermesExternalRoot } from "../hermes-external-root.js";
+import {
+  isCaseInsensitiveFilesystem,
+  normalizeFilesystemComparisonPath
+} from "../filesystem-comparison.js";
 
 type StatusValue = "current" | "behind" | "version" | "dirty" | "missing" | "unknown" | "blocked";
 type StatusSummary = {
@@ -58,6 +63,7 @@ type StatusItem = {
   status: StatusValue;
   target: string;
   targetPath: string;
+  destination: string;
   reason: string;
   installedVersion: string | null;
   currentVersion: string | null;
@@ -131,6 +137,7 @@ type InstallRecord = {
   variant?: string;
   sourceCommit?: string;
   sourceHash?: string;
+  destination?: string;
   installedFiles?: InstalledFileRecord[] | null;
   priorState?: Record<string, unknown> | null;
   skill?: string;
@@ -153,11 +160,13 @@ const INSTALL_RECORD_SCALAR_FIELDS = [
   "version",
   "variant",
   "sourceCommit",
-  "sourceHash"
+  "sourceHash",
+  "destination"
 ] as const;
 const VALID_STATUSES = new Set<StatusValue>(["current", "behind", "version", "dirty", "missing", "unknown", "blocked"]);
 type PlanBlockedItem = {
   skill: string;
+  destination: string;
   reason?: string;
   variant?: string;
   [key: string]: unknown;
@@ -270,7 +279,7 @@ export async function status({
 
     let assignmentPlan: PlanResult;
     try {
-      assignmentPlan = await plan({ source: sourceRoot, target: assignmentName });
+      assignmentPlan = await plan({ source: sourceRoot, target: assignmentName, assignmentPath: assignmentPathId });
     } catch (error) {
       const assignmentError = {
         code: "plan_failed",
@@ -296,6 +305,31 @@ export async function status({
       errors.push({ ...assignmentError, path: `assignmentPaths.${assignmentPathId}.${pathField}` });
       assignments.push(assignmentResult);
       continue;
+    }
+
+    if (kind === "hermes-external-skills-root") {
+      const home = registryEntry.home;
+      if (home === null) {
+        const assignmentError = {
+          code: "invalid_assignment_path",
+          message: `Categorized Hermes target ${assignmentPathId} is missing its explicit home.`
+        };
+        assignmentResult.errors.push(assignmentError);
+        errors.push({ ...assignmentError, path: `assignmentPaths.${assignmentPathId}.home` });
+        assignments.push(assignmentResult);
+        continue;
+      }
+      const boundaryErrors = await validateHermesExternalRoot({
+        home,
+        installRoot,
+        planned: assignmentPlan.planned
+      });
+      if (boundaryErrors.length > 0) {
+        assignmentResult.errors.push(...boundaryErrors);
+        errors.push(...boundaryErrors);
+        assignments.push(assignmentResult);
+        continue;
+      }
     }
 
     const upstreamLineageBySkill = await statusLineage.load([
@@ -346,12 +380,16 @@ export async function status({
       );
     }
 
+    const installRootCaseInsensitive = await isCaseInsensitiveFilesystem(installRoot);
     for (const planned of assignmentPlan.planned) {
       const installRecordResult = selectInstallRecord({
         installRecords: receipt.installs?.[planned.skill],
         installRoot,
         skillName: planned.skill,
-        receiptPath
+        receiptPath,
+        targetPath: path.join(installRoot, planned.destination),
+        destination: planned.destination,
+        caseInsensitive: installRootCaseInsensitive
       });
       if (installRecordResult.errors.length > 0) {
         assignmentResult.errors.push(...installRecordResult.errors);
@@ -369,7 +407,8 @@ export async function status({
         installRoot,
         skillName: planned.skill,
         installRecord: installRecordResult.installRecord,
-        sourcePolicy: manifest.sourcePolicy
+        sourcePolicy: manifest.sourcePolicy,
+        destination: planned.destination
       });
       if (check.errors.length > 0) {
         assignmentResult.errors.push(...check.errors);
@@ -389,6 +428,7 @@ export async function status({
         status: check.status,
         target: check.target,
         targetPath: check.targetPath,
+        destination: planned.destination,
         reason: check.reason,
         installedVersion: check.installedVersion,
         currentVersion: check.currentVersion,
@@ -554,7 +594,8 @@ function blockedStatusFromPlan({
   kind,
   installRoot
 }: BlockedStatusInput): StatusItem {
-  const targetPath = path.join(installRoot, blocked.skill);
+  const destination = blocked.destination;
+  const targetPath = path.join(installRoot, destination);
   const status: StatusItem = {
     assignment: assignmentName,
     assignmentPath: assignmentPathId,
@@ -563,6 +604,7 @@ function blockedStatusFromPlan({
     status: "blocked",
     target: installRoot,
     targetPath,
+    destination,
     reason: blocked.reason ?? "blocked",
     installedVersion: null,
     currentVersion: null,
@@ -583,7 +625,8 @@ async function statusSkill({
   installRoot,
   skillName,
   installRecord,
-  sourcePolicy
+  sourcePolicy,
+  destination
 }: {
   sourceRoot: string;
   sourceSkillPath: string;
@@ -591,8 +634,9 @@ async function statusSkill({
   skillName: string;
   installRecord: InstallRecord | null;
   sourcePolicy: SourcePolicy | undefined;
+  destination: string;
 }): Promise<StatusCheckResult> {
-  const targetPath = path.join(installRoot, skillName);
+  const targetPath = path.join(installRoot, destination);
   let sourceVersion: string | null;
   let sourceHashValue = "";
   try {
@@ -1449,12 +1493,18 @@ function selectInstallRecord({
   installRecords,
   installRoot,
   skillName,
-  receiptPath
+  receiptPath,
+  targetPath,
+  destination,
+  caseInsensitive
 }: {
   installRecords: unknown;
   installRoot: string;
   skillName: string;
   receiptPath: string;
+  targetPath: string;
+  destination: string;
+  caseInsensitive: boolean;
 }): { installRecord: InstallRecord | null; errors: StatusFinding[] } {
   if (installRecords === undefined) {
     return { installRecord: null, errors: [] };
@@ -1473,8 +1523,12 @@ function selectInstallRecord({
   }
 
   const normalizedRootPath = path.resolve(installRoot);
-  const normalizedSkillTarget =
-    normalizeValue(path.join(normalizedRootPath, skillName));
+  const comparisonKey = (value: string) => normalizeFilesystemComparisonPath(
+    path.resolve(value),
+    caseInsensitive
+  );
+  const normalizedRootKey = comparisonKey(normalizedRootPath);
+  const normalizedSkillTarget = comparisonKey(targetPath);
   const matching: InstallRecord[] = [];
 
   for (const entry of installRecords) {
@@ -1486,10 +1540,10 @@ function selectInstallRecord({
       continue;
     }
     const resolvedCandidate = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(normalizedRootPath, candidate);
-    const normalizedCandidate = normalizeValue(resolvedCandidate);
+    const normalizedCandidate = comparisonKey(resolvedCandidate);
     if (
-      normalizedCandidate === normalizedRootPath ||
-      (normalizedSkillTarget !== null && normalizedCandidate === normalizedSkillTarget)
+      normalizedCandidate === normalizedRootKey ||
+      normalizedCandidate === normalizedSkillTarget
     ) {
       matching.push(entry as InstallRecord);
     }
@@ -1509,6 +1563,20 @@ function selectInstallRecord({
 
   if (matching.length === 1) {
     const [matchingRecord] = matching;
+    const recordedDestination = normalizeValue(matchingRecord?.destination);
+    if (
+      recordedDestination !== null
+      && comparisonKey(path.resolve(normalizedRootPath, recordedDestination))
+        !== comparisonKey(path.resolve(normalizedRootPath, destination))
+    ) {
+      return {
+        installRecord: null,
+        errors: [{
+          code: "invalid_receipt",
+          message: `Suitcase receipt ${receiptPath} has destination ${recordedDestination} for ${skillName}, expected ${destination}.`
+        }]
+      };
+    }
     return { installRecord: matchingRecord ?? null, errors: [] };
   }
 

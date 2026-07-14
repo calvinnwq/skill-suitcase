@@ -30,6 +30,9 @@ Expected target adapters:
   `path`.
 - `hermes-skills-root` resolves to writable platform adapter `hermes`, install
   root field `path`, and compatibility name `hermes`.
+- `hermes-external-skills-root` resolves to writable platform adapter `hermes`,
+  requires `home` and `path`, and resolves assignment categories to
+  `<path>/<category>/<skill>` while keeping one receipt at `path`.
 - `agents-skills-root` resolves to platform adapter `agents`, install root
   field `path`, compatibility name `agents`, and `skills.sh` compatibility
   metadata.
@@ -106,6 +109,19 @@ For skills.sh, trust only the exact pinned installer package in the isolated tem
 Review every skills.sh fetch diff; Git declarations pin the fetched tag or commit.
 Do not trust upstream tooling to choose target roots, write receipts, prove
 rollback, or mutate live agent homes.
+
+For a categorized Hermes smoke, use a disposable Hermes home, create the owned
+root before Hermes reads its configuration, put that exact path in `config.yaml`
+under `skills.external_dirs`, and declare one safe plain category segment for
+every assigned skill.
+Then run plan/pack/apply/status/diff with the
+`hermes-external-skills-root` assignment path.
+Confirm plan and pack carry `<category>/<skill>` destinations, the only receipt is
+`<external-root>/.skill-suitcase-receipt.json`, every status is `current`, every
+diff entry is `unchanged`, and no path beneath `<hermes-home>/skills` changed.
+Also verify missing registration, local-root overlap, an earlier external root
+overlap or identity shadow, duplicate planned `SKILL.md` identities, a same-name
+local skill, and category symlinks fail before writes.
 
 For a Codex, Claude, Hermes, shared agents, and Grok machine, smoke local target overrides and target-scoped status without requiring OpenClaw paths from the shared catalog to exist:
 

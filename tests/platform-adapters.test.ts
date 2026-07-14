@@ -18,6 +18,7 @@ test("resolves explicit platform adapters for declared assignment path kinds", (
   const nestedCodex = resolvePlatformAdapter("nested-home-codex");
   const claude = resolvePlatformAdapter("claude-skills-root");
   const hermes = resolvePlatformAdapter("hermes-skills-root");
+  const categorizedHermes = resolvePlatformAdapter("hermes-external-skills-root");
   const agents = resolvePlatformAdapter("agents-skills-root");
   const grok = resolvePlatformAdapter("grok-skills-root");
 
@@ -47,6 +48,11 @@ test("resolves explicit platform adapters for declared assignment path kinds", (
   assert.equal(hermes?.installRootField, "path");
   assert.deepEqual(hermes?.requiredFields, ["path"]);
   assert.deepEqual(hermes?.compatibilityNames, ["hermes"]);
+
+  assert.equal(categorizedHermes?.id, "hermes");
+  assert.equal(categorizedHermes?.installRootField, "path");
+  assert.deepEqual(categorizedHermes?.requiredFields, ["home", "path"]);
+  assert.equal(categorizedHermes?.metadata.categorizedExternalRoot, true);
 
   assert.equal(agents?.id, "agents");
   assert.equal(agents?.installRootField, "path");
@@ -99,6 +105,16 @@ test("resolves install roots and missing required adapter fields deterministical
   assert.equal(hermesResolved.ok, true);
   assert.equal(hermesResolved.adapter?.id, "hermes");
   assert.equal(hermesResolved.installRoot, "/tmp/hermes/skills");
+
+  const categorizedHermesResolved = resolvePlatformInstallRoot({
+    kind: "hermes-external-skills-root",
+    assignmentPath: {
+      home: "/tmp/hermes",
+      path: "/tmp/hermes/skill-suitcase/skills"
+    }
+  });
+  assert.equal(categorizedHermesResolved.ok, true);
+  assert.equal(categorizedHermesResolved.installRoot, "/tmp/hermes/skill-suitcase/skills");
 });
 
 test("derives compatibility aliases from explicit platform adapter metadata", () => {

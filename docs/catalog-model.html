@@ -73,7 +73,7 @@
             <h2>What the manifest owns</h2>
             <div class="def-rows">
               <div><span class="k">suitcases</span><span class="v">named collections of skill names</span></div>
-              <div><span class="k">assignments</span><span class="v">target-facing selections of suitcases; assignments determine the skills selected for a target</span></div>
+              <div><span class="k">assignments</span><span class="v">target-facing selections of suitcases, plus per-skill categories for categorized target adapters; assignments determine the skills selected for a target</span></div>
               <div><span class="k">assignmentPaths</span><span class="v">target adapter kinds, assignment names, and install paths</span></div>
               <div><span class="k">groups</span><span class="v">reporting metadata that references existing skills, suitcases, or assignments</span></div>
               <div><span class="k">compatibility</span><span class="v">supported or blocked agents, evidence, variants, and reasons</span></div>
@@ -87,6 +87,49 @@
               <code>assignmentPaths</code>, then native adapter behavior, then the
               vendored <code>skills.sh</code> compatibility snapshot.
             </p>
+          </section>
+
+          <section>
+            <h2>Categorized Hermes roots</h2>
+            <p>
+              The writable <code>hermes-external-skills-root</code> adapter uses
+              explicit <code>home</code> and <code>path</code> fields and installs
+              each assigned skill at
+              <code>&lt;path&gt;/&lt;category&gt;/&lt;skill&gt;</code>.
+              Its assignment must declare one safe plain
+              <code>categories</code> segment for every selected skill.
+            </p>
+            <pre><code>assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      agent-swarm: autonomous-ai-agents
+
+assignmentPaths:
+  hermes:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: /path/to/hermes
+    path: /path/to/hermes/skill-suitcase/skills</code></pre>
+            <p>
+              Create the external root and register its exact path in
+              <code>&lt;home&gt;/config.yaml</code> under
+              <code>skills.external_dirs</code> before inspecting or mutating
+              live target state. Skill Suitcase never creates the root or edits
+              Hermes configuration.
+            </p>
+            <div class="callout" data-kind="boundary">
+              <p class="callout-label">Fail closed</p>
+              <p>
+                The root must not overlap <code>&lt;home&gt;/skills</code> or an
+                earlier configured external root. Local or earlier external
+                skills must not shadow a planned <code>SKILL.md</code> identity,
+                and the plan itself must not contain duplicate identities.
+                Category and traversal symlinks are refused. One central receipt
+                remains at the owned external root.
+              </p>
+            </div>
           </section>
 
           <section>

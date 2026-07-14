@@ -13,7 +13,7 @@ That runbook covers the same flow with agent-safe defaults and approval boundari
 
 ## 1. Install The CLI
 
-Skill Suitcase requires Node.js 20 or newer and has no runtime package dependencies.
+Skill Suitcase requires Node.js 20 or newer.
 
 ```bash
 npm install --global skill-suitcase
@@ -181,7 +181,8 @@ See [`SPEC.md`](../SPEC.md) for the full catalog contract.
 ## 4. Point Targets At Your Machine With Local Overrides
 
 Manifest `assignmentPaths` record absolute install roots, so a shared catalog usually declares paths that do not exist on your machine.
-The manifest does not expand `~` or environment variables; per-machine paths come from CLI override flags at invocation time:
+Manifest paths expand a leading `~`, but not environment variables;
+per-machine paths come from CLI override flags at invocation time:
 
 | Flag | Target id | Overrides |
 | --- | --- | --- |
@@ -189,7 +190,7 @@ The manifest does not expand `~` or environment variables; per-machine paths com
 | `--codex-skills` | `codex` | Codex skills root directly |
 | `--claude-skills` | `claude` | Claude skills root |
 | `--agents-skills` | `agents` | Shared agents skills root |
-| `--hermes-skills` | `hermes` | Hermes skills root |
+| `--hermes-skills` | `hermes` | Flat Hermes skills root, or only the external-root `path` for `hermes-external-skills-root` |
 | `--grok-skills` | `grok` | Grok skills root |
 
 For this walkthrough, keep the target disposable:
@@ -201,6 +202,11 @@ skill-suitcase targets --source "$SRC" --claude-skills "$TARGET" --json
 
 `targets` reports every modeled target, its resolved install root, per-path existence, and safety classification without writing anything.
 When you are ready to manage a real skills root, complete the read-only audit below and get explicit approval before replacing `"$TARGET"` with a path such as `"$HOME/.claude/skills"`.
+For a categorized Hermes target, the manifest's explicit `home` remains the
+configuration and local-skill boundary when `--hermes-skills` overrides the
+external root.
+Create that root and register it in `<home>/config.yaml` under
+`skills.external_dirs` before running live target inspection or mutation.
 
 ## 5. Audit Read-Only First
 

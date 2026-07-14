@@ -2,6 +2,7 @@ import path from "node:path";
 import { parseSuitcaseManifest } from "./suitcase-manifest.js";
 import { DEFAULT_SUITCASE_MANIFEST_FILE } from "../../config/defaults.js";
 import { readTextFile } from "../../adapters/filesystem.js";
+import { resolvePlatformAdapter } from "../platform-adapters.js";
 
 export type Catalog = ReturnType<typeof parseSuitcaseManifest>;
 
@@ -80,9 +81,13 @@ function applyTargetOverrides(manifest: Catalog, overrides: TargetOverrides | un
     agentsGlobal.path = path.resolve(overrides.agentsSkills);
   }
 
-  const hermesGlobal = assignmentPaths["hermes"];
-  if (hermesGlobal !== undefined && overrides.hermesSkills !== undefined) {
-    hermesGlobal.path = path.resolve(overrides.hermesSkills);
+  if (overrides.hermesSkills !== undefined) {
+    const hermesSkills = path.resolve(overrides.hermesSkills);
+    for (const assignmentPath of Object.values(assignmentPaths)) {
+      if (resolvePlatformAdapter(assignmentPath.kind ?? null)?.id === "hermes") {
+        assignmentPath.path = hermesSkills;
+      }
+    }
   }
 
   const grokGlobal = assignmentPaths["grok"];

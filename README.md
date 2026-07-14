@@ -114,6 +114,16 @@ The modeled targets are `openclaw`, `codex`, `openclaw-codex`, `agents`,
 `--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`,
 `--hermes-skills`, and `--grok-skills`.
 
+Hermes supports both its existing flat skills root and a categorized,
+Skill Suitcase-owned external root.
+The `hermes-external-skills-root` adapter installs each assigned skill at
+`<external-root>/<category>/<skill>` and keeps one receipt at the external root.
+The manifest must provide `home`, `path`, and one safe `categories` entry per
+assigned skill.
+Create the root and register it in `<home>/config.yaml` under
+`skills.external_dirs` before inspecting or mutating live target state;
+Skill Suitcase does not create the root or edit Hermes configuration.
+
 OpenCode and Pi are provider-backed compatibility targets.
 They are read-only even when the catalog declares a custom `assignmentPaths` entry.
 Target-aware materialization and mutation commands (`pack`, `apply`, `track`,
@@ -142,8 +152,8 @@ Artifact mode validates the artifact manifest, but ordinary create/behind writes
 Pack again immediately before artifact apply and inspect the current `diff` rather than treating an older artifact as byte-for-byte approval.
 `--mode symlink` links selected current catalog source into the target.
 
-Receipts record ownership, source provenance, install mode, file hashes, and
-rollback metadata. `status` classifies modeled installs as `current`, `behind`,
+Receipts record ownership, source provenance, relative destination, install
+mode, file hashes, and rollback metadata. `status` classifies modeled installs as `current`, `behind`,
 `version`, `dirty`, `missing`, `unknown`, or `blocked`. Provider-modeled
 fallback inventory without a catalog assignment appears with no status entries.
 
@@ -365,7 +375,7 @@ formatting check on Node 24.
 The `package-smoke` job verifies the packed and installed CLI on Node 20 and
 Node 24, and the required `test` check aggregates both jobs.
 
-The current implementation has no runtime package dependencies.
+The runtime YAML dependency parses Hermes `config.yaml` registration safely.
 Keep
 `src/cli.ts` thin, put parsing and validation in `src/commands/`, durable
 behavior in `src/core/`, infrastructure in `src/adapters/`, and output contracts

@@ -4,6 +4,10 @@ import { chmod, copyFile, mkdir, readdir, readFile, stat, writeFile } from "node
 import path from "node:path";
 import { loadCatalog, type LoadedCatalog, type TargetOverrides } from "../catalog/index.js";
 import {
+  isCaseInsensitiveFilesystem,
+  normalizeFilesystemComparisonPath
+} from "../filesystem-comparison.js";
+import {
   findTargetRegistryEntriesByAssignment,
   resolveTargetRegistryEntryFromManifest
 } from "../catalog/target-registry.js";
@@ -15,8 +19,8 @@ import {
   sourcePolicyDecision,
   sourcePolicyPrunesDirectory
 } from "../source-policy.js";
+import { BUNDLE_SCHEMA, computePackArtifactId } from "./artifact-id.js";
 
-const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_MANIFEST = "skill-suitcase-bundle.json";
 const BUNDLE_ROOT = ".skill-suitcase";
 
@@ -63,6 +67,7 @@ type PackArtifactSummary = {
 
 type PackedFile = {
   skill: string;
+  destination: string;
   relativePath: string;
   sourcePath: string;
   bundlePath: string;
@@ -161,7 +166,7 @@ export async function pack({
     };
   }
   const planTarget = resolvePlanTarget(manifest, target);
-  const planResult: PlanResult = await plan({ source: sourceRoot, target: planTarget });
+  const planResult: PlanResult = await plan({ source: sourceRoot, target: planTarget, assignmentPath: target });
   const files: PackedFile[] = [];
   const errors: ErrorLike[] = [...planResult.errors];
 
@@ -180,6 +185,10 @@ export async function pack({
         files.push(...collected.files);
       }
     }
+  }
+
+  if (output !== null && errors.length === 0) {
+    errors.push(...await collectBundlePathCollisionErrors(files, path.resolve(output)));
   }
 
   const sourceCommit = resolveSourceCommit(sourceRoot);
@@ -287,43 +296,8 @@ function buildArtifactRecord({
 
   return {
     ...artifact,
-    id: computeArtifactId(artifact)
+    id: computePackArtifactId(artifact)
   };
-}
-
-function computeArtifactId(artifact: Omit<PackArtifact, "id">): string {
-  const stableArtifact = {
-    source: artifact.source,
-    target: artifact.target,
-    action: artifact.action,
-    planned: artifact.planned.map((item) => ({
-      skill: item.skill,
-      action: item.action,
-      variant: item.variant,
-      sourcePath: item.sourcePath,
-      evidence: [...item.evidence]
-    })),
-    blocked: artifact.blocked.map((item) => ({
-      skill: item.skill,
-      action: item.action,
-      target: item.target,
-      reason: item.reason,
-      variant: item.variant,
-      sourcePath: item.sourcePath,
-      evidence: [...item.evidence]
-    })),
-    files: artifact.files.map((item) => ({
-      skill: item.skill,
-      relativePath: item.relativePath,
-      sha256: item.sha256,
-      bytes: item.bytes
-    })),
-    fileHashes: artifact.fileHashes,
-    summary: artifact.summary,
-    schema: BUNDLE_SCHEMA
-  };
-
-  return createHash("sha256").update(JSON.stringify(stableObject(stableArtifact))).digest("hex");
 }
 
 async function writeBundle({ outputPath, sourceRoot, manifest, artifact, manifestPath, files }: WriteBundleInput): Promise<void> {
@@ -350,6 +324,30 @@ async function writeBundle({ outputPath, sourceRoot, manifest, artifact, manifes
   await writeFile(manifestPath, `${JSON.stringify(storedManifest, null, 2)}\n`, "utf8");
 }
 
+async function collectBundlePathCollisionErrors(
+  files: PackedFile[],
+  outputPath: string
+): Promise<ErrorLike[]> {
+  const caseInsensitive = await isCaseInsensitiveFilesystem(outputPath);
+  const filesByPath = new Map<string, PackedFile[]>();
+  for (const file of files) {
+    const key = normalizeFilesystemComparisonPath(
+      path.resolve(outputPath, file.bundlePath),
+      caseInsensitive
+    );
+    const matching = filesByPath.get(key) ?? [];
+    matching.push(file);
+    filesByPath.set(key, matching);
+  }
+  return [...filesByPath.values()]
+    .filter((matching) => matching.length > 1)
+    .sort((left, right) => left[0]!.bundlePath.localeCompare(right[0]!.bundlePath))
+    .map((matching) => ({
+      code: "duplicate_bundle_path",
+      message: `Pack files ${matching.map((file) => `${file.skill}:${file.bundlePath}`).join(", ")} resolve to the same path on output filesystem ${outputPath}.`
+    }));
+}
+
 function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {
   return {
     schema: BUNDLE_SCHEMA,
@@ -365,6 +363,7 @@ function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {
       relativePath: item.relativePath,
       bundlePath: item.bundlePath,
       sourcePath: path.relative(sourceRoot, item.sourcePath),
+      destination: item.destination,
       bytes: item.bytes,
       sha256: item.sha256
     })),
@@ -373,6 +372,7 @@ function buildStoredManifest(artifact: PackArtifact, sourceRoot: string) {
       action: item.action,
       variant: item.variant,
       sourcePath: path.relative(sourceRoot, item.sourcePath),
+      destination: item.destination,
       evidence: item.evidence
     })),
     blocked: artifact.blocked.map((item) => ({
@@ -539,9 +539,10 @@ async function collectSkillFiles(
     const bytes = await readFile(filePath);
     files.push({
       skill: plannedSkill.skill,
+      destination: plannedSkill.destination,
       relativePath,
       sourcePath: filePath,
-      bundlePath: path.join("skills", plannedSkill.skill, relativePath),
+      bundlePath: path.join("skills", plannedSkill.destination, relativePath),
       bytes: bytes.length,
       sha256: createHash("sha256").update(bytes).digest("hex")
     });

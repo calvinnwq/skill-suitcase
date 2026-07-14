@@ -146,6 +146,75 @@ test("apply requires exactly one approval input (lock or artifact)", async (t) =
   assert.equal(bothResult.errors[0]?.code, "invalid_apply_input");
 });
 
+test("apply follows the assignment path approved by a plan lock", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-lock-path-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const sourceRoot = path.join(sandbox, "catalog");
+  const sourceSkill = path.join(sourceRoot, "skills", "hello-hermes");
+  const hermesHome = path.join(sandbox, "hermes");
+  const localRoot = path.join(hermesHome, "skills");
+  const externalRoot = path.join(sandbox, "external");
+  const lockPath = path.join(sandbox, "plan-lock.json");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(localRoot, { recursive: true });
+  await mkdir(externalRoot, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "# Hello Hermes\n");
+  await writeFile(
+    path.join(hermesHome, "config.yaml"),
+    `skills:\n  external_dirs: ${externalRoot}\n`
+  );
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - hello-hermes
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      hello-hermes: productivity
+assignmentPaths:
+  hermes-local:
+    kind: hermes-skills-root
+    assignment: hermes
+    path: ${localRoot}
+  hermes-external:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: ${hermesHome}
+    path: ${externalRoot}
+compatibility:
+  hello-hermes:
+    agents:
+      - hermes
+`);
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "hermes",
+      assignmentPath: "hermes-external",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const result = await apply({ source: sourceRoot, target: "hermes", lock: lockPath });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.target, "hermes");
+  assert.equal(result.planTarget, "hermes");
+  assert.equal(result.installRoot, externalRoot);
+  assert.equal(
+    result.postApplyStatus?.statuses.every((item) => item.assignmentPath === "hermes-external"),
+    true
+  );
+  assert.equal(
+    await readFile(path.join(externalRoot, "productivity", "hello-hermes", "SKILL.md"), "utf8"),
+    "# Hello Hermes\n"
+  );
+  await assert.rejects(() => lstat(path.join(localRoot, "hello-hermes")));
+});
+
 test("apply refuses artifact mode without a manifest", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-artifact-missing-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-apply-artifact-missing-target-"));

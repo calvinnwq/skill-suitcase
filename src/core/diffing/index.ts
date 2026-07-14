@@ -15,6 +15,7 @@ import {
   sourcePolicyDecision,
   sourcePolicyPrunesDirectory
 } from "../source-policy.js";
+import { validateHermesExternalRoot } from "../hermes-external-root.js";
 
 type DiffSourceFileRead =
   | {
@@ -145,6 +146,7 @@ export async function diff(
   const planResult = await plan({
     source,
     target: planTarget,
+    assignmentPath: target,
     ...(skills !== undefined ? { skills } : {})
   });
   const planSourceRoot = planResult.source;
@@ -186,6 +188,32 @@ export async function diff(
   }
   result.installRoot = installRoot;
 
+  const selectedRegistryEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides)
+    ?? findTargetRegistryEntriesByAssignment(manifest, planTarget, targetOverrides)[0]
+    ?? null;
+  if (selectedRegistryEntry?.kind === "hermes-external-skills-root") {
+    const home = selectedRegistryEntry.home;
+    if (home === null) {
+      result.errors.push({
+        code: "invalid_assignment_path",
+        message: `Categorized Hermes target ${selectedRegistryEntry.id} is missing its explicit home.`
+      });
+    } else {
+      result.errors.push(...await validateHermesExternalRoot({
+        home,
+        installRoot,
+        planned: result.planned
+      }));
+    }
+    if (result.errors.length > 0) {
+      for (const blockedEntry of result.blocked) {
+        result.entries.push(blockedEntryFromPlan(blockedEntry));
+      }
+      result.summary = summarizeActions(result.entries);
+      return result;
+    }
+  }
+
   for (const blockedEntry of result.blocked) {
     result.entries.push(blockedEntryFromPlan(blockedEntry));
   }
@@ -210,7 +238,7 @@ export async function diff(
       continue;
     }
 
-    const targetSkillPath = path.join(installRoot, plannedSkill.skill);
+    const targetSkillPath = path.join(installRoot, plannedSkill.destination);
     const plannedRelativePaths = new Set(
       result.entries
         .filter(
@@ -252,7 +280,7 @@ async function comparePlannedSkill(
   sourcePolicy: Catalog["sourcePolicy"]
 ): Promise<{ entries: DiffEntry[]; errors: DiffResultError[] }> {
   const sourceRoot = plannedSkill.sourcePath;
-  const targetRoot = path.join(installRoot, plannedSkill.skill);
+  const targetRoot = path.join(installRoot, plannedSkill.destination);
   const sourceListing = await collectSourceEntries(sourceRoot, plannedSkill.skill, sourcePolicy);
   if (!sourceListing.ok) {
     return { entries: [], errors: sourceListing.errors };

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +8,34 @@ import { test } from "node:test";
 import { assessPlanLock, buildPlanLock } from "../src/plan-lock.js";
 
 const fixtureSource = path.join(process.cwd(), "tests", "fixtures", "skills-catalog");
+
+function stableObject(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => stableObject(item));
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, stableObject(item)])
+  );
+}
+
+function legacyPlanId(lock: Record<string, unknown>): string {
+  const source = lock["source"] as Record<string, unknown>;
+  const record = {
+    schema: lock["schema"],
+    source: {
+      repo: source["repo"],
+      ref: source["ref"],
+      commit: source["commit"]
+    },
+    target: lock["target"],
+    assignmentPath: lock["assignmentPath"],
+    selectedSkills: lock["selectedSkills"],
+    planEntries: stableObject(lock["planEntries"]),
+    fileHashes: stableObject(lock["fileHashes"])
+  };
+  return createHash("sha256").update(JSON.stringify(record)).digest("hex");
+}
 
 test("buildPlanLock output is deterministic for the same source and plan context", async () => {
   const first = await buildPlanLock({
@@ -32,6 +61,48 @@ test("buildPlanLock output is deterministic for the same source and plan context
     ["office-hours", "skillify", "gnhf-postflight"]
   );
   assert.deepEqual(Object.keys(first.fileHashes).sort(), ["gnhf-postflight", "office-hours", "skillify"]);
+});
+
+test("buildPlanLock plans the explicit assignment path layout", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-plan-lock-path-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await mkdir(path.join(sourceRoot, "skills", "hello-hermes"), { recursive: true });
+  await writeFile(path.join(sourceRoot, "skills", "hello-hermes", "SKILL.md"), "# Hello\n");
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - hello-hermes
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      hello-hermes: productivity
+assignmentPaths:
+  hermes-local:
+    kind: hermes-skills-root
+    assignment: hermes
+    path: /path/to/hermes/skills
+  hermes-external:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: /path/to/hermes
+    path: /path/to/hermes/external
+compatibility:
+  hello-hermes:
+    agents:
+      - hermes
+`);
+
+  const lock = await buildPlanLock({
+    source: sourceRoot,
+    target: "hermes",
+    assignmentPath: "hermes-external",
+    sourceCommit: "deadbeef"
+  });
+
+  assert.equal(lock.assignmentPath, "hermes-external");
+  assert.equal(lock.planEntries[0]?.destination, path.join("productivity", "hello-hermes"));
 });
 
 test("assessPlanLock detects source file hash drift", async (t) => {
@@ -476,6 +547,60 @@ assignmentPaths:
   assert.equal(status.valid, true);
   assert.deepEqual(status.reasons, []);
   assert.equal(status.current?.planId, lock.planId);
+});
+
+test("assessPlanLock accepts hashed flat v0 locks without destination metadata", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-plan-lock-legacy-destination-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await mkdir(path.join(sourceRoot, "skills", "office-hours"), { recursive: true });
+  await writeFile(path.join(sourceRoot, "skills", "office-hours", "SKILL.md"), "---\nname: office-hours\n---\n");
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills:
+      - office-hours
+assignments:
+  openclaw:
+    suitcases:
+      - core
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${path.join(sourceRoot, "install-root")}
+`);
+  const current = await buildPlanLock({
+    source: sourceRoot,
+    target: "openclaw",
+    assignmentPath: "openclaw",
+    sourceCommit: "deadbeef"
+  });
+  const legacy = JSON.parse(JSON.stringify(current)) as Record<string, unknown> & {
+    planEntries: Array<Record<string, unknown>>;
+    planId: string;
+  };
+  for (const entry of legacy.planEntries) delete entry["destination"];
+  legacy.planId = legacyPlanId(legacy);
+
+  const accepted = await assessPlanLock({
+    source: sourceRoot,
+    target: "openclaw",
+    assignmentPath: "openclaw",
+    lock: legacy,
+    sourceCommit: "deadbeef"
+  });
+  assert.equal(accepted.valid, true);
+  assert.deepEqual(accepted.reasons, []);
+
+  legacy.planId = "tampered";
+  const tampered = await assessPlanLock({
+    source: sourceRoot,
+    target: "openclaw",
+    assignmentPath: "openclaw",
+    lock: legacy,
+    sourceCommit: "deadbeef"
+  });
+  assert.equal(tampered.valid, false);
+  assert.equal(tampered.reasons.includes("plan_id_changed"), true);
 });
 
 test("assessPlanLock detects source commit drift even without file changes", async (t) => {

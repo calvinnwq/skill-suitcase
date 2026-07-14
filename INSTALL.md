@@ -274,6 +274,10 @@ skill-suitcase diff --source "$SRC" --target grok --grok-skills "$HOME/.grok/ski
 
 Use `node "$CLI"` instead of `skill-suitcase` in those commands when operating
 from a source checkout.
+For a `hermes-external-skills-root` assignment path, `--hermes-skills`
+overrides only its owned external-root `path`.
+The manifest's explicit `home` still selects `config.yaml` and the local
+`<home>/skills` collision boundary.
 Provider-backed targets such as OpenCode and Pi are read-only compatibility
 surfaces, even when the catalog declares a custom `assignmentPaths` review root.
 Treat `read_only_target` from `pack`, `apply`, `track`, `reconcile`, `repair`,
@@ -376,7 +380,7 @@ skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" 
 
 Artifact apply validates the stored bundle, but ordinary missing/behind writes are rebuilt from current catalog source and packed hashes gate only the dirty-behind exception.
 Re-run `pack` immediately before `apply`, inspect the current `diff`, and approve the exact target override and install mode instead of treating an older artifact as byte-for-byte authorization.
-Pack refuses output beneath absolute install paths declared in the manifest, but that guard does not account for CLI target overrides or expand `~`.
+Pack refuses output beneath absolute resolved install paths, including CLI target overrides, but that guard does not expand `~`.
 Keep output in a temporary directory outside the catalog and every resolved target root.
 
 For Git-backed catalogs, staged artifacts and plan locks refuse selected source skills with untracked, non-ignored files.
@@ -400,6 +404,19 @@ skill-suitcase pack --source "$SRC" --target hermes --hermes-skills "$HOME/.herm
 HERMES_ARTIFACT="$(find "$HERMES_TMP" -name skill-suitcase-bundle.json -print -quit)"
 skill-suitcase apply --source "$SRC" --target hermes --hermes-skills "$HOME/.hermes/skills" --artifact "$HERMES_ARTIFACT" --json
 ```
+
+For categorized Hermes materialization, use a manifest assignment path with
+kind `hermes-external-skills-root`, explicit `home` and `path` fields, and one
+safe `categories` segment for every assigned skill.
+Before `status`, `diff`, or mutation, create the approved external root and
+register its exact path in `<home>/config.yaml` under `skills.external_dirs`.
+Skill Suitcase deliberately does not create that root or edit Hermes
+configuration.
+Review the `<category>/<skill>` destination emitted by `plan` and `pack`, and
+confirm the single receipt will remain at
+`<external-root>/.skill-suitcase-receipt.json`.
+Stop if the CLI reports registration, local-root overlap, higher-precedence
+shadowing or overlap, duplicate planned identities, or category-symlink errors.
 
 For the shared agents root, use:
 

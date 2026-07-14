@@ -1,5 +1,8 @@
 type ManifestSuitcase = { skills: string[] };
-type ManifestAssignment = { suitcases: string[] };
+type ManifestAssignment = {
+  suitcases: string[];
+  categories?: Record<string, string>;
+};
 type ManifestGroup = {
   title?: string;
   description?: string;
@@ -50,6 +53,7 @@ type ParsedManifest = {
 };
 
 type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "groups" | "sourcePolicy" | "validationPolicy" | "compatibility" | "variants" | null;
+type AssignmentField = "suitcases" | "categories" | null;
 type GroupField = "skills" | "suitcases" | "assignments" | "tags" | null;
 type SourcePolicyField = "exclude" | "deny" | null;
 type CompatibilityField = "agents" | "evidence" | "blockedAgents" | null;
@@ -77,6 +81,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
   let currentName: string | null = null;
   let currentVariantName: string | null = null;
   let currentGroupField: GroupField = null;
+  let currentAssignmentField: AssignmentField = null;
   let currentSourcePolicyField: SourcePolicyField = null;
   let currentValidationPolicy: ValidationPolicyState = { skillify: false, skillifySkip: false, skillName: null };
   let currentField: CompatibilityField = null;
@@ -109,6 +114,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       currentName = null;
       currentVariantName = null;
       currentGroupField = null;
+      currentAssignmentField = null;
       currentSourcePolicyField = null;
       currentValidationPolicy = { skillify: false, skillifySkip: false, skillName: null };
       currentField = null;
@@ -143,6 +149,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       currentName = trimmed.slice(0, -1);
       currentVariantName = null;
       currentGroupField = null;
+      currentAssignmentField = null;
       currentSourcePolicyField = null;
       currentValidationPolicy = { skillify: false, skillifySkip: false, skillName: null };
       currentField = null;
@@ -151,7 +158,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       if (section === "suitcases") {
         manifest.suitcases[currentName] = { skills: [] };
       } else if (section === "assignments") {
-        manifest.assignments[currentName] = { suitcases: [] };
+        manifest.assignments[currentName] = { suitcases: [], categories: {} };
       } else if (section === "assignmentPaths") {
         manifest.assignmentPaths[currentName] = {};
       } else if (section === "groups") {
@@ -179,7 +186,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
     if (section === "assignments") {
       const assignment = manifest.assignments[name];
       if (!assignment) continue;
-      parseAssignmentLine(assignment, indent, trimmed);
+      currentAssignmentField = parseAssignmentLine(assignment, indent, trimmed, currentAssignmentField);
       continue;
     }
 
@@ -405,14 +412,35 @@ function parseSuitcaseLine(suitcase: ManifestSuitcase, indent: number, trimmed: 
   }
 }
 
-function parseAssignmentLine(assignment: ManifestAssignment, indent: number, trimmed: string): void {
+function parseAssignmentLine(
+  assignment: ManifestAssignment,
+  indent: number,
+  trimmed: string,
+  currentField: AssignmentField
+): AssignmentField {
   if (indent === 4 && trimmed === "suitcases:") {
-    return;
+    return "suitcases";
   }
 
-  if (indent === 6 && trimmed.startsWith("- ")) {
-    assignment.suitcases.push(trimmed.slice(2));
+  if (indent === 4 && trimmed === "categories:") {
+    return "categories";
   }
+
+  if (indent === 6 && trimmed.startsWith("- ") && currentField === "suitcases") {
+    assignment.suitcases.push(trimmed.slice(2));
+    return currentField;
+  }
+
+  if (indent === 6 && currentField === "categories" && trimmed.includes(":")) {
+    const separator = trimmed.indexOf(":");
+    const skill = trimmed.slice(0, separator).trim();
+    const category = unquoteValue(trimmed.slice(separator + 1));
+    assignment.categories ??= {};
+    assignment.categories[skill] = category;
+    return currentField;
+  }
+
+  return currentField;
 }
 
 function parseCompatibilityLine(

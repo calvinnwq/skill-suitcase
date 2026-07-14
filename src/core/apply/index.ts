@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assessPlanLock, type PlanLock, PLAN_LOCK_SCHEMA } from "../planning/plan-lock.js";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
@@ -29,6 +29,7 @@ import {
   sourcePolicyHasExcludePatterns,
   type SourcePolicy
 } from "../source-policy.js";
+import { BUNDLE_SCHEMA, matchesPackArtifactId } from "../packing/artifact-id.js";
 
 type ApplyInput = {
   source: string;
@@ -40,6 +41,11 @@ type ApplyInput = {
   __test?: {
     failAfterSuccessfulWrites?: number;
     failAfterReceiptWrites?: number;
+    beforeWriteForSkill?: (skill: string) => Promise<void> | void;
+    afterCopyBackup?: (targetPath: string, backupPath: string) => Promise<void> | void;
+    beforeSymlinkFailureCleanup?: () => Promise<void> | void;
+    afterSymlinkCleanupClassification?: (targetPath: string) => Promise<void> | void;
+    beforeCopyBackupCleanup?: (targetPath: string, backupPath: string) => Promise<void> | void;
   };
 };
 
@@ -89,12 +95,13 @@ type ArtifactManifest = {
   target: string;
   action?: string;
   summary?: unknown;
-  planned: Array<{ skill: string; sourcePath?: string }>;
+  planned: Array<{ skill: string; sourcePath?: string; destination?: unknown }>;
   blocked?: Array<{ skill: string }>;
   files?: Array<{
     skill: string;
     relativePath: string;
     bundlePath: string;
+    destination?: unknown;
     bytes?: number;
     sha256: string;
   }>;
@@ -106,7 +113,7 @@ type DiffForApply = {
   target: string;
   assignment: string | null;
   readOnly?: boolean;
-  planned: Array<{ skill: string; sourcePath: string; variant?: string }>;
+  planned: Array<{ skill: string; sourcePath: string; destination: string; variant?: string }>;
   blocked: Array<{ skill: string; reason?: string }>;
   entries: Array<{
     action: "create" | "update" | "unchanged" | "extra" | "missing" | "blocked";
@@ -162,7 +169,6 @@ export type ApplyResult = {
   errors: ApplyFinding[];
 };
 
-const BUNDLE_SCHEMA = "calvinnwq.skills.pack-bundle.v0";
 const BUNDLE_FILE = "skill-suitcase-bundle.json";
 const SYMLINK_ROLLBACK_SCHEMA = "calvinnwq.skills.symlink-rollback.v0";
 
@@ -235,7 +241,9 @@ export async function apply({
     });
   }
 
-  const diffResult = await diff({ source, target, targetOverrides }) as DiffForApply;
+  const resolutionTarget = context.assignmentPath ?? target;
+  const resolvedDiffResult = await diff({ source, target: resolutionTarget, targetOverrides });
+  const diffResult = { ...resolvedDiffResult, target } as DiffForApply;
   if (diffResult.readOnly === true) {
     return failure({
       source: diffResult.source,
@@ -321,7 +329,7 @@ export async function apply({
     return await withReceiptLock({ installRoot }, async (receiptLock) => {
     const preStatus = await status({
     source: diffResult.source,
-    target,
+    target: resolutionTarget,
     targetOverrides
   });
   const receipt = await readReceipt({ installRoot }).catch((): Receipt => ({}));
@@ -337,6 +345,18 @@ export async function apply({
   const approvedSkills = new Set(context.approvedSkills);
   const approvedFileHashes = context.approvedFileHashes;
   const preApplyErrors: ApplyFinding[] = [];
+
+  if (context.approvedDestinations !== undefined) {
+    for (const planned of diffResult.planned) {
+      const approvedDestination = context.approvedDestinations.get(planned.skill);
+      if (approvedDestination !== planned.destination) {
+        preApplyErrors.push({
+          code: "artifact_destination_mismatch",
+          message: `Artifact destination ${approvedDestination ?? "<missing>"} for ${planned.skill} does not match current plan destination ${planned.destination}.`
+        });
+      }
+    }
+  }
 
   if (preStatus.errors.length > 0) {
     preApplyErrors.push(
@@ -417,8 +437,10 @@ export async function apply({
       preApplySummary,
       targetOverrides,
       target,
+      statusTarget: resolutionTarget,
       sourcePolicy: manifest.sourcePolicy,
-      receiptLock
+      receiptLock,
+      __test
     });
   }
 
@@ -442,9 +464,11 @@ export async function apply({
   }
 
   const sourceBySkill = new Map<string, string>();
+  const destinationBySkill = new Map<string, string>();
   const variantBySkill = new Map<string, string>();
   for (const planned of diffResult.planned) {
     sourceBySkill.set(planned.skill, planned.sourcePath);
+    destinationBySkill.set(planned.skill, planned.destination);
     if (typeof planned.variant === "string" && planned.variant.trim().length > 0) {
       variantBySkill.set(planned.skill, planned.variant);
     }
@@ -505,23 +529,29 @@ export async function apply({
       });
     }
 
+    await __test?.beforeWriteForSkill?.(skill);
     rollbackBySkill.set(skill, await buildRollbackRecord({
-      targetPath: path.join(installRoot, skill),
+      targetPath: path.join(installRoot, destinationBySkill.get(skill) ?? skill),
       entries
     }));
 
     writeResult = await writePlannedSkillEntries({
       skill,
       entries,
+      installRoot,
       failAfterSuccessfulWrites,
-      successfulWritesRef
+      successfulWritesRef,
+      afterBackup: __test?.afterCopyBackup
     });
 
     if (!writeResult.ok) {
-      await rollbackApplyWrites({
-        restorePlan
-      });
-      await cleanupApplyBackups({ restorePlan });
+      const recoveryErrors = [
+        ...writeResult.recoveryErrors,
+        ...await rollbackApplyWrites({
+          restorePlan,
+          installRoot
+        })
+      ];
       return failure({
         source: diffResult.source,
         target,
@@ -536,7 +566,10 @@ export async function apply({
           statuses: targetStatuses,
           summary: preApplySummary
         },
-        errors: [{ code: "write_error", message: writeResult.message }]
+        errors: [
+          { code: "write_error", message: writeResult.message },
+          ...recoveryErrors.map((message) => ({ code: "apply_recovery_failed", message }))
+        ]
       });
     }
 
@@ -562,7 +595,8 @@ export async function apply({
         throw new Error(`No source path for ${skill}`);
       }
 
-      const targetPath = path.join(installRoot, skill);
+      const destination = destinationBySkill.get(skill) ?? skill;
+      const targetPath = path.join(installRoot, destination);
       const nextRecord: Record<string, unknown> = {
         skill,
         agent: (diffResult.assignment ?? target),
@@ -571,7 +605,8 @@ export async function apply({
           path: skillSource
         },
         sourcePath: skillSource,
-        targetPath
+        targetPath,
+        destination
       };
 
       if (sourceCommit.length > 0) {
@@ -629,15 +664,15 @@ export async function apply({
       });
     }
   } catch (error) {
-    await rollbackApplyWrites({
-      restorePlan
+    const recoveryErrors = await rollbackApplyWrites({
+      restorePlan,
+      installRoot
     });
     const receiptRollbackComplete = await rollbackReceiptMutations({
       installRoot,
       mutations: receiptMutations,
       receiptLock
     });
-    await cleanupApplyBackups({ restorePlan });
     return failure({
       source: diffResult.source,
       target,
@@ -655,20 +690,27 @@ export async function apply({
       errors: [{
         code: "write_error",
         message: error instanceof Error ? error.message : "Unknown write error"
-      }, ...receiptRollbackComplete ? [] : [{
+      }, ...recoveryErrors.map((message) => ({
+        code: "apply_recovery_failed",
+        message
+      })), ...receiptRollbackComplete ? [] : [{
         code: "receipt_rollback_failed",
         message: "Receipt rollback was incomplete after apply failed."
       }]]
     });
   }
 
-  await cleanupApplyBackups({ restorePlan });
+  const backupCleanupErrors = await cleanupApplyBackups({
+    restorePlan,
+    installRoot,
+    beforeCleanup: __test?.beforeCopyBackupCleanup
+  });
 
   let postApplyStatus: StatusResult | null = null;
   try {
     postApplyStatus = await status({
       source: diffResult.source,
-      target,
+      target: resolutionTarget,
       targetOverrides
     });
   } catch {
@@ -676,7 +718,7 @@ export async function apply({
   }
 
     return {
-      ok: true,
+      ok: backupCleanupErrors.length === 0,
       source: diffResult.source,
       target,
       mode: context.mode,
@@ -695,7 +737,10 @@ export async function apply({
         skills: [...filesAppliedBySkill.keys()],
         files: writeEntries.items.length
       },
-      errors: []
+      errors: backupCleanupErrors.map((message) => ({
+        code: "apply_backup_cleanup_failed",
+        message
+      }))
     };
     });
   } catch (error) {
@@ -737,7 +782,7 @@ async function collectExcludedTargetPolicyFindings({
 
   const errors: ApplyFinding[] = [];
   for (const planned of plannedSkills) {
-    const targetPath = path.join(installRoot, planned.skill);
+    const targetPath = path.join(installRoot, planned.destination);
     let info;
     try {
       info = await lstat(targetPath);
@@ -766,6 +811,7 @@ type SymlinkApplyPlanItem = {
   skill: string;
   sourcePath: string;
   targetPath: string;
+  destination: string;
   variant: string | undefined;
   action: "create" | "noop";
 };
@@ -790,8 +836,10 @@ async function applySymlinkInstalls({
   preApplySummary,
   targetOverrides,
   target,
+  statusTarget,
   sourcePolicy,
-  receiptLock
+  receiptLock,
+  __test
 }: {
   diffResult: DiffForApply;
   context: ApprovalContext;
@@ -801,8 +849,10 @@ async function applySymlinkInstalls({
   preApplySummary: ApplyStatusSummary;
   targetOverrides: TargetOverrides | undefined;
   target: string;
+  statusTarget: string;
   sourcePolicy: SourcePolicy | undefined;
   receiptLock: import("../receipts/index.js").ReceiptLock;
+  __test: ApplyInput["__test"];
 }): Promise<ApplyResult> {
   const sourceRoot = diffResult.source;
   const assignment = diffResult.assignment ?? target;
@@ -837,7 +887,7 @@ async function applySymlinkInstalls({
   const plannedItems: SymlinkApplyPlanItem[] = [];
   for (const planned of diffResult.planned) {
     const sourcePath = planned.sourcePath;
-    const targetPath = path.join(installRoot, planned.skill);
+    const targetPath = path.join(installRoot, planned.destination);
 
     if (!(await isPathWithinRoot({ candidatePath: sourcePath, rootPath: sourceRoot }))) {
       errors.push({
@@ -861,13 +911,13 @@ async function applySymlinkInstalls({
 
     const classification = await classifySymlinkInstall({ targetPath, expectedSourcePath: sourcePath });
     if (classification.state === "missing") {
-      plannedItems.push({ skill: planned.skill, sourcePath, targetPath, variant: symlinkVariant(planned), action: "create" });
+      plannedItems.push({ skill: planned.skill, sourcePath, targetPath, destination: planned.destination, variant: symlinkVariant(planned), action: "create" });
       continue;
     }
     if (classification.state === "correct") {
       // Already linked at the selected source: idempotent re-apply, refresh the
       // receipt only.
-      plannedItems.push({ skill: planned.skill, sourcePath, targetPath, variant: symlinkVariant(planned), action: "noop" });
+      plannedItems.push({ skill: planned.skill, sourcePath, targetPath, destination: planned.destination, variant: symlinkVariant(planned), action: "noop" });
       continue;
     }
     errors.push({
@@ -884,13 +934,18 @@ async function applySymlinkInstalls({
   const previousReceipt = await readReceipt({ installRoot }).catch((): Receipt => ({}));
   const receiptMutations: ReceiptMutation[] = [];
   const linkedSkills: string[] = [];
-  const createdLinks: string[] = [];
+  const createdLinks: Array<{ targetPath: string; sourcePath: string }> = [];
   try {
     for (const item of plannedItems) {
       if (item.action === "create") {
+        await assertSafeMutationParent(item.targetPath, installRoot, true);
         await mkdir(path.dirname(item.targetPath), { recursive: true });
+        await assertSafeMutationParent(item.targetPath, installRoot, false);
         await symlink(item.sourcePath, item.targetPath, "dir");
-        createdLinks.push(item.targetPath);
+        createdLinks.push({ targetPath: item.targetPath, sourcePath: item.sourcePath });
+        if (__test?.failAfterSuccessfulWrites === createdLinks.length) {
+          throw new Error(`Injected symlink write failure after ${createdLinks.length} successful writes`);
+        }
       }
 
       const priorState = statusBySkill.get(item.skill);
@@ -918,6 +973,7 @@ async function applySymlinkInstalls({
         source: { path: item.sourcePath },
         sourcePath: item.sourcePath,
         targetPath: item.targetPath,
+        destination: item.destination,
         sourceHash: await hashDirectory(item.sourcePath),
         installedFiles
       };
@@ -955,16 +1011,40 @@ async function applySymlinkInstalls({
       linkedSkills.push(item.skill);
     }
   } catch (error) {
-    // Best-effort: remove only the links this run created and restore the prior
-    // receipt. Never touch the source tree the link points at.
-    for (const linkPath of [...createdLinks].reverse()) {
-      await unlinkSafe(linkPath);
+    await __test?.beforeSymlinkFailureCleanup?.();
+    const cleanupErrors: ApplyFinding[] = [];
+    for (const createdLink of [...createdLinks].reverse()) {
+      try {
+        await assertSafeMutationParent(createdLink.targetPath, installRoot, false);
+        const classification = await classifySymlinkInstall({
+          targetPath: createdLink.targetPath,
+          expectedSourcePath: createdLink.sourcePath
+        });
+        if (classification.state !== "correct") {
+          throw new Error(`created link is now ${classification.state}`);
+        }
+        await __test?.afterSymlinkCleanupClassification?.(createdLink.targetPath);
+        await assertSafeMutationParent(createdLink.targetPath, installRoot, false);
+        const finalClassification = await classifySymlinkInstall({
+          targetPath: createdLink.targetPath,
+          expectedSourcePath: createdLink.sourcePath
+        });
+        if (finalClassification.state !== "correct") {
+          throw new Error(`created link is now ${finalClassification.state}`);
+        }
+        await unlink(createdLink.targetPath);
+      } catch (cleanupError) {
+        cleanupErrors.push({
+          code: "symlink_cleanup_failed",
+          message: `Could not safely remove created symlink ${createdLink.targetPath}: ${errorMessage(cleanupError)}`
+        });
+      }
     }
     const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
     return failSymlink([{
       code: "symlink_write_error",
       message: error instanceof Error ? error.message : "Unknown symlink write error"
-    }, ...receiptRollbackComplete ? [] : [{
+    }, ...cleanupErrors, ...receiptRollbackComplete ? [] : [{
       code: "receipt_rollback_failed",
       message: "Receipt rollback was incomplete after symlink apply failed."
     }]]);
@@ -972,7 +1052,7 @@ async function applySymlinkInstalls({
 
   let postApplyStatus: StatusResult | null = null;
   try {
-    postApplyStatus = await status({ source: sourceRoot, target, targetOverrides });
+    postApplyStatus = await status({ source: sourceRoot, target: statusTarget, targetOverrides });
   } catch {
     postApplyStatus = null;
   }
@@ -1103,6 +1183,8 @@ type ApprovalContext = {
   input: string;
   sourceCommit: string;
   approvedSkills: string[];
+  assignmentPath?: string | undefined;
+  approvedDestinations?: Map<string, string>;
   approvedFileHashes: Map<string, Map<string, string>> | null;
   errors: ApplyFinding[];
 };
@@ -1188,6 +1270,7 @@ async function resolveLockContext({ lockPath, source, target }: {
     input: resolved,
     sourceCommit: lock.source.commit ?? "",
     approvedSkills: lock.selectedSkills,
+    assignmentPath: lock.assignmentPath ?? target,
     approvedFileHashes: fileHashesToMap(lock.fileHashes),
     errors: []
   };
@@ -1359,6 +1442,28 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
     };
   }
 
+  const approvedDestinations = new Map<string, string>();
+  for (const planned of manifest.planned) {
+    if (!isNonEmptyString(planned.skill)) {
+      continue;
+    }
+    if (planned.destination !== undefined && !isNonEmptyString(planned.destination)) {
+      return {
+        ok: false,
+        mode: "artifact",
+        input: manifestPath,
+        sourceCommit: typeof manifest.source.commit === "string" ? manifest.source.commit : "",
+        approvedSkills: [],
+        approvedFileHashes: null,
+        errors: [{
+          code: "invalid_artifact_manifest",
+          message: `Invalid destination metadata for ${planned.skill} in ${manifestPath}`
+        }]
+      };
+    }
+    approvedDestinations.set(planned.skill, planned.destination ?? planned.skill);
+  }
+
   return {
     ok: true,
     mode: "artifact",
@@ -1367,6 +1472,7 @@ async function resolveArtifactContext({ artifactPath, source, target }: {
     approvedSkills: manifest.planned
       .map((planned) => planned.skill)
       .filter((skill): skill is string => typeof skill === "string" && skill.trim().length > 0),
+    approvedDestinations,
     approvedFileHashes: await validatedArtifactFileHashes({ manifest, manifestPath }),
     errors: []
   };
@@ -1387,10 +1493,12 @@ type WriteEntries = {
 type WritePlannedSkillInput = {
   skill: string;
   entries: WriteEntry[];
+  installRoot: string;
   failAfterSuccessfulWrites: number | null;
   successfulWritesRef: {
     value: number;
   };
+  afterBackup?: ((targetPath: string, backupPath: string) => Promise<void> | void) | undefined;
 };
 
 type WritePlannedSkillResult = {
@@ -1402,6 +1510,7 @@ type WritePlannedSkillResult = {
   message: string;
   successfulWrites: number;
   restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
+  recoveryErrors: string[];
 };
 
 type RollbackFileState = {
@@ -1707,7 +1816,16 @@ async function validatedArtifactFileHashes({
     return null;
   }
 
-  if (computeStoredArtifactId(manifest) !== manifest.artifactId) {
+  if (!matchesPackArtifactId(manifest.artifactId, {
+    source: manifest.source,
+    target: manifest.target,
+    action: manifest.action,
+    planned: manifest.planned,
+    blocked: manifest.blocked ?? [],
+    files: manifest.files,
+    fileHashes: manifest.fileHashes,
+    summary: manifest.summary
+  })) {
     return null;
   }
 
@@ -1748,62 +1866,6 @@ async function validatedArtifactFileHashes({
   }
 
   return approvedHashes;
-}
-
-function computeStoredArtifactId(manifest: ArtifactManifest): string | null {
-  if (
-    manifest.action !== "pack"
-    || !Array.isArray(manifest.files)
-    || !isRecord(manifest.summary)
-    || !isRecord(manifest.fileHashes)
-  ) {
-    return null;
-  }
-
-  const stableArtifact = {
-    source: manifest.source,
-    target: manifest.target,
-    action: manifest.action,
-    planned: manifest.planned.map((item) => ({
-      skill: item.skill,
-      action: (item as { action?: unknown }).action,
-      variant: (item as { variant?: unknown }).variant,
-      sourcePath: normalizeArtifactSourcePath(manifest.source.repo, item.sourcePath),
-      evidence: evidenceArray(item)
-    })),
-    blocked: (manifest.blocked ?? []).map((item) => ({
-      skill: item.skill,
-      action: (item as { action?: unknown }).action,
-      target: (item as { target?: unknown }).target,
-      reason: (item as { reason?: unknown }).reason,
-      variant: (item as { variant?: unknown }).variant,
-      sourcePath: normalizeArtifactSourcePath(manifest.source.repo, (item as { sourcePath?: unknown }).sourcePath),
-      evidence: evidenceArray(item)
-    })),
-    files: manifest.files.map((item) => ({
-      skill: item.skill,
-      relativePath: item.relativePath,
-      sha256: item.sha256,
-      bytes: item.bytes
-    })),
-    fileHashes: manifest.fileHashes,
-    summary: manifest.summary,
-    schema: BUNDLE_SCHEMA
-  };
-
-  return createHash("sha256").update(JSON.stringify(stableObject(stableArtifact))).digest("hex");
-}
-
-function normalizeArtifactSourcePath(sourceRoot: string, sourcePath: unknown): unknown {
-  if (typeof sourcePath !== "string") {
-    return sourcePath;
-  }
-  return path.isAbsolute(sourcePath) ? sourcePath : path.join(sourceRoot, sourcePath);
-}
-
-function evidenceArray(value: unknown): unknown[] {
-  const evidence = isRecord(value) ? value.evidence : undefined;
-  return Array.isArray(evidence) ? [...evidence] : [];
 }
 
 async function sourceFileMatchesApprovedHash({
@@ -1871,23 +1933,6 @@ function isArtifactFileRecord(file: unknown): file is NonNullable<ArtifactManife
     && typeof (file as { relativePath?: unknown }).relativePath === "string"
     && typeof (file as { bundlePath?: unknown }).bundlePath === "string"
     && typeof (file as { sha256?: unknown }).sha256 === "string";
-}
-
-function stableObject(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => stableObject(item));
-  }
-
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-
-  const source = value as Record<string, unknown>;
-  const ordered: Record<string, unknown> = {};
-  for (const key of Object.keys(source).sort()) {
-    ordered[key] = stableObject(source[key]);
-  }
-  return ordered;
 }
 
 function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {
@@ -1966,8 +2011,10 @@ async function writePlannedSkillEntries(
   {
     skill,
     entries,
+    installRoot,
     failAfterSuccessfulWrites,
-    successfulWritesRef
+    successfulWritesRef,
+    afterBackup
   }: WritePlannedSkillInput
 ): Promise<WritePlannedSkillResult> {
   const tempSuffix = `suitcase-apply-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -1978,7 +2025,9 @@ async function writePlannedSkillEntries(
       await writePlannedEntryWithRollback({
         entry,
         restorePlan: nextRestorePlan,
-        tempSuffix
+        tempSuffix,
+        installRoot,
+        afterBackup
       });
 
       successfulWritesRef.value += 1;
@@ -1995,10 +2044,13 @@ async function writePlannedSkillEntries(
       restorePlan: nextRestorePlan
     };
   } catch (error) {
+    const recoveryErrors: string[] = [];
+    const retainedRestorePlan: Array<{ targetPath: string; backupPath: string | null }> = [];
     for (const plannedRestore of [...nextRestorePlan].reverse()) {
-      await rollbackPlannedEntry(plannedRestore);
-      if (plannedRestore.backupPath !== null) {
-        await unlinkSafe(plannedRestore.backupPath);
+      const recovery = await rollbackPlannedEntry(plannedRestore, installRoot);
+      if (!recovery.ok) {
+        recoveryErrors.push(recovery.message);
+        retainedRestorePlan.push(plannedRestore);
       }
     }
 
@@ -2006,7 +2058,8 @@ async function writePlannedSkillEntries(
       ok: false,
       message: error instanceof Error ? error.message : "Unknown write error",
       successfulWrites: successfulWritesRef.value,
-      restorePlan: []
+      restorePlan: retainedRestorePlan.reverse(),
+      recoveryErrors
     };
   }
 }
@@ -2014,11 +2067,15 @@ async function writePlannedSkillEntries(
 async function writePlannedEntryWithRollback({
   entry,
   tempSuffix,
-  restorePlan
+  restorePlan,
+  installRoot,
+  afterBackup
 }: {
   entry: WriteEntry;
   tempSuffix: string;
   restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
+  installRoot: string;
+  afterBackup?: ((targetPath: string, backupPath: string) => Promise<void> | void) | undefined;
 }): Promise<void> {
   const targetPath = entry.targetPath;
   const sourcePath = entry.sourcePath;
@@ -2026,33 +2083,49 @@ async function writePlannedEntryWithRollback({
   let backupPath: string | null = null;
 
   try {
-    await mkdir(path.dirname(targetPath), { recursive: true });
+    await assertSafeMutationParent(targetPath, installRoot, true);
 
     if (await statSafe(targetPath) !== null) {
       backupPath = `${targetPath}.previous-${tempSuffix}`;
+      await assertSafeMutationParent(targetPath, installRoot, false);
       await rename(targetPath, backupPath);
+      await afterBackup?.(targetPath, backupPath);
     }
 
     const sourceMode = (await stat(sourcePath)).mode & 0o777;
     const contents = await readFile(sourcePath);
+    await assertSafeMutationParent(targetPath, installRoot, false);
     await writeFile(tmpPath, contents, { mode: sourceMode });
     await chmod(tmpPath, sourceMode);
+    await assertSafeMutationParent(targetPath, installRoot, false);
     await rename(tmpPath, targetPath);
     restorePlan.push({
       targetPath,
       backupPath
     });
   } catch (error) {
-    await rollbackPlannedEntry({
+    const recoveryErrors: string[] = [];
+    const plannedRestore = {
       targetPath,
       backupPath
-    });
-    try {
-      await unlinkSafe(tmpPath);
-    } catch {
-      // best effort cleanup
+    };
+    const recovery = await rollbackPlannedEntry(plannedRestore, installRoot);
+    if (!recovery.ok) {
+      recoveryErrors.push(recovery.message);
+      restorePlan.push(plannedRestore);
     }
-    throw error;
+    try {
+      await assertSafeMutationParent(tmpPath, installRoot, false);
+      await unlink(tmpPath);
+    } catch (cleanupError) {
+      if (!isNodeError(cleanupError) || cleanupError.code !== "ENOENT") {
+        recoveryErrors.push(`Temporary apply path retained at ${tmpPath}: ${errorMessage(cleanupError)}`);
+      }
+    }
+    const message = errorMessage(error);
+    throw new Error(recoveryErrors.length === 0
+      ? message
+      : `${message}; recovery errors: ${recoveryErrors.join("; ")}`);
   }
 }
 
@@ -2062,43 +2135,129 @@ async function rollbackPlannedEntry({
 }: {
   targetPath: string;
   backupPath: string | null;
-}): Promise<void> {
+}, installRoot: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await assertSafeMutationParent(targetPath, installRoot, false);
+    if (backupPath !== null) await assertSafeMutationParent(backupPath, installRoot, false);
+  } catch (error) {
+    return {
+      ok: false,
+      message: `Apply recovery refused for ${targetPath}${backupPath === null ? "" : `; backup retained at ${backupPath}`}: ${errorMessage(error)}`
+    };
+  }
   if (backupPath === null) {
     try {
       await unlink(targetPath);
-    } catch {
-      // best effort
+      return { ok: true };
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") return { ok: true };
+      return { ok: false, message: `Apply recovery could not remove ${targetPath}: ${errorMessage(error)}` };
     }
-    return;
   }
 
   try {
     await rename(backupPath, targetPath);
-  } catch {
-    // best effort
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `Apply recovery could not restore ${targetPath}; backup retained at ${backupPath}: ${errorMessage(error)}`
+    };
   }
 }
 
 async function rollbackApplyWrites({
-  restorePlan
+  restorePlan,
+  installRoot
 }: {
   restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
-}): Promise<void> {
+  installRoot: string;
+}): Promise<string[]> {
+  const recoveryErrors: string[] = [];
   for (const plannedRestore of [...restorePlan].reverse()) {
-    await rollbackPlannedEntry(plannedRestore);
+    const recovery = await rollbackPlannedEntry(plannedRestore, installRoot);
+    if (!recovery.ok) recoveryErrors.push(recovery.message);
   }
+  return recoveryErrors;
 }
 
 async function cleanupApplyBackups({
-  restorePlan
+  restorePlan,
+  installRoot,
+  beforeCleanup
 }: {
   restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
-}): Promise<void> {
+  installRoot: string;
+  beforeCleanup?: ((targetPath: string, backupPath: string) => Promise<void> | void) | undefined;
+}): Promise<string[]> {
+  const errors: string[] = [];
   for (const plannedRestore of restorePlan) {
     if (plannedRestore.backupPath !== null) {
-      await unlinkSafe(plannedRestore.backupPath);
+      try {
+        await beforeCleanup?.(plannedRestore.targetPath, plannedRestore.backupPath);
+        await assertSafeMutationParent(plannedRestore.backupPath, installRoot, false);
+        await unlink(plannedRestore.backupPath);
+      } catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT") continue;
+        errors.push(`Apply backup retained at ${plannedRestore.backupPath}: ${errorMessage(error)}`);
+      }
     }
   }
+  return errors;
+}
+
+async function assertSafeMutationParent(
+  targetPath: string,
+  installRoot: string,
+  createMissing: boolean
+): Promise<void> {
+  const lexicalRoot = path.resolve(installRoot);
+  const lexicalParent = path.resolve(path.dirname(targetPath));
+  if (!isInsideOrEqual(lexicalParent, lexicalRoot)) {
+    throw new Error(`Target parent ${lexicalParent} escapes install root ${lexicalRoot}.`);
+  }
+
+  let current = lexicalRoot;
+  const relativeParts = path.relative(lexicalRoot, lexicalParent).split(path.sep).filter(Boolean);
+  for (const part of relativeParts) {
+    current = path.join(current, part);
+    try {
+      const info = await lstat(current);
+      if (info.isSymbolicLink()) throw new Error(`Target parent component ${current} is a symlink.`);
+      if (!info.isDirectory()) throw new Error(`Target parent component ${current} is not a directory.`);
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") break;
+      throw error;
+    }
+  }
+
+  const canonicalRoot = await realpath(lexicalRoot);
+  let existingParent = lexicalParent;
+  while (true) {
+    try {
+      const canonicalExistingParent = await realpath(existingParent);
+      if (!isInsideOrEqual(canonicalExistingParent, canonicalRoot)) {
+        throw new Error(`Target parent ${lexicalParent} resolves outside install root ${lexicalRoot}.`);
+      }
+      break;
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+      const parent = path.dirname(existingParent);
+      if (parent === existingParent) throw error;
+      existingParent = parent;
+    }
+  }
+
+  if (createMissing) await mkdir(lexicalParent, { recursive: true });
+  const canonicalParent = await realpath(lexicalParent);
+  if (!isInsideOrEqual(canonicalParent, canonicalRoot)) {
+    throw new Error(`Target parent ${lexicalParent} resolves outside install root ${lexicalRoot}.`);
+  }
+}
+
+function isInsideOrEqual(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 async function readFileSafeText(filePath: string): Promise<string | null> {
@@ -2308,6 +2467,10 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error;
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function statSafe(filePath: string): Promise<import("node:fs").Stats | null> {
   try {
     return await stat(filePath);
@@ -2316,13 +2479,5 @@ async function statSafe(filePath: string): Promise<import("node:fs").Stats | nul
       return null;
     }
     return null;
-  }
-}
-
-async function unlinkSafe(filePath: string): Promise<void> {
-  try {
-    await unlink(filePath);
-  } catch {
-    // best effort only
   }
 }
