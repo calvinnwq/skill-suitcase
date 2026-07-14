@@ -71,6 +71,7 @@ const EXECUTION_WRAPPERS = new Set([
   "nohup",
   "not",
   "or",
+  "stdbuf",
   "sudo",
   "timeout",
   "time",
@@ -327,6 +328,7 @@ const WRAPPER_FLAG_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
     "--set-home",
     "--stdin"
   ]),
+  stdbuf: new Set<string>(),
   timeout: new Set(["-f", "-p", "-v", "--foreground", "--preserve-status", "--verbose"]),
   time: new Set(["-a", "-p", "-v", "--append", "--portability", "--verbose"]),
   watch: new Set([
@@ -367,12 +369,21 @@ const WRAPPER_OPTIONAL_VALUE_OPTIONS: Readonly<Record<string, ReadonlyMap<string
   watch: new Map([
     ["-d", /^(?:1|permanent)$/],
     ["--differences", /^(?:1|permanent)$/]
+  ]),
+  xargs: new Map([
+    ["-e", /^.*$/],
+    ["-i", /^.*$/],
+    ["-l", /^[1-9]\d*$/],
+    ["--eof", /^.*$/],
+    ["--max-lines", /^[1-9]\d*$/],
+    ["--replace", /^.*$/]
   ])
 };
 const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   env: new Set(["-a", "-C", "-P", "-S", "-u", "--argv0", "--chdir", "--split-string", "--unset"]),
   exec: new Set(["-a"]),
   nice: new Set(["-n", "--adjustment"]),
+  stdbuf: new Set(["-e", "-i", "-o", "--error", "--input", "--output"]),
   sudo: new Set([
     "-C",
     "-D",
@@ -411,14 +422,36 @@ const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
     "-s",
     "--arg-file",
     "--delimiter",
-    "--eof",
     "--max-args",
     "--max-chars",
-    "--max-lines",
     "--max-procs",
     "--process-slot-var",
-    "--replace"
   ])
+};
+const WRAPPER_VALUE_PATTERNS: Readonly<Record<string, Readonly<Record<string, RegExp>>>> = {
+  nice: {
+    "-n": /^[+-]?\d+$/,
+    "--adjustment": /^[+-]?\d+$/
+  },
+  stdbuf: {
+    "-e": /^(?:L|\d+(?:[KMGTPEZYRQ](?:i?B)?)?)$/i,
+    "-i": /^\d+(?:[KMGTPEZYRQ](?:i?B)?)?$/i,
+    "-o": /^(?:L|\d+(?:[KMGTPEZYRQ](?:i?B)?)?)$/i,
+    "--error": /^(?:L|\d+(?:[KMGTPEZYRQ](?:i?B)?)?)$/i,
+    "--input": /^\d+(?:[KMGTPEZYRQ](?:i?B)?)?$/i,
+    "--output": /^(?:L|\d+(?:[KMGTPEZYRQ](?:i?B)?)?)$/i
+  },
+  xargs: {
+    "-L": /^[1-9]\d*$/,
+    "-n": /^[1-9]\d*$/,
+    "-P": /^\d+$/,
+    "-R": /^[1-9]\d*$/,
+    "-S": /^[1-9]\d*$/,
+    "-s": /^[1-9]\d*$/,
+    "--max-args": /^[1-9]\d*$/,
+    "--max-chars": /^[1-9]\d*$/,
+    "--max-procs": /^\d+$/
+  }
 };
 
 interface CommandExample {
@@ -582,7 +615,9 @@ function markdownCommandExamples(contents: string): CommandExample[] {
       const start = launcher.index;
       if (start === undefined) continue;
       const span = spans.find((item) => item.end > start);
-      if (span === undefined || !span.chunk.formatted) continue;
+      const prefix = text.slice(0, start);
+      const commandCue = /(?:^|[\s:])(?:execute|invoke|run|try)\s*$/i.test(prefix);
+      if (span === undefined || (!span.chunk.formatted && !commandCue)) continue;
       if (span.chunk.inlineCode && span.chunk.text.trim() !== launcher[0]) continue;
 
       const nextLauncher = launchers[index + 1]?.index ?? text.length;
@@ -591,8 +626,6 @@ function markdownCommandExamples(contents: string): CommandExample[] {
       const sentenceEnd = sentence?.index === undefined ? tail.length : sentence.index + 1;
       const command = tail.slice(0, sentenceEnd).trim();
       const commandName = command.match(/^\S+\s+(\S+)/)?.[1] ?? "";
-      const prefix = text.slice(0, start);
-      const commandCue = /(?:^|[\s:])(?:execute|invoke|run|try)\s*$/i.test(prefix);
       if (!PUBLIC_COMMANDS.has(commandName) && !commandCue && !command.includes("--json")) continue;
       extracted.push(...textCommandExamples(command));
     }
@@ -765,8 +798,15 @@ function posixLineState(line: string): { comment: boolean; continuation: boolean
 
 function plainTextCliProse(line: string): boolean {
   const trimmed = line.trim();
-  const match = trimmed.match(/^skill-suitcase\s+(\S+)\s+.+[.!?]$/);
+  const match = trimmed.match(/^skill-suitcase\s+(\S+)\s+(.+)[.!?]$/);
   if (match === null || !PUBLIC_COMMANDS.has(match[1] ?? "")) return false;
+  const command = match[1] ?? "";
+  const arguments_ = match[2]?.trim().split(/\s+/) ?? [];
+  const commandLike = arguments_[0]?.startsWith("-")
+    || (command === "upstream"
+      && ["check", "fetch", "import"].includes(arguments_[0] ?? "")
+      && arguments_[1]?.startsWith("-"));
+  if (commandLike) return false;
   return !posixLineState(line).comment && !/\s\.$/.test(trimmed) && !/[;&|`]/.test(line);
 }
 
@@ -1375,16 +1415,47 @@ function packageRunnerCommandString(
   return undefined;
 }
 
-function wrapperOptionValueMode(token: string, valueOptions: ReadonlySet<string>): "attached" | "separate" | null {
+interface WrapperOptionValue {
+  mode: "attached" | "separate";
+  option: string;
+  value?: string;
+}
+
+function wrapperOptionValue(token: string, valueOptions: ReadonlySet<string>): WrapperOptionValue | null {
   const equalsIndex = token.indexOf("=");
   const option = equalsIndex < 0 ? token : token.slice(0, equalsIndex);
-  if (valueOptions.has(option)) return equalsIndex < 0 ? "separate" : "attached";
+  if (valueOptions.has(option)) {
+    return equalsIndex < 0
+      ? { mode: "separate", option }
+      : { mode: "attached", option, value: token.slice(equalsIndex + 1) };
+  }
   if (!/^-[^-]/.test(token)) return null;
   for (let index = 1; index < token.length; index += 1) {
-    if (!valueOptions.has(`-${token[index] ?? ""}`)) continue;
-    return index === token.length - 1 ? "separate" : "attached";
+    const shortOption = `-${token[index] ?? ""}`;
+    if (!valueOptions.has(shortOption)) continue;
+    const attachedValue = token.slice(index + 1);
+    return attachedValue === ""
+      ? { mode: "separate", option: shortOption }
+      : { mode: "attached", option: shortOption, value: attachedValue.replace(/^=/, "") };
   }
   return null;
+}
+
+function wrapperOptionValueMode(token: string, valueOptions: ReadonlySet<string>): "attached" | "separate" | null {
+  return wrapperOptionValue(token, valueOptions)?.mode ?? null;
+}
+
+function assertWrapperOptionValue(
+  executable: string,
+  optionValue: WrapperOptionValue,
+  separateValue: string | undefined
+): void {
+  const value = optionValue.mode === "attached" ? optionValue.value : separateValue;
+  const pattern = WRAPPER_VALUE_PATTERNS[executable]?.[optionValue.option];
+  assert.ok(
+    value !== undefined && value !== "" && (pattern === undefined || pattern.test(value)),
+    `invalid ${executable} wrapper option value: ${optionValue.option}`
+  );
 }
 
 function isSupportedWrapperOption(
@@ -1434,8 +1505,9 @@ function wrapperCommandIndex(executable: string, words: Word[]): number | null {
       isSupportedWrapperOption(token, flagOptions, optionalValueOptions, valueOptions),
       `unsupported ${executable} wrapper option: ${token}`
     );
-    const valueMode = wrapperOptionValueMode(token, valueOptions);
-    index += valueMode === "separate" ? 2 : 1;
+    const optionValue = wrapperOptionValue(token, valueOptions);
+    if (optionValue !== null) assertWrapperOptionValue(executable, optionValue, words[index + 1]?.value);
+    index += optionValue?.mode === "separate" ? 2 : 1;
   }
 
   if (executable === "env" || executable === "sudo") {
@@ -2254,6 +2326,23 @@ test("structured parsers extract Markdown, HTML, YAML, JSON, and text examples",
 });
 
 test("documentation parsers reject fragmented and malformed CLI launches", async (t) => {
+  await t.test("unformatted Markdown command cue", () => {
+    assert.throws(
+      () => validateCliExamples("fixture.md", "Run skill-suitcase bogus --json"),
+      /unknown command: bogus/
+    );
+  });
+
+  await t.test("punctuated plain-text command", () => {
+    assert.throws(
+      () => validateCliExamples(
+        "fixture.txt",
+        "skill-suitcase status --source . --not-a-real-flag --json."
+      ),
+      /without --json/
+    );
+  });
+
   await t.test("formatted Markdown launcher", () => {
     for (const source of [
       "Run **skill-suitcase** bogus",
@@ -2378,6 +2467,7 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "timeout -sTERM 30 skill-suitcase bogus --json",
     "watch skill-suitcase bogus --json",
     "xargs -n1 skill-suitcase bogus --json",
+    "stdbuf -oL skill-suitcase bogus --json",
     "/usr/local/bin/skill-suitcase bogus --json",
     "node dist/src/cli.js bogus --json",
     "\"$CLI\" bogus --json",
@@ -2414,6 +2504,27 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     );
   }
 
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("xargs -n -t skill-suitcase status --source . --json")
+    ),
+    /invalid xargs wrapper option value: -n/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("xargs --max-args= skill-suitcase status --source . --json")
+    ),
+    /invalid xargs wrapper option value: --max-args/
+  );
+  assert.throws(
+    () => validateCliExamples(
+      "fixture.md",
+      markdownFixture("stdbuf --definitely-invalid skill-suitcase status --source . --json")
+    ),
+    /unsupported stdbuf wrapper option: --definitely-invalid/
+  );
   assert.throws(
     () => validateCliExamples(
       "fixture.md",
@@ -2509,6 +2620,14 @@ test("launcher normalization covers wrappers, runners, paths, and command string
     "timeout -v 5 skill-suitcase status --source . --json",
     "watch -d1 skill-suitcase status --source . --json",
     "watch --differences=permanent skill-suitcase status --source . --json",
+    "xargs -n 1 skill-suitcase status --source . --json",
+    "xargs -tn1 skill-suitcase status --source . --json",
+    "xargs -l1 skill-suitcase status --source . --json",
+    "xargs --max-lines skill-suitcase status --source . --json",
+    "xargs --max-lines=1 skill-suitcase status --source . --json",
+    "stdbuf -oL skill-suitcase status --source . --json",
+    "stdbuf --output=L skill-suitcase status --source . --json",
+    "stdbuf --output=1MiB skill-suitcase status --source . --json",
     "cmd /d /s /c skill-suitcase status --source . --json"
   ]) {
     assert.equal(validateCliExamples("fixture.md", markdownFixture(source)), 1, source);
