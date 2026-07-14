@@ -154,16 +154,25 @@ skill-suitcase status --source "$SRC" --json</code></pre>
             <p>
               Target IDs are <code>openclaw</code>, <code>codex</code>,
               <code>openclaw-codex</code>, <code>agents</code>, <code>claude</code>,
-              <code>opencode</code>, <code>pi</code>, and <code>grok</code>. Paths
-              stay portable with explicit overrides:
+              <code>hermes</code>, <code>opencode</code>, <code>pi</code>, and
+              <code>grok</code>. Paths stay portable with explicit overrides:
             </p>
             <div class="def-rows">
               <div><span class="k">--agents-skills &lt;dir&gt;</span><span class="v">shared agents skill root</span></div>
               <div><span class="k">--codex-home &lt;dir&gt;</span><span class="v">Codex home directory</span></div>
               <div><span class="k">--codex-skills &lt;dir&gt;</span><span class="v">Codex skills root</span></div>
               <div><span class="k">--claude-skills &lt;dir&gt;</span><span class="v">Claude skills root</span></div>
+              <div><span class="k">--hermes-skills &lt;dir&gt;</span><span class="v">flat Hermes root, or the owned external-root path for categorized Hermes</span></div>
               <div><span class="k">--grok-skills &lt;dir&gt;</span><span class="v">Grok skills root</span></div>
             </div>
+            <p>
+              Categorized Hermes targets install at
+              <code>&lt;external-root&gt;/&lt;category&gt;/&lt;skill&gt;</code> with one
+              receipt at the owned root. The root must already exist, be
+              registered in Hermes <code>skills.external_dirs</code>, and pass
+              overlap, precedence, identity-shadow, and symlink checks before
+              live target work.
+            </p>
           </section>
 
           <section>

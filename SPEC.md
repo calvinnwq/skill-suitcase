@@ -93,13 +93,39 @@ assignmentPaths:
     path: ~/.hermes/skill-suitcase/skills
 ```
 
-Before materialization, the operator creates the external root and registers its
-exact path in `<home>/config.yaml` under `skills.external_dirs`. The adapter
-requires both conditions and never edits that configuration. It also refuses a
-same-name skill under `<home>/skills` or elsewhere in the owned external root,
-category symlinks, path traversal, unmanaged destination collisions, and receipt destination drift.
+Before live target inspection or mutation, the operator creates the external
+root and registers its exact path in `<home>/config.yaml` under
+`skills.external_dirs`.
+That Hermes field may be a string or a list of strings.
+Registration comparison expands a leading `~`, expands defined `$NAME` and
+`${NAME}` environment variables, resolves relative entries against `home`, and
+compares canonical filesystem paths; an unresolved variable does not register
+the root.
+The adapter requires both conditions and never edits that configuration.
+The external root must not overlap `<home>/skills` in either direction.
+Hermes resolves skill identity from `SKILL.md` frontmatter when present, so the
+adapter refuses duplicate planned identities and matching identities under the
+local skills root, an earlier configured external root, or another destination
+inside the owned root.
+It also refuses overlap with an earlier configured external root, directory
+symlinks encountered while checking shadows, category symlinks, path traversal,
+unmanaged destination collisions, and receipt destination drift.
 The one receipt remains at the external root. Existing flat Hermes targets are
 unchanged.
+
+Category values must start with an ASCII letter or digit and may then contain
+only ASCII letters, digits, `.`, `_`, or `-`.
+They must not be `.`, `..`, end in `.`, use a Windows reserved basename, or use
+a Hermes-excluded cache, environment, package, or archive directory name.
+The reserved basenames are `CON`, `PRN`, `AUX`, `NUL`, `COM1` through `COM9`,
+and `LPT1` through `LPT9`, case-insensitively and before any extension.
+The excluded directory names are `.git`, `.github`, `.hub`, `.archive`,
+`.venv`, `venv`, `node_modules`, `site-packages`, `__pycache__`, `.tox`, `.nox`,
+`.pytest_cache`, `.mypy_cache`, and `.ruff_cache`.
+Extra category entries for skills outside the assignment are invalid.
+If one assignment is exposed through both flat and categorized assignment
+paths, assignment-only planning is refused as
+`ambiguous_assignment_path_layout`; select an explicit assignment path ID.
 
 OpenCode and Pi are provider-backed compatibility targets and are read-only.
 That policy follows the adapter kind even when a manifest supplies a custom
@@ -212,7 +238,14 @@ record. Its schema is `calvinnwq.skills.receipt.v0`. A managed install record
 captures the skill, target path, source path and provenance, install mode,
 version and content hashes, installed-file hashes, resolved relative
 destination, and rollback metadata when available. Older receipt records without
-`destination` remain valid.
+`destination` remain valid for flat targets; categorized Hermes ownership
+requires `<category>/<skill>`.
+
+Plan-lock entries and staged artifact plan/file entries also record the resolved
+relative destination, and destination changes participate in their integrity
+checks.
+Existing flat v0 plan locks without `destination` remain valid as
+`<skill>` destinations.
 
 Receipt updates use atomic replacement and a receipt-local transaction lock.
 Concurrent workflows must not silently discard one another's records. A legacy

@@ -228,7 +228,12 @@ and an assignment `categories` entry for every selected skill. Verify the exact
 root already exists and is listed in `<home>/config.yaml` under
 `skills.external_dirs`.
 Never add it automatically, never write into `<home>/skills`, and stop on
-`hermes_external_root_unregistered` or `hermes_local_skill_shadow`. Review each
+registration, overlap, shadow, duplicate identity, or category-symlink findings.
+In particular, stop on `hermes_external_root_unregistered`,
+`hermes_external_root_local_overlap`, `hermes_external_root_precedence_overlap`,
+`hermes_local_skill_shadow`, `hermes_external_skill_shadow`,
+`hermes_managed_skill_shadow`, or `hermes_planned_skill_identity_conflict`.
+Review each
 planned `destination` (`<category>/<skill>`) and confirm the central receipt is
 at the external root before any live apply.
 

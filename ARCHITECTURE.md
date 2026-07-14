@@ -160,8 +160,8 @@ The durable state model belongs to Skill Suitcase:
   non-empty exclude policy, while denied or secret-like paths refuse with
   path-level evidence before any target write
 - manifest `validationPolicy.skillify.skip` records reviewed exceptions for referenced skills that strict validation must not score against the local Skillify-10 authoring contract
-- receipts record ownership, source provenance, install mode, file hashes, and
-  rollback state; receipt writers use atomic replacement and a receipt-local
+- receipts record ownership, source provenance, relative destination, install
+  mode, file hashes, and rollback state; receipt writers use atomic replacement and a receipt-local
   transaction lock so concurrent workflows cannot discard one another's state
 - status uses the complete `current`, `missing`, `version`, `behind`, `dirty`, `blocked`, and `unknown` enum for catalog-planned entries
 - provider fallback inventory without a catalog assignment has no status entries; read-only is target metadata, not a status value
@@ -174,9 +174,17 @@ Hermes categorized materialization uses a dedicated Skill Suitcase-owned
 external root. Assignment `categories` select one safe category segment per
 skill, and resolved destinations remain inside that root. The central receipt
 stays at the external root; Skill Suitcase never claims Hermes's bundled or
-user-managed `$HERMES_HOME/skills` categories. The owned root must exist and be
-registered in Hermes configuration before planning live filesystem behavior so
-Hermes cannot cache it as absent.
+user-managed `$HERMES_HOME/skills` categories.
+The owned root must exist, must not overlap the local skills tree, and must be
+registered in Hermes configuration before live target inspection or mutation
+so Hermes cannot cache it as absent.
+Validation follows Hermes precedence: local skills and earlier configured
+external roots must not shadow a planned skill identity, earlier roots must not
+overlap the owned root, and the plan itself must not contain duplicate
+`SKILL.md` identities.
+Category and skill parents are revalidated around filesystem operations so a
+symlink swap cannot redirect categorized writes, adoption, recovery, pruning,
+or rollback outside the owned root.
 
 Manifest-owned logical groups are reporting metadata. They may name product
 families, upstream suites, provider boundaries, or other operator-facing buckets

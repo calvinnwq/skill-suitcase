@@ -56,7 +56,8 @@
             <p>
               Target IDs are <code>openclaw</code>, <code>codex</code>,
               <code>openclaw-codex</code>, <code>agents</code>, <code>claude</code>,
-              <code>opencode</code>, <code>pi</code>, and <code>grok</code>.
+              <code>hermes</code>, <code>opencode</code>, <code>pi</code>, and
+              <code>grok</code>.
               OpenCode and Pi are provider-backed and read-only. Commands that
               resolve target paths accept these overrides, which outrank manifest
               <code>assignmentPaths</code>:
@@ -68,9 +69,22 @@
                 <tr><td>--codex-home &lt;dir&gt;</td><td>Codex home directory</td></tr>
                 <tr><td>--codex-skills &lt;dir&gt;</td><td>Codex skills root</td></tr>
                 <tr><td>--claude-skills &lt;dir&gt;</td><td>Claude skills root</td></tr>
+                <tr><td>--hermes-skills &lt;dir&gt;</td><td>flat Hermes skills root, or only the owned external-root path for a categorized Hermes adapter</td></tr>
                 <tr><td>--grok-skills &lt;dir&gt;</td><td>Grok skills root</td></tr>
               </tbody>
             </table>
+            <p>
+              A <code>hermes-external-skills-root</code> target keeps its manifest
+              <code>home</code> when that override changes its <code>path</code>.
+              Create the external root and register its exact path in
+              <code>&lt;home&gt;/config.yaml</code> under
+              <code>skills.external_dirs</code> before status, diff, or live target
+              mutation. Skill Suitcase never creates the root or edits Hermes
+              configuration.
+              The <code>&lt;category&gt;/&lt;skill&gt;</code> destination is preserved
+              through staging, every target lifecycle command, receipts, and
+              rollback while one receipt remains at the external root.
+            </p>
           </section>
 
           <section>
@@ -118,9 +132,13 @@ skill-suitcase validate --source "$SRC" --strict --json</code></pre>
               <pre><code>skill-suitcase plan --source "$SRC" --target codex --json</code></pre>
               <p>
                 Resolves the selected assignment and emits each skill's action,
-                variant, source path, evidence, and any blocked reason. It does not
-                resolve target install paths, choose install modes, hash content,
-                or read or write live targets.
+                variant, source path, relative destination, evidence, and any
+                blocked reason. Flat targets use the skill name as the destination;
+                categorized Hermes uses <code>&lt;category&gt;/&lt;skill&gt;</code>.
+                It does not resolve target install paths, choose install modes,
+                hash content, or read or write live targets. An assignment exposed
+                through mixed flat and categorized paths requires an explicit path
+                ID as <code>--target</code>.
               </p>
             </div>
 
@@ -139,6 +157,7 @@ skill-suitcase validate --source "$SRC" --strict --json</code></pre>
                 and read-only targets are reported. <code>diff</code> does not run
                 the Git source-hygiene check; <code>pack</code>, plan-lock
                 creation, and <code>apply</code> enforce the untracked-source gate.
+                Planned entries retain their relative destination.
               </p>
             </div>
 
@@ -155,6 +174,7 @@ skill-suitcase status \
                 receipts, and install mode into <code>current</code>,
                 <code>missing</code>, <code>version</code>, <code>behind</code>,
                 <code>dirty</code>, <code>blocked</code>, or <code>unknown</code>.
+                Each status entry includes its resolved relative destination.
                 Those seven values are the complete status enum; see the
                 <a href="safety-model.html">safety model</a> for their meanings and
                 <a href="troubleshooting.html">troubleshooting</a> for responses.
@@ -208,8 +228,10 @@ skill-suitcase pack \
                 Dry-run reports the bundle plan. With <code>--output</code>, pack
                 writes an immutable bundle below the explicit directory and returns
                 its artifact manifest recording source provenance, selected skills,
-                file hashes, planned target entries, and blocked entries. It does
-                not touch the live target.
+                file hashes, planned target entries, relative destinations, and
+                blocked entries. Staged files live under
+                <code>skills/&lt;destination&gt;/</code>, and destination metadata
+                participates in the artifact ID. It does not touch the live target.
               </p>
               <p>
                 Pack refuses output beneath an absolute manifest-declared install
@@ -232,7 +254,9 @@ skill-suitcase pack \
                 <code>apply --lock</code>. <code>assessPlanLock</code> rebuilds
                 current facts and returns drift reasons such as
                 <code>source_commit_changed</code> or
-                <code>file_hashes_changed</code>. See the
+                <code>file_hashes_changed</code>. Plan entries include relative
+                destinations; legacy flat v0 entries without that field are treated
+                as skill-name destinations. See the
                 <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/command-reference.md#plan-lock-creation-library-api">command reference</a>
                 for the worked example.
               </p>
@@ -268,6 +292,10 @@ skill-suitcase pack \
                 current plan and hashes against the lock; artifact mode rebuilds
                 ordinary missing or behind writes from current catalog source and
                 enforces artifact file hashes only for the dirty-behind exception.
+                Categorized apply additionally refuses
+                <code>artifact_destination_mismatch</code> when an artifact's
+                destination differs from the current plan. Existing flat v0
+                artifacts without destination metadata use the skill name.
                 Neither input binds path overrides, the resolved install root, or
                 <code>--mode</code>.
               </p>
@@ -392,6 +420,8 @@ skill-suitcase pack \
                 a refusal. It removes a Suitcase-created symlink only when the link
                 still matches its recorded source, and it does not restore
                 promotions or arbitrary catalog edits.
+                Categorized Hermes records use their nested target and destination
+                while refusing category-parent symlinks or containment escapes.
               </p>
             </div>
 

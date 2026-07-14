@@ -112,11 +112,16 @@ rollback, or mutate live agent homes.
 
 For a categorized Hermes smoke, use a disposable Hermes home, create the owned
 root before Hermes reads its configuration, put that exact path in `config.yaml`
-under `skills.external_dirs`, and declare one plain category segment for every assigned skill. Then run pack/apply/status/diff with
-the `hermes-external-skills-root` assignment path. Confirm the only receipt is
+under `skills.external_dirs`, and declare one safe plain category segment for
+every assigned skill.
+Then run plan/pack/apply/status/diff with the
+`hermes-external-skills-root` assignment path.
+Confirm plan and pack carry `<category>/<skill>` destinations, the only receipt is
 `<external-root>/.skill-suitcase-receipt.json`, every status is `current`, every
 diff entry is `unchanged`, and no path beneath `<hermes-home>/skills` changed.
-Also verify missing registration and a same-name local skill fail before writes.
+Also verify missing registration, local-root overlap, an earlier external root
+overlap or identity shadow, duplicate planned `SKILL.md` identities, a same-name
+local skill, and category symlinks fail before writes.
 
 For a Codex, Claude, Hermes, shared agents, and Grok machine, smoke local target overrides and target-scoped status without requiring OpenClaw paths from the shared catalog to exist:
 

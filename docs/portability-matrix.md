@@ -29,7 +29,8 @@ variants:
 ```
 
 Planning picks the first variant whose `agents` match the resolved platform
-adapter aliases. The planned item carries that variant name and source path
+adapter aliases. The planned item carries that variant name, source path, and
+relative destination
 through `diff`, `pack`, `apply`, `track`, `reconcile`, `repair`,
 `import-target`, receipts, and `status`.
 
@@ -56,7 +57,11 @@ rewrite `variants/<agent>/<name>`.
 ## Generated Packs
 
 Generated packs are immutable snapshots of a resolved plan. They preserve the
-selected `variant`, selected source path, file hashes, and staged file payloads.
+selected `variant`, selected source path, relative destination, file hashes, and
+staged file payloads.
+For categorized Hermes targets, the destination is `<category>/<skill>` and is
+part of the artifact identity; apply refuses an artifact whose destination no
+longer matches the current assignment.
 They do not create or infer a variant model. If a platform needs a different
 source shape, add that model to `variants` in the source catalog first, then
 generate a pack from that catalog state.
