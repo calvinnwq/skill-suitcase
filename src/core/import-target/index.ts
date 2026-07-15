@@ -5,18 +5,20 @@ import path from "node:path";
 import type { TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
 import {
-  RECEIPT_FILE,
   buildInstallRecord,
   buildInstalledFiles,
   readReceipt,
-  rollbackReceiptMutations,
   upsertAndWriteReceipt,
   type Receipt,
-  type ReceiptInstallRecord,
-  type ReceiptLock,
-  type ReceiptMutation,
-  withReceiptLock
+  type ReceiptInstallRecord
 } from "../receipts/index.js";
+import {
+  RECEIPT_ROLLBACK_FAILED,
+  readOptionalReceiptText,
+  receiptRollbackIncompleteMessage,
+  type ReceiptTransaction,
+  withReceiptTransaction
+} from "../receipts/transaction.js";
 import { SYMLINK_MODE } from "../install-modes.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import { status } from "../status/index.js";
@@ -238,9 +240,9 @@ async function executeImport(input: ImportTargetInput, plan: ImportTargetBaseRes
     return applyFailure(plan, "missing_install_root", "could not resolve install root for import-target");
   }
   try {
-    return await withReceiptLock(
+    return await withReceiptTransaction(
       { installRoot },
-      (receiptLock) => executeImportLocked(input, plan, installRoot, receiptLock)
+      (receiptTransaction) => executeImportLocked(input, plan, installRoot, receiptTransaction)
     );
   } catch (error) {
     return applyFailure(plan, "receipt_lock_failed", errorMessage(error));
@@ -251,17 +253,16 @@ async function executeImportLocked(
   input: ImportTargetInput,
   plan: ImportTargetBaseResult,
   installRoot: string,
-  receiptLock: ReceiptLock
+  receiptTransaction: ReceiptTransaction
 ): Promise<ImportTargetApplyResult> {
   try {
-    await readOptionalText(path.join(installRoot, RECEIPT_FILE));
+    await readOptionalReceiptText(installRoot);
   } catch (error) {
     return applyFailure(plan, "invalid_receipt", `Could not read receipt before import-target: ${errorMessage(error)}`);
   }
 
   const importedSkills: string[] = [];
   const completed: Array<{ catalogPath: string; backupPath: string }> = [];
-  const receiptMutations: ReceiptMutation[] = [];
   let importedFiles = 0;
   let receiptPathWritten: string | null = null;
 
@@ -333,8 +334,8 @@ async function executeImportLocked(
         installRoot,
         skillName: candidate.skill,
         installRecord: buildInstallRecord(installRecord),
-        onWritten: (mutation) => receiptMutations.push(mutation),
-        receiptLock
+        onWritten: receiptTransaction.recordMutation,
+        receiptLock: receiptTransaction.receiptLock
       });
       importedSkills.push(candidate.skill);
       importedFiles += installedFiles.length;
@@ -349,7 +350,7 @@ async function executeImportLocked(
       if (copied) {
         await removePath(tmpPath);
       }
-      const receiptRollbackComplete = await restoreCompletedImports({ completed, installRoot, receiptMutations, receiptLock });
+      const receiptRollbackComplete = await restoreCompletedImports({ completed, receiptTransaction });
       importedSkills.length = 0;
       importedFiles = 0;
       completed.length = 0;
@@ -375,8 +376,8 @@ async function executeImportLocked(
             path: catalogPath
           }),
           ...receiptRollbackComplete ? [] : [importError({
-            code: "receipt_rollback_failed",
-            message: "Receipt rollback was incomplete after import-target failed."
+            code: RECEIPT_ROLLBACK_FAILED,
+            message: receiptRollbackIncompleteMessage("import-target failed")
           })]
         ],
         imported: {
@@ -405,7 +406,7 @@ async function executeImportLocked(
     inputTarget: input.target
   });
   if (postStatusErrors.length > 0) {
-    const receiptRollbackComplete = await restoreCompletedImports({ completed, installRoot, receiptMutations, receiptLock });
+    const receiptRollbackComplete = await restoreCompletedImports({ completed, receiptTransaction });
     return {
       ...plan,
       ok: false,
@@ -422,8 +423,8 @@ async function executeImportLocked(
         ...plan.errors,
         ...postStatusErrors,
         ...receiptRollbackComplete ? [] : [importError({
-          code: "receipt_rollback_failed",
-          message: "Receipt rollback was incomplete after import-target verification failed."
+          code: RECEIPT_ROLLBACK_FAILED,
+          message: receiptRollbackIncompleteMessage("import-target verification failed")
         })]
       ],
       imported: {
@@ -458,16 +459,12 @@ async function executeImportLocked(
 
 async function restoreCompletedImports({
   completed,
-  installRoot,
-  receiptMutations,
-  receiptLock
+  receiptTransaction
 }: {
   completed: Array<{ catalogPath: string; backupPath: string }>;
-  installRoot: string;
-  receiptMutations: ReceiptMutation[];
-  receiptLock: ReceiptLock;
+  receiptTransaction: ReceiptTransaction;
 }): Promise<boolean> {
-  const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
+  const receiptRollbackComplete = await receiptTransaction.rollbackRecordedMutations();
   for (const done of [...completed].reverse()) {
     await removePath(done.catalogPath);
     await restorePath(done.backupPath, done.catalogPath);
@@ -1336,17 +1333,6 @@ async function treesMatch(left: string, right: string): Promise<boolean> {
     }
   }
   return true;
-}
-
-async function readOptionalText(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  }
 }
 
 async function removePath(targetPath: string): Promise<void> {

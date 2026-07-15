@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SKILLS_DIRECTORY } from "../../config/defaults.js";
 import { isPathWithinRoot, SYMLINK_MODE } from "../install-modes.js";
@@ -8,12 +8,15 @@ import {
   buildInstallRecord,
   buildInstalledFiles,
   RECEIPT_FILE,
-  rollbackReceiptMutations,
-  type ReceiptMutation,
   upsertAndWriteReceipt,
-  withReceiptLock,
   writeReceipt
 } from "../receipts/index.js";
+import {
+  RECEIPT_ROLLBACK_FAILED,
+  readOptionalReceiptText,
+  receiptRollbackIncompleteMessage,
+  withReceiptTransaction
+} from "../receipts/transaction.js";
 import { readSkillVersion } from "../skill-metadata.js";
 
 /**
@@ -371,7 +374,7 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
   const installRoot = path.dirname(targetSkillPath);
 
   try {
-    return await withReceiptLock({ installRoot }, async (receiptLock) => {
+    return await withReceiptTransaction({ installRoot }, async (receiptTransaction) => {
   // Defense-in-depth re-check: the plan found the catalog path clear, but never
   // copy onto (and then delete) a directory we did not create.
   if (await pathExists(repoSkillPath)) {
@@ -392,12 +395,11 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
 
   const receiptPath = path.join(installRoot, RECEIPT_FILE);
   try {
-    await readOptionalFileText(receiptPath);
+    await readOptionalReceiptText(installRoot);
   } catch (error) {
     result.errors.push({ code: "promote_receipt_failed", message: describeError(error) });
     return result;
   }
-  const receiptMutations: ReceiptMutation[] = [];
 
   // Phase 1: copy the target tree into the catalog source path.
   try {
@@ -482,8 +484,8 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
             }
           }
           : { installs: {} },
-        onWritten: (mutation) => receiptMutations.push(mutation),
-        receiptLock
+        onWritten: receiptTransaction.recordMutation,
+        receiptLock: receiptTransaction.receiptLock
       });
       if (__test.conflictReceiptBeforeFailure === true) {
         await writeFile(receiptPath, `${JSON.stringify({
@@ -522,8 +524,8 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
       installRoot,
       skillName,
       installRecord,
-      onWritten: (mutation) => receiptMutations.push(mutation),
-      receiptLock
+      onWritten: receiptTransaction.recordMutation,
+      receiptLock: receiptTransaction.receiptLock
     });
   } catch (error) {
     // The swap succeeded but the receipt did not: undo the swap and remove the
@@ -531,13 +533,13 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
     await removeLink(targetSkillPath);
     await restorePath(backupPath, targetSkillPath);
     await removeTree(repoSkillPath);
-    const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
+    const receiptRollbackComplete = await receiptTransaction.rollbackRecordedMutations();
     result.backupPath = null;
     result.errors.push({ code: "promote_receipt_failed", message: describeError(error) });
     if (!receiptRollbackComplete) {
       result.errors.push({
-        code: "receipt_rollback_failed",
-        message: "Receipt rollback was incomplete after promote failed."
+        code: RECEIPT_ROLLBACK_FAILED,
+        message: receiptRollbackIncompleteMessage("promote failed")
       });
     }
     return result;
@@ -641,17 +643,6 @@ async function restorePath(from: string, to: string): Promise<void> {
     await rename(from, to);
   } catch {
     // best effort restore only
-  }
-}
-
-async function readOptionalFileText(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if ((error as { code?: string }).code === "ENOENT") {
-      return null;
-    }
-    throw error;
   }
 }
 
