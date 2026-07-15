@@ -508,8 +508,8 @@ await upsertAndWriteReceipt({
 `readReceipt` reads modern receipts or migrates legacy `.skills-sync.json` data in memory without writing, while `writeReceipt` replaces the full receipt payload.
 All receipt writers serialize through a receipt-local lock, replace receipt files atomically, preserve an existing receipt's permissions, and create new receipts with mode `0600`.
 `updateAndWriteReceipt` performs an arbitrary read-modify-write while holding that lock.
-Use `withReceiptLock` to serialize a multi-step transaction, and pass its callback token to nested receipt writers so they reuse the active lock.
-Writers can report `ReceiptMutation` values through `onWritten`; `rollbackReceiptMutations` reverses only those writes and returns `false` rather than overwriting a conflicting concurrent update.
+Core live-mutation workflows that need receipt unwind use `withReceiptTransaction`; pass its `receiptLock` and `recordMutation` members to nested receipt writers, then call `rollbackRecordedMutations` if the workflow fails.
+`withReceiptLock`, `ReceiptMutation`, and `rollbackReceiptMutations` remain the lower-level primitives for transactions with intentionally different semantics, including prune's journaled quarantine transaction and rollback's single guarded receipt update.
 The lock is released when its callback ends, and orphaned locks from terminated processes are recovered automatically.
 Custom receipt paths must remain inside `installRoot`, and multiple installs for one skill are represented as an array under that skill name.
 Managed workflows write each install's relative `destination`.

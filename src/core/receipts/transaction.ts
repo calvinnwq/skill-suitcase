@@ -12,7 +12,7 @@ import {
  * Shared receipt transaction for live mutation workflows (apply, reconcile,
  * repair, promote, and import-target).
  *
- * Every one of those workflows repeats the same mechanics around a mutation:
+ * Each of those workflows needs the same mechanics around a mutation:
  * hold the receipt-local lock for the whole mutation, accumulate each receipt
  * write as a {@link ReceiptMutation}, and, when the workflow fails partway,
  * revert the accumulated receipt writes and report when that revert could not
@@ -66,9 +66,10 @@ export async function withReceiptTransaction<T>(
 }
 
 /**
- * Read the modern receipt text at the install root, or null when absent. Live
- * mutation workflows call this before their first write so an unreadable
- * receipt refuses the mutation instead of failing after target files moved.
+ * Read the modern receipt text at the install root, or null when absent.
+ * Reconcile, repair, promote, and import-target call this before their first
+ * write so an unreadable receipt refuses the mutation instead of failing after
+ * target files moved.
  */
 export async function readOptionalReceiptText(installRoot: string): Promise<string | null> {
   try {
