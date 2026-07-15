@@ -13,14 +13,17 @@ import {
   buildInstallRecord,
   buildInstalledFiles,
   readReceipt,
-  rollbackReceiptMutations,
   upsertAndWriteReceipt,
-  withReceiptLock,
   type Receipt,
   type ReceiptInstalledFile,
-  type ReceiptInstallRecord,
-  type ReceiptMutation
+  type ReceiptInstallRecord
 } from "../receipts/index.js";
+import {
+  RECEIPT_ROLLBACK_FAILED,
+  receiptRollbackIncompleteMessage,
+  type ReceiptTransaction,
+  withReceiptTransaction
+} from "../receipts/transaction.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import { checkSelectedSourceHygiene } from "../source-hygiene.js";
 import { status } from "../status/index.js";
@@ -326,7 +329,7 @@ export async function apply({
   }
 
   try {
-    return await withReceiptLock({ installRoot }, async (receiptLock) => {
+    return await withReceiptTransaction({ installRoot }, async (receiptTransaction) => {
     const preStatus = await status({
     source: diffResult.source,
     target: resolutionTarget,
@@ -439,7 +442,7 @@ export async function apply({
       target,
       statusTarget: resolutionTarget,
       sourcePolicy: manifest.sourcePolicy,
-      receiptLock,
+      receiptTransaction,
       __test
     });
   }
@@ -578,8 +581,6 @@ export async function apply({
     successfulWritesRef.value = writeResult.successfulWrites;
   }
 
-  const receiptMutations: ReceiptMutation[] = [];
-
   const sourceCommit = context.sourceCommit;
   const backupPaths = restorePlan
     .map((plannedRestore) => plannedRestore.backupPath)
@@ -659,8 +660,8 @@ export async function apply({
         installRoot,
         skillName: skill,
         installRecord: buildInstallRecord(nextRecord),
-        onWritten: (mutation) => receiptMutations.push(mutation),
-        receiptLock
+        onWritten: receiptTransaction.recordMutation,
+        receiptLock: receiptTransaction.receiptLock
       });
     }
   } catch (error) {
@@ -668,11 +669,7 @@ export async function apply({
       restorePlan,
       installRoot
     });
-    const receiptRollbackComplete = await rollbackReceiptMutations({
-      installRoot,
-      mutations: receiptMutations,
-      receiptLock
-    });
+    const receiptRollbackComplete = await receiptTransaction.rollbackRecordedMutations();
     return failure({
       source: diffResult.source,
       target,
@@ -694,8 +691,8 @@ export async function apply({
         code: "apply_recovery_failed",
         message
       })), ...receiptRollbackComplete ? [] : [{
-        code: "receipt_rollback_failed",
-        message: "Receipt rollback was incomplete after apply failed."
+        code: RECEIPT_ROLLBACK_FAILED,
+        message: receiptRollbackIncompleteMessage("apply failed")
       }]]
     });
   }
@@ -838,7 +835,7 @@ async function applySymlinkInstalls({
   target,
   statusTarget,
   sourcePolicy,
-  receiptLock,
+  receiptTransaction,
   __test
 }: {
   diffResult: DiffForApply;
@@ -851,7 +848,7 @@ async function applySymlinkInstalls({
   target: string;
   statusTarget: string;
   sourcePolicy: SourcePolicy | undefined;
-  receiptLock: import("../receipts/index.js").ReceiptLock;
+  receiptTransaction: ReceiptTransaction;
   __test: ApplyInput["__test"];
 }): Promise<ApplyResult> {
   const sourceRoot = diffResult.source;
@@ -932,7 +929,6 @@ async function applySymlinkInstalls({
 
   // Phase 2: create links (only for missing targets) and write symlink receipts.
   const previousReceipt = await readReceipt({ installRoot }).catch((): Receipt => ({}));
-  const receiptMutations: ReceiptMutation[] = [];
   const linkedSkills: string[] = [];
   const createdLinks: Array<{ targetPath: string; sourcePath: string }> = [];
   try {
@@ -1005,8 +1001,8 @@ async function applySymlinkInstalls({
         installRoot,
         skillName: item.skill,
         installRecord: buildInstallRecord(nextRecord),
-        onWritten: (mutation) => receiptMutations.push(mutation),
-        receiptLock
+        onWritten: receiptTransaction.recordMutation,
+        receiptLock: receiptTransaction.receiptLock
       });
       linkedSkills.push(item.skill);
     }
@@ -1040,13 +1036,13 @@ async function applySymlinkInstalls({
         });
       }
     }
-    const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
+    const receiptRollbackComplete = await receiptTransaction.rollbackRecordedMutations();
     return failSymlink([{
       code: "symlink_write_error",
       message: error instanceof Error ? error.message : "Unknown symlink write error"
     }, ...cleanupErrors, ...receiptRollbackComplete ? [] : [{
-      code: "receipt_rollback_failed",
-      message: "Receipt rollback was incomplete after symlink apply failed."
+      code: RECEIPT_ROLLBACK_FAILED,
+      message: receiptRollbackIncompleteMessage("symlink apply failed")
     }]]);
   }
 

@@ -5,15 +5,17 @@ import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
 import {
-  RECEIPT_FILE,
   buildInstallRecord,
   buildInstalledFiles,
-  rollbackReceiptMutations,
-  type ReceiptLock,
-  type ReceiptMutation,
-  upsertAndWriteReceipt,
-  withReceiptLock
+  upsertAndWriteReceipt
 } from "../receipts/index.js";
+import {
+  RECEIPT_ROLLBACK_FAILED,
+  readOptionalReceiptText,
+  receiptRollbackIncompleteMessage,
+  type ReceiptTransaction,
+  withReceiptTransaction
+} from "../receipts/transaction.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import {
   collectSourcePolicyDeniedPaths,
@@ -486,9 +488,9 @@ async function executeReconcile(input: ReconcileInput, plan: ReconcileBaseResult
     return applyFailure(plan, "missing_install_root", "could not resolve install root for reconcile");
   }
   try {
-    return await withReceiptLock(
+    return await withReceiptTransaction(
       { installRoot },
-      (receiptLock) => executeReconcileLocked(input, plan, installRoot, receiptLock)
+      (receiptTransaction) => executeReconcileLocked(input, plan, installRoot, receiptTransaction)
     );
   } catch (error) {
     return applyFailure(plan, "receipt_lock_failed", errorMessage(error));
@@ -499,17 +501,16 @@ async function executeReconcileLocked(
   input: ReconcileInput,
   plan: ReconcileBaseResult,
   installRoot: string,
-  receiptLock: ReceiptLock
+  receiptTransaction: ReceiptTransaction
 ): Promise<ReconcileApplyResult> {
   try {
-    await readOptionalText(path.join(installRoot, RECEIPT_FILE));
+    await readOptionalReceiptText(installRoot);
   } catch (error) {
     return applyFailure(plan, "invalid_receipt", `Could not read receipt before reconcile: ${errorMessage(error)}`);
   }
 
   const reconciledSkills: string[] = [];
   const backups: ReconciledBackup[] = [];
-  const receiptMutations: ReceiptMutation[] = [];
   let reconciledFiles = 0;
   let receiptPathWritten: string | null = null;
   const { manifest } = await loadCatalog(input.source, { targetOverrides: input.targetOverrides });
@@ -597,8 +598,8 @@ async function executeReconcileLocked(
         installRoot,
         skillName: candidate.skill,
         installRecord: buildInstallRecord(installRecord),
-        onWritten: (mutation) => receiptMutations.push(mutation),
-        receiptLock
+        onWritten: receiptTransaction.recordMutation,
+        receiptLock: receiptTransaction.receiptLock
       });
       reconciledSkills.push(candidate.skill);
       reconciledFiles += installedFiles.length;
@@ -630,7 +631,7 @@ async function executeReconcileLocked(
           recoveryErrors.push(`Temporary reconcile copy retained at ${tmpPath}: ${errorMessage(cleanupError)}`);
         }
       }
-      const receiptRollbackComplete = await rollbackReceiptMutations({ installRoot, mutations: receiptMutations, receiptLock });
+      const receiptRollbackComplete = await receiptTransaction.rollbackRecordedMutations();
       for (const completed of backups.reverse()) {
         const completedRecoveryErrors = await recoverReconciledTarget({
           targetPath: completed.targetPath,
@@ -672,8 +673,8 @@ async function executeReconcileLocked(
             message
           })),
           ...receiptRollbackComplete ? [] : [reconcileError({
-            code: "receipt_rollback_failed",
-            message: "Receipt rollback was incomplete after reconcile failed."
+            code: RECEIPT_ROLLBACK_FAILED,
+            message: receiptRollbackIncompleteMessage("reconcile failed")
           })]
         ],
         reconciled: {
@@ -1456,17 +1457,6 @@ function hasPathAncestor(ancestors: string[], candidate: string): boolean {
     const relativePath = path.relative(ancestor, candidate);
     return relativePath !== "" && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
   });
-}
-
-async function readOptionalText(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  }
 }
 
 async function removePath(targetPath: string): Promise<void> {
