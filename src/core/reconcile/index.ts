@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
@@ -18,11 +18,18 @@ import {
 } from "../receipts/transaction.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import {
-  collectSourcePolicyDeniedPaths,
   sourcePolicyDecision,
   sourcePolicyPrunesDirectory,
   type SourcePolicy
 } from "../source-policy.js";
+import {
+  beginStagedSwap,
+  hashDirectory,
+  listDirectories,
+  listFiles,
+  recoverSwappedTarget,
+  transactionDirectoryForTarget
+} from "../staged-swap.js";
 import { status } from "../status/index.js";
 
 type ReconcileInput = {
@@ -520,34 +527,29 @@ async function executeReconcileLocked(
     const transactionDirectory = transactionDirectoryForTarget(candidate.targetPath, installRoot);
     const backupPath = path.join(transactionDirectory, `.${candidate.skill}.suitcase-pre-reconcile-${uniqueSuffix()}`);
     const tmpPath = path.join(transactionDirectory, `.${candidate.skill}.suitcase-reconcile-next-${uniqueSuffix()}`);
-    let copied = false;
-    let backedUp = false;
-    let installed = false;
+    const swap = beginStagedSwap({
+      installRoot,
+      sourcePath: candidate.sourcePath,
+      targetPath: candidate.targetPath,
+      backupPath,
+      stagingPath: tmpPath,
+      workflow: "reconcile",
+      requireDirectoryParents: true,
+      sourcePolicy
+    });
 
     try {
       await input.__test?.beforeMutationForSkill?.(candidate.skill);
-      await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
-      await ensureTransactionDirectory(transactionDirectory, installRoot);
-      await assertTargetParentInsideInstallRoot(tmpPath, installRoot);
-      await assertSourcePolicyAllowsSource(candidate.sourcePath, sourcePolicy);
-      await copyTree(candidate.sourcePath, tmpPath, sourcePolicy);
-      copied = true;
+      await swap.stageSourceTree();
       await input.__test?.afterStagingForSkill?.(candidate.skill, tmpPath);
-      if (!(await treesMatch(candidate.sourcePath, tmpPath, sourcePolicy))) {
+      if (!(await swap.stagedTreeMatchesSource())) {
         throw new Error(`Temporary reconcile copy for ${candidate.skill} does not match catalog source.`);
       }
-      await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
-      await assertTargetParentInsideInstallRoot(backupPath, installRoot);
-      await rename(candidate.targetPath, backupPath);
-      backedUp = true;
+      await swap.moveTargetToBackup();
       if (input.__test?.failAfterBackup === true || input.__test?.failAfterBackupForSkill === candidate.skill) {
         throw new Error("Injected failure after backup.");
       }
-      await assertTargetParentInsideInstallRoot(candidate.targetPath, installRoot);
-      await assertTargetParentInsideInstallRoot(tmpPath, installRoot);
-      await rename(tmpPath, candidate.targetPath);
-      installed = true;
-      copied = false;
+      await swap.installStagedTree();
 
       if (input.__test?.failBeforeReceipt === true) {
         throw new Error("Injected failure before receipt.");
@@ -612,33 +614,21 @@ async function executeReconcileLocked(
       await input.__test?.beforeFailureRecoveryForSkill?.(candidate.skill);
       const recoveryErrors: string[] = [];
       const retainedBackups: ReconciledBackup[] = [];
-      const candidateRecoveryErrors = await recoverReconciledTarget({
-        targetPath: candidate.targetPath,
-        backupPath,
-        installed,
-        backedUp,
-        installRoot
-      });
-      recoveryErrors.push(...candidateRecoveryErrors);
-      if (backedUp && candidateRecoveryErrors.length > 0) {
+      const candidateRecovery = await swap.recoverAfterFailure();
+      recoveryErrors.push(...candidateRecovery.errors);
+      if (candidateRecovery.backupRetained) {
         retainedBackups.push({ skill: candidate.skill, targetPath: candidate.targetPath, backupPath });
-      }
-      if (copied) {
-        try {
-          await assertTargetParentInsideInstallRoot(tmpPath, installRoot);
-          await removePath(tmpPath);
-        } catch (cleanupError) {
-          recoveryErrors.push(`Temporary reconcile copy retained at ${tmpPath}: ${errorMessage(cleanupError)}`);
-        }
       }
       const receiptRollbackComplete = await receiptTransaction.rollbackRecordedMutations();
       for (const completed of backups.reverse()) {
-        const completedRecoveryErrors = await recoverReconciledTarget({
+        const completedRecoveryErrors = await recoverSwappedTarget({
           targetPath: completed.targetPath,
           backupPath: completed.backupPath,
           installed: true,
           backedUp: true,
-          installRoot
+          installRoot,
+          requireDirectoryParents: true,
+          workflow: "reconcile"
         });
         recoveryErrors.push(...completedRecoveryErrors);
         if (completedRecoveryErrors.length > 0) retainedBackups.push(completed);
@@ -719,89 +709,6 @@ async function executeReconcileLocked(
     receiptPath: receiptPathWritten,
     postReconcileStatus
   };
-}
-
-async function assertTargetParentInsideInstallRoot(targetPath: string, installRoot: string): Promise<void> {
-  const lexicalRoot = path.resolve(installRoot);
-  const lexicalParent = path.resolve(path.dirname(targetPath));
-  if (!isSameOrInsidePath(lexicalParent, lexicalRoot)) {
-    throw new Error(`Target parent ${lexicalParent} escapes install root ${lexicalRoot}.`);
-  }
-  let current = lexicalRoot;
-  for (const part of path.relative(lexicalRoot, lexicalParent).split(path.sep).filter(Boolean)) {
-    current = path.join(current, part);
-    const info = await lstat(current);
-    if (info.isSymbolicLink()) {
-      throw new Error(`Target parent component ${current} is a symlink.`);
-    }
-    if (!info.isDirectory()) {
-      throw new Error(`Target parent component ${current} is not a directory.`);
-    }
-  }
-  const [resolvedRoot, resolvedParent] = await Promise.all([
-    realpath(installRoot),
-    realpath(path.dirname(targetPath))
-  ]);
-  if (!isSameOrInsidePath(resolvedParent, resolvedRoot)) {
-    throw new Error(`Target parent ${path.dirname(targetPath)} resolves outside install root ${installRoot}.`);
-  }
-}
-
-async function ensureTransactionDirectory(transactionDirectory: string, installRoot: string): Promise<void> {
-  try {
-    const info = await lstat(transactionDirectory);
-    if (info.isSymbolicLink() || !info.isDirectory()) {
-      throw new Error(`Transaction directory ${transactionDirectory} must be a real directory.`);
-    }
-  } catch (error) {
-    if (!isNodeError(error) || error.code !== "ENOENT") throw error;
-    await mkdir(transactionDirectory, { recursive: false });
-  }
-  await assertTargetParentInsideInstallRoot(path.join(transactionDirectory, ".transaction-check"), installRoot);
-}
-
-function transactionDirectoryForTarget(targetPath: string, installRoot: string): string {
-  return path.dirname(path.relative(installRoot, targetPath)) === "."
-    ? path.dirname(targetPath)
-    : path.join(installRoot, ".archive");
-}
-
-async function recoverReconciledTarget({
-  targetPath,
-  backupPath,
-  installed,
-  backedUp,
-  installRoot
-}: {
-  targetPath: string;
-  backupPath: string;
-  installed: boolean;
-  backedUp: boolean;
-  installRoot: string;
-}): Promise<string[]> {
-  const errors: string[] = [];
-  let targetReady = true;
-  if (installed) {
-    try {
-      await assertTargetParentInsideInstallRoot(targetPath, installRoot);
-      await removePath(targetPath);
-    } catch (error) {
-      targetReady = false;
-      errors.push(`Could not safely remove failed reconcile target ${targetPath}: ${errorMessage(error)}`);
-    }
-  }
-  if (backedUp && targetReady) {
-    try {
-      await assertTargetParentInsideInstallRoot(targetPath, installRoot);
-      await assertTargetParentInsideInstallRoot(backupPath, installRoot);
-      await restorePath(backupPath, targetPath);
-    } catch (error) {
-      errors.push(`Could not restore ${targetPath}; backup retained at ${backupPath}: ${errorMessage(error)}`);
-    }
-  } else if (backedUp) {
-    errors.push(`Backup retained at ${backupPath} because ${targetPath} could not be safely cleared.`);
-  }
-  return errors;
 }
 
 function postStatusCurrentErrors({
@@ -1205,74 +1112,6 @@ async function validateDirectoryEntries(
   return { ok: true };
 }
 
-async function copyTree(
-  sourcePath: string,
-  targetPath: string,
-  sourcePolicy?: SourcePolicy | undefined,
-  sourceRoot = sourcePath
-): Promise<void> {
-  if (isSameOrInsidePath(targetPath, sourcePath)) {
-    throw new Error(`Refusing to copy ${sourcePath} into nested destination ${targetPath}.`);
-  }
-  await mkdir(targetPath, { recursive: true });
-  const entries = await readdir(sourcePath, { withFileTypes: true });
-  for (const entry of entries) {
-    const from = path.join(sourcePath, entry.name);
-    const relativePath = path.relative(sourceRoot, from);
-    const policyDecision = sourcePolicy === undefined
-      ? { action: "include" as const, pattern: null }
-      : sourcePolicyDecision(relativePath, sourcePolicy);
-    if (policyDecision.action === "deny") {
-      throw new Error(`source policy denies path ${relativePath}`);
-    }
-    if (policyDecision.action === "exclude") {
-      continue;
-    }
-    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
-      continue;
-    }
-    const to = path.join(targetPath, entry.name);
-    if (entry.isDirectory()) {
-      if (sourcePolicy !== undefined && sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
-        continue;
-      }
-      await copyTree(from, to, sourcePolicy, sourceRoot);
-      continue;
-    }
-    if (entry.isFile()) {
-      await copyFile(from, to);
-    }
-  }
-}
-
-async function treesMatch(left: string, right: string, sourcePolicy?: SourcePolicy | undefined): Promise<boolean> {
-  const [leftFiles, rightFiles] = await Promise.all([
-    buildFileHashes(left, sourcePolicy),
-    buildFileHashes(right)
-  ]);
-  if (leftFiles.length !== rightFiles.length) {
-    return false;
-  }
-  for (let index = 0; index < leftFiles.length; index += 1) {
-    const leftFile = leftFiles[index];
-    const rightFile = rightFiles[index];
-    if (leftFile === undefined || rightFile === undefined || leftFile.path !== rightFile.path || leftFile.hash !== rightFile.hash) {
-      return false;
-    }
-  }
-  return true;
-}
-
-async function assertSourcePolicyAllowsSource(root: string, sourcePolicy?: SourcePolicy | undefined): Promise<void> {
-  if (sourcePolicy === undefined) {
-    return;
-  }
-  const deniedPaths = await collectSourcePolicyDeniedPaths(root, sourcePolicy);
-  if (deniedPaths.length > 0) {
-    throw new Error(`source policy denies paths (${deniedPaths.join(", ")})`);
-  }
-}
-
 async function buildRollbackFiles({
   previousTargetPath,
   appliedTargetPath
@@ -1361,87 +1200,6 @@ async function readRollbackFileState(filePath: string): Promise<RollbackFileStat
   }
 }
 
-async function hashDirectory(root: string, sourcePolicy?: SourcePolicy | undefined): Promise<string> {
-  await assertSourcePolicyAllowsSource(root, sourcePolicy);
-  const files = await listFiles(root, "", sourcePolicy);
-  const digest = createHash("sha256");
-  for (const relativePath of files) {
-    const bytes = await readFile(path.join(root, relativePath));
-    digest.update(relativePath);
-    digest.update("\0");
-    digest.update(bytes);
-    digest.update("\0");
-  }
-  return digest.digest("hex");
-}
-
-async function buildFileHashes(root: string, sourcePolicy?: SourcePolicy | undefined): Promise<Array<{ path: string; hash: string }>> {
-  const files = await listFiles(root, "", sourcePolicy);
-  const records = [];
-  for (const relativePath of files) {
-    const bytes = await readFile(path.join(root, relativePath));
-    records.push({
-      path: relativePath,
-      hash: createHash("sha256").update(bytes).digest("hex")
-    });
-  }
-  return records.sort((left, right) => left.path.localeCompare(right.path));
-}
-
-async function listFiles(
-  root: string,
-  prefix = "",
-  sourcePolicy?: SourcePolicy | undefined
-): Promise<string[]> {
-  const entries = await readdir(root, { withFileTypes: true });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const relativePath = prefix.length > 0 ? path.join(prefix, entry.name) : entry.name;
-    const policyDecision = sourcePolicy === undefined
-      ? { action: "include" as const, pattern: null }
-      : sourcePolicyDecision(relativePath, sourcePolicy);
-    if (policyDecision.action === "deny") {
-      throw new Error(`source policy denies path ${relativePath}`);
-    }
-    if (policyDecision.action === "exclude") {
-      continue;
-    }
-    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
-      continue;
-    }
-
-    const entryPath = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      if (sourcePolicy !== undefined && sourcePolicyPrunesDirectory(relativePath, sourcePolicy)) {
-        continue;
-      }
-      files.push(...(await listFiles(entryPath, relativePath, sourcePolicy)));
-      continue;
-    }
-    if (entry.isFile()) {
-      files.push(relativePath);
-    }
-  }
-
-  return files.sort();
-}
-
-async function listDirectories(root: string): Promise<string[]> {
-  const entries = await readdir(root, { withFileTypes: true });
-  const directories: string[] = [];
-
-  for (const entry of entries) {
-    const entryPath = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      directories.push(entry.name);
-      directories.push(...(await listDirectories(entryPath)).map((item) => path.join(entry.name, item)));
-    }
-  }
-
-  return directories.sort();
-}
-
 function compareDeepestPathFirst(left: string, right: string): number {
   const depthDifference = right.split(path.sep).length - left.split(path.sep).length;
   return depthDifference === 0 ? left.localeCompare(right) : depthDifference;
@@ -1457,14 +1215,6 @@ function hasPathAncestor(ancestors: string[], candidate: string): boolean {
     const relativePath = path.relative(ancestor, candidate);
     return relativePath !== "" && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
   });
-}
-
-async function removePath(targetPath: string): Promise<void> {
-  await rm(targetPath, { recursive: true, force: true });
-}
-
-async function restorePath(from: string, to: string): Promise<void> {
-  await rename(from, to);
 }
 
 function reconcileError({
