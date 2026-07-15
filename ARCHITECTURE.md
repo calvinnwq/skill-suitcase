@@ -44,6 +44,7 @@ src/
     track/
     reconcile/
     repair/
+    staged-swap.ts
     prune/
     promote/
     import-target/
@@ -97,6 +98,8 @@ Command modules should stay thin because they adapt parsed CLI arguments to core
 - apply/install workflows
 - rollback, reconcile, repair, prune, import-target, and existing-install adoption
   workflows
+- staged-directory replacement and recovery mechanics shared only by reconcile
+  and repair
 - upstream-managed catalog source refresh workflows
 - install mode classification and safety checks
 - receipt creation and validation
