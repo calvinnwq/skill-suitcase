@@ -102,7 +102,7 @@ Command modules should stay thin because they adapt parsed CLI arguments to core
   and repair
 - upstream-managed catalog source refresh workflows
 - install mode classification and safety checks
-- receipt creation and validation
+- receipt creation, validation, and mutation transactions
 - catalog, manifest, target, and validation rules
 
 Core modules must not depend on command modules, help text, stdout/stderr, or
@@ -501,6 +501,38 @@ Promotion must preserve the original target in a backup path.
 The current rollback command does not restore that backup, so promotion recovery remains a separate manual decision.
 Do not remove the original target directory before the repo copy has been verified.
 If a conflict exists, such as an existing repo skill name or unsafe path, report it as a machine-readable planning error before mutation.
+
+## Shared Mutation Boundaries
+
+Two narrow modules under `src/core/` own mutation mechanics that live mutation workflows share.
+They are durable core behavior, not `src/shared/` helpers, and neither module depends on command modules, renderers, CLI arguments, or process output.
+Both boundaries preserve the existing JSON, error, receipt, and status contracts.
+
+### Receipt transactions
+
+`src/core/receipts/transaction.ts` owns the receipt-lock lifecycle, mutation journaling, and receipt rollback mechanics for `apply` (copy and symlink), `reconcile`, `repair`, `promote`, and `import-target`.
+`withReceiptTransaction` holds the receipt-local lock for the whole mutation, which serializes receipt mutation across concurrent workflows.
+It records each successful receipt write and reverts the recorded writes in reverse order when the surrounding filesystem workflow fails.
+When that revert cannot complete, the shared `receipt_rollback_failed` incomplete-rollback report lets the workflow surface the retained receipt state alongside its own failure.
+`readOptionalReceiptText` gives `reconcile`, `repair`, `promote`, and `import-target` a pre-mutation receipt readability check so an unreadable receipt refuses the mutation before target files move.
+The transaction helpers own only those mechanics.
+Workflow policy, planning, validation, filesystem rollback, error codes other than the shared incomplete-rollback report, and command result construction stay in the owning workflow modules.
+
+### Staged directory swap
+
+`src/core/staged-swap.ts` is a narrow filesystem boundary shared only by `repair` and `reconcile`.
+It stages a policy-aware copy of catalog source in a validated transaction directory, verifies the staged tree against the source, moves the live target to a workflow-named backup, moves the staged tree into place, and recovers from failure by restoring backups and cleaning incomplete staged copies.
+Recovery never throws; it returns structured recovery facts, including retained backup paths, that the owning workflow reports through its existing result shape.
+
+Repair and reconcile keep their workflow-specific behavior: candidate planning and refusal policy, backup and staging names, receipt install records including repair's prior-state hashes, rollback metadata collection, error codes and message wording, injected-failure test seams, and post-operation status verification.
+Their intentional safety differences also stay explicit: reconcile rejects a non-directory target parent component, while repair deliberately does not.
+
+### Separation decisions
+
+- `prune` keeps its own persistent journaled quarantine transaction because its durability semantics differ from the in-memory receipt mutation journal.
+- `rollback` keeps its single guarded receipt update because receipt rollback state is its product rather than an unwind mechanism.
+
+`tests/receipt-transaction.test.ts` and `tests/staged-swap.test.ts` exercise these boundaries directly, and `pnpm run architecture:check` enforces the layer rules that keep them free of command, renderer, and process-output dependencies.
 
 ## Mutation Boundaries
 
