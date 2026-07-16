@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
-import type { Dirent, Stats } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { rename } from "node:fs/promises";
 import path from "node:path";
 import type { TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
@@ -22,6 +20,16 @@ import {
 import { SYMLINK_MODE } from "../install-modes.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import { status } from "../status/index.js";
+import {
+  assertCategorizedTargetParentInsideInstallRoot,
+  copyTree,
+  hashDirectory,
+  isSameOrInsidePath,
+  removePath,
+  restorePath,
+  treesMatch,
+  validateDirectoryTree
+} from "./tree-operations.js";
 
 export type ImportTargetInput = {
   source: string;
@@ -1143,214 +1151,6 @@ function refusedSkillsFromErrors(errors: ImportTargetError[]): string[] {
   )].sort();
 }
 
-type DirectoryTreeValidationResult =
-  | { ok: true }
-  | { ok: false; error: ImportTargetError };
-
-async function validateDirectoryTree(
-  rootPath: string,
-  codes: {
-    symlinkCode: string;
-    unreadableCode: string;
-    missingCode: string;
-    label: string;
-  }
-): Promise<DirectoryTreeValidationResult> {
-  let info: Stats;
-  try {
-    info = await lstat(rootPath);
-  } catch (error) {
-    return {
-      ok: false,
-      error: importError({
-        code: isNodeError(error) && error.code === "ENOENT" ? codes.missingCode : codes.unreadableCode,
-        message: `${codes.label} directory ${rootPath} could not be read: ${errorMessage(error)}`,
-        path: rootPath
-      })
-    };
-  }
-
-  if (info.isSymbolicLink()) {
-    return {
-      ok: false,
-      error: importError({
-        code: codes.symlinkCode,
-        message: `${codes.label} directory ${rootPath} is a symlink and cannot be imported safely.`,
-        path: rootPath
-      })
-    };
-  }
-
-  if (!info.isDirectory()) {
-    return {
-      ok: false,
-      error: importError({
-        code: codes.unreadableCode,
-        message: `${codes.label} path ${rootPath} is not a directory.`,
-        path: rootPath
-      })
-    };
-  }
-
-  return validateDirectoryEntries(rootPath, rootPath, codes);
-}
-
-async function validateDirectoryEntries(
-  rootPath: string,
-  currentPath: string,
-  codes: {
-    symlinkCode: string;
-    unreadableCode: string;
-    missingCode: string;
-    label: string;
-  }
-): Promise<DirectoryTreeValidationResult> {
-  let entries: Dirent[];
-  try {
-    entries = await readdir(currentPath, { withFileTypes: true });
-  } catch (error) {
-    return {
-      ok: false,
-      error: importError({
-        code: codes.unreadableCode,
-        message: `${codes.label} directory ${rootPath} could not be scanned: ${errorMessage(error)}`,
-        path: currentPath
-      })
-    };
-  }
-
-  for (const entry of entries) {
-    const entryPath = path.join(currentPath, entry.name);
-    if (entry.isSymbolicLink()) {
-      return {
-        ok: false,
-        error: importError({
-          code: codes.symlinkCode,
-          message: `${codes.label} tree ${rootPath} contains a symlink at ${entryPath} and cannot be imported safely.`,
-          path: entryPath
-        })
-      };
-    }
-    if (entry.isDirectory()) {
-      const nested = await validateDirectoryEntries(rootPath, entryPath, codes);
-      if (!nested.ok) {
-        return nested;
-      }
-      continue;
-    }
-    if (entry.isFile()) {
-      continue;
-    }
-    return {
-      ok: false,
-      error: importError({
-        code: codes.symlinkCode,
-        message: `${codes.label} tree ${rootPath} contains an unsupported filesystem entry at ${entryPath} and cannot be imported safely.`,
-        path: entryPath
-      })
-    };
-  }
-  return { ok: true };
-}
-
-async function hashDirectory(root: string): Promise<string> {
-  const files = await listFiles(root);
-  const digest = createHash("sha256");
-  for (const relativePath of files) {
-    const bytes = await readFile(path.join(root, relativePath));
-    digest.update(relativePath);
-    digest.update("\0");
-    digest.update(bytes);
-    digest.update("\0");
-  }
-  return digest.digest("hex");
-}
-
-async function listFiles(root: string): Promise<string[]> {
-  const entries = await readdir(root, { withFileTypes: true });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
-      continue;
-    }
-
-    const entryPath = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await listFiles(entryPath)).map((item) => path.join(entry.name, item)));
-      continue;
-    }
-    if (entry.isFile()) {
-      files.push(entry.name);
-    }
-  }
-
-  return files.sort();
-}
-
-async function copyTree(
-  sourcePath: string,
-  targetPath: string,
-  options: { failAfterCreate?: boolean } = {}
-): Promise<void> {
-  if (isSameOrInsidePath(targetPath, sourcePath)) {
-    throw new Error(`Refusing to copy ${sourcePath} into nested destination ${targetPath}.`);
-  }
-  await mkdir(targetPath, { recursive: true });
-  if (options.failAfterCreate === true) {
-    throw new Error("Injected failure during copy.");
-  }
-  const entries = await readdir(sourcePath, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) {
-      continue;
-    }
-    const from = path.join(sourcePath, entry.name);
-    const to = path.join(targetPath, entry.name);
-    if (entry.isDirectory()) {
-      await copyTree(from, to);
-      continue;
-    }
-    if (entry.isFile()) {
-      await copyFile(from, to);
-    }
-  }
-}
-
-async function treesMatch(left: string, right: string): Promise<boolean> {
-  const [leftFiles, rightFiles] = await Promise.all([
-    buildInstalledFiles(left),
-    buildInstalledFiles(right)
-  ]);
-  if (leftFiles.length !== rightFiles.length) {
-    return false;
-  }
-  for (let index = 0; index < leftFiles.length; index += 1) {
-    const leftFile = leftFiles[index];
-    const rightFile = rightFiles[index];
-    if (leftFile === undefined || rightFile === undefined || leftFile.path !== rightFile.path || leftFile.hash !== rightFile.hash) {
-      return false;
-    }
-  }
-  return true;
-}
-
-async function removePath(targetPath: string): Promise<void> {
-  try {
-    await rm(targetPath, { recursive: true, force: true });
-  } catch {
-    // best effort cleanup only
-  }
-}
-
-async function restorePath(from: string, to: string): Promise<void> {
-  try {
-    await rename(from, to);
-  } catch {
-    // best effort restore only
-  }
-}
-
 function uniqueSuffix(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -1385,47 +1185,6 @@ function isPlainPathSegment(value: string): boolean {
     value !== ".." &&
     !value.includes("/") &&
     !value.includes("\\");
-}
-
-function isSameOrInsidePath(candidatePath: string, rootPath: string): boolean {
-  const relativePath = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
-  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
-}
-
-async function assertCategorizedTargetParentInsideInstallRoot(targetPath: string, installRoot: string): Promise<void> {
-  const lexicalRoot = path.resolve(installRoot);
-  const lexicalParent = path.resolve(path.dirname(targetPath));
-  const relativeParent = path.relative(lexicalRoot, lexicalParent);
-  if (relativeParent === "") {
-    return;
-  }
-  if (relativeParent.startsWith("..") || path.isAbsolute(relativeParent)) {
-    throw new Error(`Target parent ${lexicalParent} escapes install root ${lexicalRoot}.`);
-  }
-
-  let current = lexicalRoot;
-  for (const part of relativeParent.split(path.sep).filter(Boolean)) {
-    current = path.join(current, part);
-    const info = await lstat(current);
-    if (info.isSymbolicLink()) {
-      throw new Error(`Target parent component ${current} is a symlink.`);
-    }
-    if (!info.isDirectory()) {
-      throw new Error(`Target parent component ${current} is not a directory.`);
-    }
-  }
-
-  const [resolvedRoot, resolvedParent] = await Promise.all([
-    realpath(lexicalRoot),
-    realpath(lexicalParent)
-  ]);
-  if (!isSameOrInsidePath(resolvedParent, resolvedRoot)) {
-    throw new Error(`Target parent ${lexicalParent} resolves outside install root ${lexicalRoot}.`);
-  }
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 function errorMessage(error: unknown): string {
