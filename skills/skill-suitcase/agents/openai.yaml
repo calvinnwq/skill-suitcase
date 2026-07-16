@@ -1,4 +1,4 @@
 interface:
   display_name: "Skill Suitcase"
   short_description: "Operate Skill Suitcase safely"
-  default_prompt: "Use $skill-suitcase to sync my agent skills from the catalog."
+  default_prompt: "Use $skill-suitcase to audit my catalog and target first, then stage any approved skill changes safely."

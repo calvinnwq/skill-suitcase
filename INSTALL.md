@@ -140,20 +140,29 @@ Restart the agent runtime after installing or replacing a skill.
 ## 3. Install Or Refresh The Skills Catalog
 
 Use the reviewed catalog repository the operator names.
-Replace `<your-catalog-remote>` with its HTTPS remote URL, then clone it into Skill Suitcase's own catalog home:
+Inspect an existing checkout before deciding whether it needs an update:
 
 ```bash
 unset SRC
 CATALOG_DIR="$HOME/.skill-suitcase/skills"
-CATALOG_REMOTE="<your-catalog-remote>"
-if mkdir -p "$HOME/.skill-suitcase" &&
-  {
-    if test -e "$HOME/.skill-suitcase/skills/.git"; then
-      git -C "$CATALOG_DIR" pull --ff-only
-    else
-      git clone "$CATALOG_REMOTE" "$CATALOG_DIR"
-    fi
-  }
+if test -e "$HOME/.skill-suitcase/skills/.git" &&
+  git -C "$CATALOG_DIR" status --short --branch
+then
+  export SRC="$CATALOG_DIR"
+else
+  printf 'Catalog checkout is missing; SRC was not exported.\n' >&2
+  false
+fi
+```
+
+After explicit approval naming that catalog path and the update action, update
+the existing checkout, inspect the resulting revision, and restart the
+read-only audit:
+
+```bash
+unset SRC
+if git -C "$CATALOG_DIR" pull --ff-only &&
+  git -C "$CATALOG_DIR" status --short --branch
 then
   export SRC="$CATALOG_DIR"
 else
@@ -162,10 +171,28 @@ else
 fi
 ```
 
-If no catalog exists yet, create a minimal one by following [`docs/getting-started.md`](docs/getting-started.md).
-On success, the checkout command exports that catalog as `SRC`.
+If no checkout exists, obtain explicit approval naming the catalog remote and
+destination before cloning it.
+Replace `<your-catalog-remote>` with the approved HTTPS remote URL, then run:
 
-New-machine setup installs from this catalog through Skill Suitcase, not directly from `skills.sh` or `npx skills`.
+```bash
+unset SRC
+CATALOG_REMOTE="<your-catalog-remote>"
+if mkdir -p "$HOME/.skill-suitcase" &&
+  git clone "$CATALOG_REMOTE" "$CATALOG_DIR"
+then
+  export SRC="$CATALOG_DIR"
+else
+  printf 'Catalog checkout update failed; SRC was not exported.\n' >&2
+  false
+fi
+```
+
+If no catalog exists yet, create a minimal one by following
+[`docs/getting-started.md`](docs/getting-started.md).
+
+New-machine setup installs from this catalog through Skill Suitcase, not
+directly from `skills.sh` or `npx skills`.
 If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the repository diff, and then resume the normal Suitcase audit and sync flow.
 Keep upstream-to-catalog drift separate from catalog-to-target drift.
 

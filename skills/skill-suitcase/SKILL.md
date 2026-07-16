@@ -1,6 +1,6 @@
 ---
 name: skill-suitcase
-description: Use when asked to install, audit, sync, track, reconcile, repair, prune, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import, obsolete-install pruning, and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, Hermes, shared agents roots, Grok, or another machine using a skills catalog.
+description: Use when asked to install, audit, sync, recover, track, reconcile, repair, prune, promote, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import, obsolete-install pruning, target-created skill promotion, and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, Hermes, shared agents roots, Grok, or another machine using a skills catalog.
 ---
 
 # Skill Suitcase
@@ -11,12 +11,13 @@ The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either th
 
 ## Contract
 
-- Treat read-only commands as the default path: `import`, `validate --strict`,
-  `targets`, `plan`, `status`, `diff`, `pack --dry-run`, and
-  `upstream check`; when explicitly refreshing source, use
-  `upstream fetch --dry-run` before `upstream import --apply`.
-- Mutate live skill roots only after explicit human approval naming the target
-  and action.
+- Treat read-only command modes as the default path: `import`, `validate`,
+  `targets`, `plan`, `status`, `diff`, `pack --dry-run`,
+  `reconcile --dry-run`, `repair --dry-run`, `prune --dry-run`,
+  `promote --dry-run`, `import-target --dry-run`, `upstream check`, and
+  `upstream fetch --dry-run`.
+- Mutate a catalog or live skill root only after explicit human approval naming
+  the source catalog, target or catalog skill, action, and mode.
 - Work one target at a time. Do not bulk-repair every target after seeing a
   mixed status report.
 - Use local path overrides instead of editing the shared catalog for another
@@ -29,6 +30,8 @@ The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either th
   suites, and provider boundaries. They help summarize related skills but do not
   change install or receipt semantics.
 - Use `track` only for exact existing matches.
+  Preview candidates with `diff`; `track` has no dry-run flag and writes a
+  receipt, so run it only after approval.
 - Use `reconcile --dry-run` before `reconcile --apply`, and only for selected
   catalog-owned skills.
 - Use `pack --output` then `apply --artifact` for missing or behind skills.
@@ -46,6 +49,9 @@ The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either th
   local edit you want as the repo version. Review `import-target --dry-run`, then
   run `import-target --apply` for that named skill only after explicit approval;
   it moves target → catalog. Refuse broad/all-skills imports.
+- Use `promote` only for a brand-new target-created skill that should become
+  catalog source. Review `promote --dry-run`, then run `promote --apply` only
+  after approval for the source catalog and exact target skill path.
 - Stop and report on broad `unknown`, unexpected target paths, or provider-owned
   skills.
 - Never force provider-managed Codex skills such as Codex `linear` into Suitcase
@@ -54,6 +60,22 @@ The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either th
   to adopt OpenCode, Pi, or other provider-backed adapter roots, even when the
   catalog declares a custom manifest `assignmentPaths` entry for review.
 - The current `rollback` command reverses apply, reconcile, and repair state, but it does not restore promotions.
+
+## Phases
+
+1. Discover the CLI, source catalog, target registry, and resolved install root.
+2. Inspect catalog and target state with read-only commands and report blockers.
+3. Stage missing or behind content outside the catalog and resolved target roots.
+4. Request approval with the exact source, target, skills, action, mode, and current dry-run or diff evidence.
+5. Run only the approved mutation, verify final status, and report rollback or backup evidence.
+
+## Strict Validation Notes
+
+Deterministic code is not applicable because this operator skill orchestrates the shipped `skill-suitcase` CLI and must not carry a second implementation of its behavior.
+LLM and prompt evaluation is applicable because an agent model consumes this operator skill and its packaged default prompt.
+Packaged happy-path, edge-case, and adversarial prompt fixtures verify that the expected agent response audits first and refuses unapproved catalog or target mutations.
+Filing rules are not applicable because this skill does not create notes, memory, wiki, vault, or other durable knowledge artifacts.
+Trigger coverage must include user requests to install, audit, sync, recover, promote, or refresh Skill Suitcase-managed skills.
 
 ## Setup
 
@@ -87,11 +109,17 @@ export SRC="$HOME/.skill-suitcase/skills"
 export CLI="skill-suitcase"
 ```
 
-Refresh the catalog before inspecting:
+Inspect the catalog checkout before deciding whether it needs an update:
 
 ```bash
-git -C "$SRC" pull --ff-only
+git -C "$SRC" status --short --branch
 ```
+
+If the user asks to update the catalog and approves that repository mutation,
+unset `SRC` before pulling.
+Re-export it only after the pull and checkout inspection both succeed;
+otherwise stop.
+Then restart the read-only audit.
 
 New-machine setup uses this catalog plus Suitcase `pack`, `apply`, `track`, `status`, and `diff` flows.
 If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the ordinary repository diff, and then return to the normal target sync workflow.
@@ -159,6 +187,7 @@ Run the catalog gates first:
 "$CLI" validate --source "$SRC" --strict --json
 "$CLI" upstream check --source "$SRC" --json
 "$CLI" targets --source "$SRC" --json
+"$CLI" plan --source "$SRC" --target codex --json
 "$CLI" status --source "$SRC" --json
 ```
 
@@ -308,6 +337,23 @@ intentional local edit you want in the repo, import it the other direction
 "$CLI" status --source "$SRC" --target openclaw --json
 ```
 
+For a brand-new target-created skill that should become catalog source, inspect
+the exact target skill directory and catalog destination first:
+
+```bash
+"$CLI" promote --source "$SRC" --target-skill "/path/to/agent-skills/new-skill" --dry-run --json
+# after approval for the source catalog and exact target skill path:
+"$CLI" promote --source "$SRC" --target-skill "/path/to/agent-skills/new-skill" --apply --json
+```
+
+Promotion copies the skill into catalog source, replaces the target with a
+symlink, and writes receipt state.
+It does not update `skill-suitcase.yaml` or add target assignment state.
+If the promoted skill also needs catalog assignment, inspect and obtain separate
+approval for the exact manifest change before editing it.
+Inspect the ordinary Git diff after every approved catalog mutation.
+Rollback does not restore promotions.
+
 For missing, behind, or receipt-owned dirty+behind skills, stage an immutable
 bundle and apply the artifact. The dirty+behind case is allowed only when the
 catalog is ahead, the approved bundle writes that same skill, the bundle carries
@@ -329,7 +375,9 @@ ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
 Artifact mode validates the bundle, but ordinary missing/behind writes are rebuilt from current catalog source and artifact hashes gate only the dirty-behind exception.
 Neither an artifact nor a plan lock binds local target overrides, the resolved install root, or copy versus symlink mode, so approve those invocation-time choices separately.
 Re-run `pack` and inspect the current `diff` immediately before artifact apply; do not treat an older artifact as byte-for-byte authorization.
-Pack guards only absolute manifest-declared target paths and does not account for CLI overrides or expand `~`, so keep staging outside the catalog and every resolved target root.
+Pack guards absolute resolved target paths, including CLI overrides, but does
+not expand `~`, so keep staging outside the catalog and every resolved target
+root.
 
 For Git-backed catalogs, `pack`, plan-lock creation, and `apply` refuse selected
 source skills that contain untracked, non-ignored files. Track or remove scratch
@@ -384,7 +432,7 @@ Status meanings:
 These seven values are the complete status enum.
 Goal state for an intended target is zero `behind`, `version`, `dirty`, `missing`, `unknown`, and `blocked`.
 
-## Report
+## Output Format
 
 After every operation, report:
 
