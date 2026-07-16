@@ -145,8 +145,9 @@ Inspect an existing checkout before deciding whether it needs an update:
 ```bash
 unset SRC
 CATALOG_DIR="$HOME/.skill-suitcase/skills"
-if test -e "$HOME/.skill-suitcase/skills/.git"; then
+if test -e "$HOME/.skill-suitcase/skills/.git" &&
   git -C "$CATALOG_DIR" status --short --branch
+then
   export SRC="$CATALOG_DIR"
 else
   printf 'Catalog checkout is missing; SRC was not exported.\n' >&2

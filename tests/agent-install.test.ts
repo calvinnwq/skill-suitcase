@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -94,6 +95,12 @@ test("packaged operator skill passes strict catalog validation", async (t) => {
   const source = await mkdtemp(path.join(tmpdir(), "skill-suitcase-operator-catalog-"));
   t.after(async () => rm(source, { recursive: true, force: true }));
   const skillDirectory = path.join(source, "skills", "skill-suitcase");
+  const resolverDirectory = path.join(
+    source,
+    "skills",
+    "check-resolvable-local",
+    "scripts"
+  );
   const routingFixtureDirectory = path.join(
     source,
     "skills",
@@ -103,6 +110,7 @@ test("packaged operator skill passes strict catalog validation", async (t) => {
   const testsDirectory = path.join(source, "tests");
   await Promise.all([
     mkdir(skillDirectory, { recursive: true }),
+    mkdir(resolverDirectory, { recursive: true }),
     mkdir(routingFixtureDirectory, { recursive: true }),
     mkdir(testsDirectory, { recursive: true }),
   ]);
@@ -116,13 +124,21 @@ test("packaged operator skill passes strict catalog validation", async (t) => {
       - skill-suitcase
 
 assignments:
-  codex:
+  agents:
     suitcases:
       - operator
 
 assignmentPaths:
-  codex:
-    assignment: codex
+  agents:
+    kind: agents-skills-root
+    assignment: agents
+    path: /path/to/disposable/agent-skills
+
+compatibility:
+  skill-suitcase:
+    agents:
+      - agents
+    variant: canonical
 `
     ),
     writeFile(
@@ -130,33 +146,192 @@ assignmentPaths:
       `${JSON.stringify({
         fixtures: [
           {
-            prompt: "Audit and safely sync my Skill Suitcase-managed agent skills.",
-            expectedSkill: "skill-suitcase",
+            utterance: "Audit and safely sync my Skill Suitcase-managed agent skills.",
+            expected: ["skill-suitcase"],
+            forbidden: [],
           },
         ],
       }, null, 2)}\n`
     ),
     writeFile(
+      path.join(resolverDirectory, "check_resolvable_local.py"),
+      `#!/usr/bin/env python3
+import argparse
+import json
+import re
+from pathlib import Path
+
+
+def tokens(value):
+    return set(re.findall(r"[a-z0-9]+", value.lower()))
+
+
+def skill_description(skill_file):
+    text = skill_file.read_text(encoding="utf-8")
+    match = re.search(r"^description:\\s*(.+)$", text, re.MULTILINE)
+    return match.group(1) if match else ""
+
+
+def route_intent(root, utterance):
+    utterance_tokens = tokens(utterance)
+    ranked = []
+    for skill_file in sorted((root / "skills").glob("*/SKILL.md")):
+        skill_name = skill_file.parent.name
+        score = len(utterance_tokens & tokens(skill_name + " " + skill_description(skill_file)))
+        ranked.append({"name": skill_name, "score": score})
+    return sorted(ranked, key=lambda item: (-item["score"], item["name"]))
+
+
+def evaluate_routing(root, fixtures_path):
+    fixtures = json.loads(fixtures_path.read_text(encoding="utf-8"))["fixtures"]
+    cases = []
+    for fixture in fixtures:
+        predicted = [item["name"] for item in route_intent(root, fixture["utterance"])[:3]]
+        ok = all(name in predicted for name in fixture["expected"])
+        ok = ok and all(name not in predicted for name in fixture.get("forbidden", []))
+        cases.append({"utterance": fixture["utterance"], "predicted": predicted, "ok": ok})
+    return {"ok": all(case["ok"] for case in cases), "cases": cases}
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--root", type=Path, required=True)
+parser.add_argument("command", choices=["routing-eval"])
+parser.add_argument("--fixtures", type=Path, required=True)
+args = parser.parse_args()
+print(json.dumps(evaluate_routing(args.root, args.fixtures), sort_keys=True))
+`
+    ),
+    writeFile(
       path.join(testsDirectory, "test_skill_suitcase.py"),
-      `from pathlib import Path
+      `import json
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 
-def test_operator_skill_contract():
-    skill = Path("skills/skill-suitcase/SKILL.md").read_text()
-    assert "## Contract" in skill
-    assert "## Phases" in skill
-    assert "## Output Format" in skill
+ROOT = Path(__file__).resolve().parents[1]
+CLI = Path(os.environ["SKILL_SUITCASE_CLI"])
+NODE = os.environ["SKILL_SUITCASE_NODE"]
+RESOLVER = ROOT / "skills" / "check-resolvable-local" / "scripts" / "check_resolvable_local.py"
+ROUTING_FIXTURES = ROOT / "skills" / "check-resolvable-local" / "fixtures" / "routing-fixtures.json"
 
 
-def test_operator_skill_integration_uses_disposable_catalog():
-    with TemporaryDirectory() as catalog:
-        assert Path(catalog).is_dir()
+def run_cli(*args):
+    result = subprocess.run(
+        [NODE, str(CLI), *args, "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
 
 
-def test_route_intent_e2e_user_turn_to_safe_side_effect():
-    user_turn = "Audit and safely sync my Skill Suitcase-managed agent skills."
-    assert "audit" in user_turn.lower()
+class SkillSuitcaseCatalogContractTests(unittest.TestCase):
+    def test_operator_skill_contract_unit(self):
+        skill = (ROOT / "skills" / "skill-suitcase" / "SKILL.md").read_text(encoding="utf-8")
+        contract = skill.split("## Contract", 1)[1].split("## Phases", 1)[0]
+        self.assertIn("read-only command modes as the default path", contract)
+        self.assertIn("Mutate a catalog or live skill root only after explicit human approval", contract)
+        self.assertIn("Never run it directly against live Codex, Claude, OpenClaw, or other agent homes", contract)
+
+    def test_operator_skill_integration_uses_strict_catalog_release_gate(self):
+        result = run_cli("validate", "--source", str(ROOT), "--strict")
+        self.assertTrue(result["ok"])
+        self.assertEqual(1, result["summary"]["contractsComplete"])
+        self.assertEqual(10, result["contracts"][0]["score"])
+
+    def test_check_resolvable_local_routing_eval(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(RESOLVER),
+                "--root",
+                str(ROOT),
+                "routing-eval",
+                "--fixtures",
+                str(ROUTING_FIXTURES),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        report = json.loads(result.stdout)
+        self.assertTrue(report["ok"])
+        self.assertEqual("skill-suitcase", report["cases"][0]["predicted"][0])
+
+    def test_e2e_user_turn_to_safe_side_effect(self):
+        with TemporaryDirectory() as target, TemporaryDirectory() as stage:
+            routing = subprocess.run(
+                [
+                    sys.executable,
+                    str(RESOLVER),
+                    "--root",
+                    str(ROOT),
+                    "routing-eval",
+                    "--fixtures",
+                    str(ROUTING_FIXTURES),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual("skill-suitcase", json.loads(routing.stdout)["cases"][0]["predicted"][0])
+
+            initial = run_cli(
+                "status",
+                "--source",
+                str(ROOT),
+                "--target",
+                "agents",
+                "--agents-skills",
+                target,
+            )
+            self.assertEqual(1, initial["summary"]["missing"])
+
+            packed = run_cli(
+                "pack",
+                "--source",
+                str(ROOT),
+                "--target",
+                "agents",
+                "--agents-skills",
+                target,
+                "--output",
+                stage,
+            )
+            applied = run_cli(
+                "apply",
+                "--source",
+                str(ROOT),
+                "--target",
+                "agents",
+                "--agents-skills",
+                target,
+                "--artifact",
+                packed["bundle"]["artifactPath"],
+            )
+            self.assertTrue(applied["ok"])
+            self.assertTrue((Path(target) / "skill-suitcase" / "SKILL.md").is_file())
+            self.assertTrue((Path(target) / ".skill-suitcase-receipt.json").is_file())
+
+            settled = run_cli(
+                "status",
+                "--source",
+                str(ROOT),
+                "--target",
+                "agents",
+                "--agents-skills",
+                target,
+            )
+            self.assertEqual(1, settled["summary"]["current"])
+            self.assertEqual(0, settled["summary"]["missing"])
+
+
+if __name__ == "__main__":
+    unittest.main()
 `
     ),
   ]);
@@ -177,10 +352,34 @@ def test_route_intent_e2e_user_turn_to_safe_side_effect():
     [{ skill: "skill-suitcase", score: 10, total: 10, complete: true }]
   );
   assert.deepEqual(result.findings.filter((finding) => finding.level === "error"), []);
+
+  const executableEvidence = spawnSync(
+    "python3",
+    ["-m", "unittest", "discover", "-s", "tests", "-p", "test_skill_suitcase.py", "-v"],
+    {
+      cwd: source,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        SKILL_SUITCASE_CLI: path.join(process.cwd(), "dist", "src", "cli.js"),
+        SKILL_SUITCASE_NODE: process.execPath,
+      },
+    }
+  );
+  assert.equal(
+    executableEvidence.status,
+    0,
+    `catalog-root contract evidence failed:\n${executableEvidence.stdout}\n${executableEvidence.stderr}`
+  );
+  assert.match(executableEvidence.stderr, /Ran 4 tests/);
+  assert.match(executableEvidence.stderr, /OK/);
 });
 
 test("agent install guide tells agents how to install and verify the skill", async () => {
-  const install = await readFile("INSTALL.md", "utf8");
+  const [install, installHtml] = await Promise.all([
+    readFile("INSTALL.md", "utf8"),
+    readFile("docs/install.html", "utf8"),
+  ]);
 
   assert.match(install, /These instructions are for any coding agent/);
   assert.doesNotMatch(install, /These instructions are for Codex, Claude/);
@@ -212,4 +411,16 @@ test("agent install guide tells agents how to install and verify the skill", asy
   assert.match(install, /Read-Only Audit First/);
   assert.match(install, /Mutate Only After Approval/);
   assert.match(install, /Codex `linear` is\s+provider-managed/);
+
+  const existingCheckoutBlock = installHtml.match(
+    /Inspect an existing checkout[\s\S]*?<pre><code>([\s\S]*?)<\/code><\/pre>/
+  )?.[1];
+  assert.ok(existingCheckoutBlock, "the install page must keep an existing-checkout block");
+  assert.match(existingCheckoutBlock, /^unset SRC$/m);
+  assert.match(
+    existingCheckoutBlock,
+    /if test -e "\$HOME\/\.skill-suitcase\/skills\/\.git" &amp;&amp;\n  git -C "\$CATALOG_DIR" status --short --branch\nthen/
+  );
+  assert.match(existingCheckoutBlock, /export SRC="\$CATALOG_DIR"/);
+  assert.match(existingCheckoutBlock, /Catalog checkout is missing; SRC was not exported/);
 });

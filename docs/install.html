@@ -157,8 +157,16 @@ install_operator_skill</code></pre>
               update. Cloning or pulling mutates the catalog and requires
               explicit approval naming the catalog path and action.
             </p>
-            <pre><code>CATALOG_DIR="$HOME/.skill-suitcase/skills"
-git -C "$CATALOG_DIR" status --short --branch</code></pre>
+            <pre><code>unset SRC
+CATALOG_DIR="$HOME/.skill-suitcase/skills"
+if test -e "$HOME/.skill-suitcase/skills/.git" &amp;&amp;
+  git -C "$CATALOG_DIR" status --short --branch
+then
+  export SRC="$CATALOG_DIR"
+else
+  printf 'Catalog checkout is missing; SRC was not exported.\n' &gt;&amp;2
+  false
+fi</code></pre>
             <p>
               Follow the authoritative approval-gated catalog checkout runbook
               in <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md#3-install-or-refresh-the-skills-catalog">INSTALL.md</a>
