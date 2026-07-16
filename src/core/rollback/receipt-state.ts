@@ -16,8 +16,8 @@ import {
  * collects supported install records, parses copy and symlink rollback state,
  * and resolves receipt-relative paths while rejecting escapes from the install
  * root. It reads the filesystem only to resolve paths and never mutates it.
- * The executor in index.ts consumes the normalized models returned here and
- * must not reinterpret raw receipt JSON.
+ * The executor in index.ts consumes the normalized rollback models returned
+ * here and retains live target inspection and mutation policy.
  */
 
 /**

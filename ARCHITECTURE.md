@@ -471,6 +471,9 @@ Keep the command verbs separate:
   earlier path component, but a symlinked target leaf remains unsafe.
   Missing receipt parents must not be created while acquiring the receipt lock.
   It does not restore promotions; promotion receipts are safe no-ops in the current rollback command.
+  `src/core/rollback/receipt-state.ts` owns receipt loading, untrusted rollback-record normalization, and receipt-relative containment checks.
+  `src/core/rollback/index.ts` consumes those normalized models and owns live target inspection, filesystem mutation, guarded receipt updates, and result summaries.
+  Records stay normalized inside the executor loop because path resolution reads live filesystem state and must preserve partial and refused result ordering.
 - `promote` turns a target-created skill (for example a skill an agent wrote
   into an agent home directory) into a repo-owned catalog skill. `--dry-run`
   runs a read-only plan; `--apply` runs the approval-gated live promotion.
