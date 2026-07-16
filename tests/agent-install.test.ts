@@ -11,6 +11,7 @@ test("npm package includes the operator skill and install guide", async () => {
 
   assert.ok(packageJson.files?.includes("skills/skill-suitcase/SKILL.md"));
   assert.ok(packageJson.files?.includes("skills/skill-suitcase/agents/openai.yaml"));
+  assert.ok(packageJson.files?.includes("skills/skill-suitcase/evals/prompt-fixtures.json"));
   assert.ok(packageJson.files?.includes("INSTALL.md"));
 });
 
@@ -108,13 +109,27 @@ test("packaged operator skill passes strict catalog validation", async (t) => {
     "fixtures"
   );
   const testsDirectory = path.join(source, "tests");
+  const promptEvalDirectory = path.join(skillDirectory, "evals");
+  const competingSkillDirectories = [
+    path.join(source, "skills", "catalog-auditor"),
+    path.join(source, "skills", "project-recovery"),
+    path.join(source, "skills", "release-promoter"),
+  ];
   await Promise.all([
     mkdir(skillDirectory, { recursive: true }),
     mkdir(resolverDirectory, { recursive: true }),
     mkdir(routingFixtureDirectory, { recursive: true }),
     mkdir(testsDirectory, { recursive: true }),
+    mkdir(promptEvalDirectory, { recursive: true }),
+    ...competingSkillDirectories.map((directory) => mkdir(directory, { recursive: true })),
   ]);
-  await copyFile("skills/skill-suitcase/SKILL.md", path.join(skillDirectory, "SKILL.md"));
+  await Promise.all([
+    copyFile("skills/skill-suitcase/SKILL.md", path.join(skillDirectory, "SKILL.md")),
+    copyFile(
+      "skills/skill-suitcase/evals/prompt-fixtures.json",
+      path.join(promptEvalDirectory, "prompt-fixtures.json")
+    ),
+  ]);
   await Promise.all([
     writeFile(
       path.join(source, "skill-suitcase.yaml"),
@@ -146,12 +161,87 @@ compatibility:
       `${JSON.stringify({
         fixtures: [
           {
-            utterance: "Audit and safely sync my Skill Suitcase-managed agent skills.",
+            utterance: "Install agent skills from the approved catalog.",
             expected: ["skill-suitcase"],
             forbidden: [],
           },
+          {
+            utterance: "Audit agent skill installs without changing the target.",
+            expected: ["skill-suitcase"],
+            forbidden: [],
+          },
+          {
+            utterance: "Sync managed agent skills safely.",
+            expected: ["skill-suitcase"],
+            forbidden: [],
+          },
+          {
+            utterance: "Recover a broken agent skill installation.",
+            expected: ["skill-suitcase"],
+            forbidden: [],
+          },
+          {
+            utterance: "Promote this target-created agent skill into the catalog.",
+            expected: ["skill-suitcase"],
+            forbidden: [],
+          },
+          {
+            utterance: "Refresh an upstream skill source in the catalog.",
+            expected: ["skill-suitcase"],
+            forbidden: [],
+          },
+          {
+            utterance: "Banana quantum zebra",
+            expected: [],
+            forbidden: ["skill-suitcase"],
+          },
+          {
+            utterance: "Audit the package catalog for dependency licenses.",
+            expected: ["catalog-auditor"],
+            forbidden: ["skill-suitcase"],
+          },
+          {
+            utterance: "Recover deleted project files from Git history.",
+            expected: ["project-recovery"],
+            forbidden: ["skill-suitcase"],
+          },
+          {
+            utterance: "Promote the release candidate to production.",
+            expected: ["release-promoter"],
+            forbidden: ["skill-suitcase"],
+          },
         ],
       }, null, 2)}\n`
+    ),
+    writeFile(
+      path.join(competingSkillDirectories[0]!, "SKILL.md"),
+      `---
+name: catalog-auditor
+description: Use when asked to audit a package catalog for dependency licenses.
+---
+
+# Catalog Auditor
+`
+    ),
+    writeFile(
+      path.join(competingSkillDirectories[1]!, "SKILL.md"),
+      `---
+name: project-recovery
+description: Use when asked to recover deleted project files from Git history.
+---
+
+# Project Recovery
+`
+    ),
+    writeFile(
+      path.join(competingSkillDirectories[2]!, "SKILL.md"),
+      `---
+name: release-promoter
+description: Use when asked to promote a release candidate to production.
+---
+
+# Release Promoter
+`
     ),
     writeFile(
       path.join(resolverDirectory, "check_resolvable_local.py"),
@@ -177,16 +267,21 @@ def route_intent(root, utterance):
     ranked = []
     for skill_file in sorted((root / "skills").glob("*/SKILL.md")):
         skill_name = skill_file.parent.name
-        score = len(utterance_tokens & tokens(skill_name + " " + skill_description(skill_file)))
+        score = len(utterance_tokens & tokens(skill_description(skill_file)))
+        if skill_name.lower() in utterance.lower():
+            score += 100
         ranked.append({"name": skill_name, "score": score})
-    return sorted(ranked, key=lambda item: (-item["score"], item["name"]))
+    return sorted(
+        (item for item in ranked if item["score"] > 0),
+        key=lambda item: (-item["score"], item["name"]),
+    )
 
 
 def evaluate_routing(root, fixtures_path):
     fixtures = json.loads(fixtures_path.read_text(encoding="utf-8"))["fixtures"]
     cases = []
     for fixture in fixtures:
-        predicted = [item["name"] for item in route_intent(root, fixture["utterance"])[:3]]
+        predicted = [item["name"] for item in route_intent(root, fixture["utterance"])[:1]]
         ok = all(name in predicted for name in fixture["expected"])
         ok = ok and all(name not in predicted for name in fixture.get("forbidden", []))
         cases.append({"utterance": fixture["utterance"], "predicted": predicted, "ok": ok})
@@ -205,6 +300,7 @@ print(json.dumps(evaluate_routing(args.root, args.fixtures), sort_keys=True))
       path.join(testsDirectory, "test_skill_suitcase.py"),
       `import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -217,6 +313,7 @@ CLI = Path(os.environ["SKILL_SUITCASE_CLI"])
 NODE = os.environ["SKILL_SUITCASE_NODE"]
 RESOLVER = ROOT / "skills" / "check-resolvable-local" / "scripts" / "check_resolvable_local.py"
 ROUTING_FIXTURES = ROOT / "skills" / "check-resolvable-local" / "fixtures" / "routing-fixtures.json"
+PROMPT_EVAL_FIXTURES = ROOT / "skills" / "skill-suitcase" / "evals" / "prompt-fixtures.json"
 
 
 def run_cli(*args):
@@ -243,6 +340,25 @@ class SkillSuitcaseCatalogContractTests(unittest.TestCase):
         self.assertEqual(1, result["summary"]["contractsComplete"])
         self.assertEqual(10, result["contracts"][0]["score"])
 
+    def test_operator_prompt_eval_enforces_approval_boundary(self):
+        skill = (ROOT / "skills" / "skill-suitcase" / "SKILL.md").read_text(encoding="utf-8")
+        fixtures = json.loads(PROMPT_EVAL_FIXTURES.read_text(encoding="utf-8"))["cases"]
+        self.assertEqual({"happy", "edge", "adversarial"}, {case["kind"] for case in fixtures})
+        inspect_phase = skill.index("2. Inspect catalog and target state")
+        approval_phase = skill.index("4. Request approval")
+        mutation_phase = skill.index("5. Run only the approved mutation")
+        self.assertLess(inspect_phase, approval_phase)
+        self.assertLess(approval_phase, mutation_phase)
+        for case in fixtures:
+            expected = case["expected"]
+            response = case["referenceResponse"].lower()
+            self.assertEqual("audit", expected["firstAction"])
+            self.assertFalse(expected["mutationAllowed"])
+            for phrase in expected["responseMustInclude"]:
+                self.assertIn(phrase.lower(), response)
+            for phrase in expected["responseMustNotInclude"]:
+                self.assertNotIn(phrase.lower(), response)
+
     def test_check_resolvable_local_routing_eval(self):
         result = subprocess.run(
             [
@@ -260,7 +376,44 @@ class SkillSuitcaseCatalogContractTests(unittest.TestCase):
         )
         report = json.loads(result.stdout)
         self.assertTrue(report["ok"])
-        self.assertEqual("skill-suitcase", report["cases"][0]["predicted"][0])
+        by_utterance = {case["utterance"]: case for case in report["cases"]}
+        self.assertEqual(10, len(by_utterance))
+        for case in report["cases"][:6]:
+            self.assertEqual(["skill-suitcase"], case["predicted"])
+        self.assertEqual([], report["cases"][6]["predicted"])
+        self.assertEqual(["catalog-auditor"], report["cases"][7]["predicted"])
+        self.assertEqual(["project-recovery"], report["cases"][8]["predicted"])
+        self.assertEqual(["release-promoter"], report["cases"][9]["predicted"])
+
+    def test_routing_eval_fails_without_trigger_language(self):
+        with TemporaryDirectory() as stripped_root:
+            stripped_root = Path(stripped_root)
+            shutil.copytree(ROOT / "skills", stripped_root / "skills")
+            skill_file = stripped_root / "skills" / "skill-suitcase" / "SKILL.md"
+            skill = skill_file.read_text(encoding="utf-8")
+            skill = skill.replace(
+                next(line for line in skill.splitlines() if line.startswith("description:")),
+                "description: Use when asked to organize a physical suitcase.",
+            )
+            skill_file.write_text(skill, encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(RESOLVER),
+                    "--root",
+                    str(stripped_root),
+                    "routing-eval",
+                    "--fixtures",
+                    str(ROUTING_FIXTURES),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            report = json.loads(result.stdout)
+            self.assertFalse(report["ok"])
+            for case in report["cases"][:6]:
+                self.assertNotIn("skill-suitcase", case["predicted"])
 
     def test_e2e_user_turn_to_safe_side_effect(self):
         with TemporaryDirectory() as target, TemporaryDirectory() as stage:
@@ -371,7 +524,7 @@ if __name__ == "__main__":
     0,
     `catalog-root contract evidence failed:\n${executableEvidence.stdout}\n${executableEvidence.stderr}`
   );
-  assert.match(executableEvidence.stderr, /Ran 4 tests/);
+  assert.match(executableEvidence.stderr, /Ran 6 tests/);
   assert.match(executableEvidence.stderr, /OK/);
 });
 

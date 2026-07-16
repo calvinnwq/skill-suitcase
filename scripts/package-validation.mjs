@@ -19,6 +19,7 @@ const EXPECTED_FILES_ALLOWLIST = [
   "dist/src/**/*.js",
   "skills/skill-suitcase/SKILL.md",
   "skills/skill-suitcase/agents/openai.yaml",
+  "skills/skill-suitcase/evals/prompt-fixtures.json",
   "LICENSE",
   "VISION.md",
   "SPEC.md",

@@ -72,7 +72,8 @@ The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either th
 ## Strict Validation Notes
 
 Deterministic code is not applicable because this operator skill orchestrates the shipped `skill-suitcase` CLI and must not carry a second implementation of its behavior.
-LLM evals are not applicable because this skill neither invokes an LLM nor defines a model prompt; deterministic catalog fixtures and installed-CLI tests cover its routing and workflow behavior.
+LLM and prompt evaluation is applicable because an agent model consumes this operator skill and its packaged default prompt.
+Packaged happy-path, edge-case, and adversarial prompt fixtures verify that the expected agent response audits first and refuses unapproved catalog or target mutations.
 Filing rules are not applicable because this skill does not create notes, memory, wiki, vault, or other durable knowledge artifacts.
 Trigger coverage must include user requests to install, audit, sync, recover, promote, or refresh Skill Suitcase-managed skills.
 
