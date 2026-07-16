@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/calvinnwq/skill-suitcase/compare/v0.17.0...v0.17.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* enforce strict packaged operator validation ([#97](https://github.com/calvinnwq/skill-suitcase/issues/97)) ([a1e12b3](https://github.com/calvinnwq/skill-suitcase/commit/a1e12b3a9659f19b3e1d75dfcd03c447dec7efa3))
+
 ## [0.17.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.16.0...v0.17.0) (2026-07-14)
 
 
