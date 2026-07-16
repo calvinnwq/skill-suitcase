@@ -336,8 +336,12 @@ the exact target skill directory and catalog destination first:
 "$CLI" promote --source "$SRC" --target-skill <target-skill-path> --apply --json
 ```
 
-Promotion creates catalog source and target assignment state, so inspect the
-ordinary Git diff afterward.
+Promotion copies the skill into catalog source, replaces the target with a
+symlink, and writes receipt state.
+It does not update `skill-suitcase.yaml` or add target assignment state.
+If the promoted skill also needs catalog assignment, inspect and obtain separate
+approval for the exact manifest change before editing it.
+Inspect the ordinary Git diff after every approved catalog mutation.
 Rollback does not restore promotions.
 
 For missing, behind, or receipt-owned dirty+behind skills, stage an immutable

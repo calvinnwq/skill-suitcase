@@ -82,6 +82,9 @@ test("operator skill mirrors the public inspect-stage-mutate safety model", asyn
   assert.match(skill, /pack --output/);
   assert.match(skill, /apply --artifact/);
   assert.match(skill, /restart the read-only audit/);
+  assert.match(skill, /does not update `skill-suitcase\.yaml` or add target assignment state/);
+  assert.match(skill, /separate\s+approval for the exact manifest change/);
+  assert.doesNotMatch(skill, /Promotion creates catalog source and target assignment state/);
   assert.doesNotMatch(skill, /Refresh the catalog before inspecting/);
   assert.match(agentMetadata, /audit my catalog and target first/);
   assert.match(agentMetadata, /stage any approved skill changes safely/);
