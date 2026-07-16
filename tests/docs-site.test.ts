@@ -598,19 +598,19 @@ test("agent workflows page carries the ten operational recipes", () => {
   const workflows = read("docs/agent-workflows.html");
   const normalized = workflows.replace(/\s+/g, " ");
 
-  const RECIPE_IDS = [
-    "recipe-new-machine-setup",
-    "recipe-read-only-audit",
-    "recipe-drift-heartbeat",
-    "recipe-missing-behind-pack-apply",
-    "recipe-exact-match-track",
-    "recipe-receiptless-mismatch-reconcile",
-    "recipe-accidental-dirty-repair",
-    "recipe-intentional-dirty-import-target",
-    "recipe-upstream-source-refresh",
-    "recipe-provider-read-only"
+  const RECIPES: ReadonlyArray<readonly [string, readonly string[]]> = [
+    ["recipe-new-machine-setup", ["read-only", "staging-only", "live-target-mutating"]],
+    ["recipe-read-only-audit", ["read-only"]],
+    ["recipe-drift-heartbeat", ["read-only"]],
+    ["recipe-missing-behind-pack-apply", ["read-only", "staging-only", "live-target-mutating"]],
+    ["recipe-exact-match-track", ["read-only", "live-target-mutating"]],
+    ["recipe-receiptless-mismatch-reconcile", ["read-only", "live-target-mutating"]],
+    ["recipe-accidental-dirty-repair", ["read-only", "live-target-mutating"]],
+    ["recipe-intentional-dirty-import-target", ["read-only", "catalog-mutating"]],
+    ["recipe-upstream-source-refresh", ["read-only", "catalog-mutating"]],
+    ["recipe-provider-read-only", ["read-only"]]
   ];
-  for (const id of RECIPE_IDS) {
+  for (const [id] of RECIPES) {
     assert.match(workflows, new RegExp(`<h3 id="${id}">`), `agent workflows should keep the recipe section ${id}`);
   }
 
@@ -621,12 +621,12 @@ test("agent workflows page carries the ten operational recipes", () => {
     return workflows.slice(start, end < 0 ? workflows.length : end);
   }
 
-  // Every recipe labels its steps with the shared write classifications.
-  for (const classification of ["read-only", "staging-only", "catalog-mutating", "live-target-mutating"]) {
-    assert.ok(
-      workflows.includes(`<span class="k">${classification}</span>`),
-      `agent workflows should classify recipe steps as ${classification}`
+  // Every recipe labels its steps with its exact shared write classifications.
+  for (const [id, expectedClassifications] of RECIPES) {
+    const actualClassifications = [...recipeSection(id).matchAll(/<span class="k">([^<]+)<\/span>/g)].map(
+      (match) => match[1]
     );
+    assert.deepEqual(actualClassifications, expectedClassifications, `${id} must classify every recipe step`);
   }
 
   // The state-to-command routing distinctions must stay explicit.
