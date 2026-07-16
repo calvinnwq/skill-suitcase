@@ -138,7 +138,8 @@ The required `test` check aggregates all three jobs, so the stable ruleset conte
 
 The active repository ruleset was verified through the GitHub API on 2026-07-16.
 It is named `Protect main` and targets `main`.
-It requires pull requests, at least one approving review, stale-review dismissal after new pushes, review-thread resolution, the CI `test` check, deletion protection, and non-fast-forward protection.
+It requires pull requests, stale-review dismissal after new pushes, review-thread resolution, the CI `test` check, deletion protection, and non-fast-forward protection.
+It requires zero approving reviews because the repository currently has one maintainer, so a green pull request can be merged without an unavailable second reviewer.
 It does not require the checked branch to be up to date; enable strict status checks later if concurrent merge traffic makes stale-base validation a practical risk.
 These are GitHub ruleset settings and cannot be enforced from repository source.
 
