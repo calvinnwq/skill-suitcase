@@ -1,6 +1,6 @@
 ---
 name: skill-suitcase
-description: Use when asked to install, audit, sync, track, reconcile, repair, prune, promote, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import, obsolete-install pruning, target-created skill promotion, and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, Hermes, shared agents roots, Grok, or another machine using a skills catalog.
+description: Use when asked to install, audit, sync, recover, track, reconcile, repair, prune, promote, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, including dirty repair/import, obsolete-install pruning, target-created skill promotion, and upstream source-refresh flows, across OpenClaw, Codex, OpenClaw-Codex, Claude, Hermes, shared agents roots, Grok, or another machine using a skills catalog.
 ---
 
 # Skill Suitcase
@@ -72,7 +72,7 @@ The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either th
 ## Strict Validation Notes
 
 Deterministic code is not applicable because this operator skill orchestrates the shipped `skill-suitcase` CLI and must not carry a second implementation of its behavior.
-LLM evals are not applicable because routing and workflow behavior are covered by deterministic catalog fixtures and installed-CLI tests.
+LLM evals are not applicable because this skill neither invokes an LLM nor defines a model prompt; deterministic catalog fixtures and installed-CLI tests cover its routing and workflow behavior.
 Filing rules are not applicable because this skill does not create notes, memory, wiki, vault, or other durable knowledge artifacts.
 Trigger coverage must include user requests to install, audit, sync, recover, promote, or refresh Skill Suitcase-managed skills.
 
@@ -115,8 +115,10 @@ git -C "$SRC" status --short --branch
 ```
 
 If the user asks to update the catalog and approves that repository mutation,
-run `git -C "$SRC" pull --ff-only`, inspect the resulting revision, and then
-restart the read-only audit.
+unset `SRC` before pulling.
+Re-export it only after the pull and checkout inspection both succeed;
+otherwise stop.
+Then restart the read-only audit.
 
 New-machine setup uses this catalog plus Suitcase `pack`, `apply`, `track`, `status`, and `diff` flows.
 If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the ordinary repository diff, and then return to the normal target sync workflow.
@@ -184,7 +186,7 @@ Run the catalog gates first:
 "$CLI" validate --source "$SRC" --strict --json
 "$CLI" upstream check --source "$SRC" --json
 "$CLI" targets --source "$SRC" --json
-"$CLI" plan --source "$SRC" --target <target-id> --json
+"$CLI" plan --source "$SRC" --target codex --json
 "$CLI" status --source "$SRC" --json
 ```
 
@@ -338,9 +340,9 @@ For a brand-new target-created skill that should become catalog source, inspect
 the exact target skill directory and catalog destination first:
 
 ```bash
-"$CLI" promote --source "$SRC" --target-skill <target-skill-path> --dry-run --json
+"$CLI" promote --source "$SRC" --target-skill "/path/to/agent-skills/new-skill" --dry-run --json
 # after approval for the source catalog and exact target skill path:
-"$CLI" promote --source "$SRC" --target-skill <target-skill-path> --apply --json
+"$CLI" promote --source "$SRC" --target-skill "/path/to/agent-skills/new-skill" --apply --json
 ```
 
 Promotion copies the skill into catalog source, replaces the target with a

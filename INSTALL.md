@@ -160,8 +160,15 @@ the existing checkout, inspect the resulting revision, and restart the
 read-only audit:
 
 ```bash
-git -C "$CATALOG_DIR" pull --ff-only
-git -C "$CATALOG_DIR" status --short --branch
+unset SRC
+if git -C "$CATALOG_DIR" pull --ff-only &&
+  git -C "$CATALOG_DIR" status --short --branch
+then
+  export SRC="$CATALOG_DIR"
+else
+  printf 'Catalog checkout update failed; SRC was not exported.\n' >&2
+  false
+fi
 ```
 
 If no checkout exists, obtain explicit approval naming the catalog remote and
