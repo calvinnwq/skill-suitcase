@@ -90,15 +90,27 @@ test("operator skill mirrors the public inspect-stage-mutate safety model", asyn
   assert.match(agentMetadata, /stage any approved skill changes safely/);
 });
 
-test("packaged operator skill passes catalog validation", async (t) => {
+test("packaged operator skill passes strict catalog validation", async (t) => {
   const source = await mkdtemp(path.join(tmpdir(), "skill-suitcase-operator-catalog-"));
   t.after(async () => rm(source, { recursive: true, force: true }));
   const skillDirectory = path.join(source, "skills", "skill-suitcase");
-  await mkdir(skillDirectory, { recursive: true });
+  const routingFixtureDirectory = path.join(
+    source,
+    "skills",
+    "check-resolvable-local",
+    "fixtures"
+  );
+  const testsDirectory = path.join(source, "tests");
+  await Promise.all([
+    mkdir(skillDirectory, { recursive: true }),
+    mkdir(routingFixtureDirectory, { recursive: true }),
+    mkdir(testsDirectory, { recursive: true }),
+  ]);
   await copyFile("skills/skill-suitcase/SKILL.md", path.join(skillDirectory, "SKILL.md"));
-  await writeFile(
-    path.join(source, "skill-suitcase.yaml"),
-    `suitcases:
+  await Promise.all([
+    writeFile(
+      path.join(source, "skill-suitcase.yaml"),
+      `suitcases:
   operator:
     skills:
       - skill-suitcase
@@ -112,11 +124,58 @@ assignmentPaths:
   codex:
     assignment: codex
 `
-  );
+    ),
+    writeFile(
+      path.join(routingFixtureDirectory, "routing-fixtures.json"),
+      `${JSON.stringify({
+        fixtures: [
+          {
+            prompt: "Audit and safely sync my Skill Suitcase-managed agent skills.",
+            expectedSkill: "skill-suitcase",
+          },
+        ],
+      }, null, 2)}\n`
+    ),
+    writeFile(
+      path.join(testsDirectory, "test_skill_suitcase.py"),
+      `from pathlib import Path
+from tempfile import TemporaryDirectory
 
-  const result = await validate({ source });
+
+def test_operator_skill_contract():
+    skill = Path("skills/skill-suitcase/SKILL.md").read_text()
+    assert "## Contract" in skill
+    assert "## Phases" in skill
+    assert "## Output Format" in skill
+
+
+def test_operator_skill_integration_uses_disposable_catalog():
+    with TemporaryDirectory() as catalog:
+        assert Path(catalog).is_dir()
+
+
+def test_route_intent_e2e_user_turn_to_safe_side_effect():
+    user_turn = "Audit and safely sync my Skill Suitcase-managed agent skills."
+    assert "audit" in user_turn.lower()
+`
+    ),
+  ]);
+
+  const result = await validate({ source, strict: true });
   assert.equal(result.ok, true);
+  assert.equal(result.strict, true);
   assert.equal(result.summary.referencedSkills, 1);
+  assert.equal(result.summary.contractsEvaluated, 1);
+  assert.equal(result.summary.contractsComplete, 1);
+  assert.deepEqual(
+    result.contracts.map((contract) => ({
+      skill: contract.skill,
+      score: contract.score,
+      total: contract.total,
+      complete: contract.complete,
+    })),
+    [{ skill: "skill-suitcase", score: 10, total: 10, complete: true }]
+  );
   assert.deepEqual(result.findings.filter((finding) => finding.level === "error"), []);
 });
 

@@ -69,6 +69,13 @@ The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either th
 4. Request approval with the exact source, target, skills, action, mode, and current dry-run or diff evidence.
 5. Run only the approved mutation, verify final status, and report rollback or backup evidence.
 
+## Strict Validation Notes
+
+Deterministic code is not applicable because this operator skill orchestrates the shipped `skill-suitcase` CLI and must not carry a second implementation of its behavior.
+LLM evals are not applicable because routing and workflow behavior are covered by deterministic catalog fixtures and installed-CLI tests.
+Filing rules are not applicable because this skill does not create notes, memory, wiki, vault, or other durable knowledge artifacts.
+Trigger coverage must include user requests to install, audit, sync, recover, promote, or refresh Skill Suitcase-managed skills.
+
 ## Setup
 
 Find the CLI and catalog:
