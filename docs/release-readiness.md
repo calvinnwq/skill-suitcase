@@ -131,7 +131,7 @@ and publishes with provenance.
 
 The public repository runs `.github/workflows/ci.yml` for pull requests and pushes to `main`.
 Its `dependency-audit` job runs the official OSV-Scanner reusable workflow against `pnpm-lock.yaml` and fails on a known vulnerability.
-SARIF upload is disabled so the same read-only scan works for forked pull requests without elevated security-event permissions.
+SARIF upload is disabled, so the workflow does not write code-scanning results even though its reusable-workflow contract requires the `security-events: write` declaration.
 Its `verify` job installs the frozen pnpm lockfile on Node 24 and runs the tests, lint/typecheck, architecture check, and formatting check.
 Its `package-smoke` job verifies the packed and installed CLI on Node 20 and Node 24.
 The required `test` check aggregates all three jobs, so the stable ruleset context passes only after the advisory scan, every repository gate, and both supported-runtime smoke runs succeed.

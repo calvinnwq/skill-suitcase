@@ -52,7 +52,11 @@ test("CI preserves the required aggregate gate and supported Node runtimes", asy
     "upload-sarif": false,
     "fail-on-vuln": true,
   });
-  assert.deepEqual(dependencyAudit.permissions, { contents: "read" });
+  assert.deepEqual(dependencyAudit.permissions, {
+    actions: "read",
+    contents: "read",
+    "security-events": "write",
+  });
 
   assert.equal(workflow.jobs.test.name, "test");
   assert.equal(workflow.jobs.test.if, "${{ always() }}");
