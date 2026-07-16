@@ -153,26 +153,17 @@ install_operator_skill</code></pre>
               preferred operating model.
             </p>
             <p>
-              Replace <code>&lt;your-catalog-remote&gt;</code> with the HTTPS URL of
-              your reviewed catalog repository:
+              Inspect an existing checkout before deciding whether it needs an
+              update. Cloning or pulling mutates the catalog and requires
+              explicit approval naming the catalog path and action.
             </p>
-            <pre><code>unset SRC
-CATALOG_DIR="$HOME/.skill-suitcase/skills"
-CATALOG_REMOTE="&lt;your-catalog-remote&gt;"
-if mkdir -p "$HOME/.skill-suitcase" &amp;&amp;
-  {
-    if test -e "$HOME/.skill-suitcase/skills/.git"; then
-      git -C "$CATALOG_DIR" pull --ff-only
-    else
-      git clone "$CATALOG_REMOTE" "$CATALOG_DIR"
-    fi
-  }
-then
-  export SRC="$CATALOG_DIR"
-else
-  printf 'Catalog checkout update failed; SRC was not exported.\n' &gt;&amp;2
-  false
-fi</code></pre>
+            <pre><code>CATALOG_DIR="$HOME/.skill-suitcase/skills"
+git -C "$CATALOG_DIR" status --short --branch</code></pre>
+            <p>
+              Follow the authoritative approval-gated catalog checkout runbook
+              in <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md#3-install-or-refresh-the-skills-catalog">INSTALL.md</a>
+              for an approved clone or update.
+            </p>
             <p>
               If you do not have a catalog yet, the
               <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/getting-started.md">getting-started walkthrough</a>

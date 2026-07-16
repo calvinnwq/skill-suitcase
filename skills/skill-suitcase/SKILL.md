@@ -365,7 +365,9 @@ ARTIFACT="$(find "$TMP" -name skill-suitcase-bundle.json -print -quit)"
 Artifact mode validates the bundle, but ordinary missing/behind writes are rebuilt from current catalog source and artifact hashes gate only the dirty-behind exception.
 Neither an artifact nor a plan lock binds local target overrides, the resolved install root, or copy versus symlink mode, so approve those invocation-time choices separately.
 Re-run `pack` and inspect the current `diff` immediately before artifact apply; do not treat an older artifact as byte-for-byte authorization.
-Pack guards only absolute manifest-declared target paths and does not account for CLI overrides or expand `~`, so keep staging outside the catalog and every resolved target root.
+Pack guards absolute resolved target paths, including CLI overrides, but does
+not expand `~`, so keep staging outside the catalog and every resolved target
+root.
 
 For Git-backed catalogs, `pack`, plan-lock creation, and `apply` refuse selected
 source skills that contain untracked, non-ignored files. Track or remove scratch
