@@ -27,8 +27,9 @@ Current durable release facts:
 - The GitHub repository is public.
 - The installed binary name is `skill-suitcase`.
 - The package requires Node.js 20 or newer.
-- CI runs tests, lint/typecheck, architecture, and formatting checks on Node 24,
-  plus the packed-package smoke test on Node 20 and Node 24.
+- CI runs an OSV dependency advisory scan against `pnpm-lock.yaml`, plus tests,
+  lint/typecheck, architecture, and formatting checks on Node 24 and the
+  packed-package smoke test on Node 20 and Node 24.
 - GitHub releases and release notes are managed by Release Please.
 - npm publication runs only after Release Please creates a GitHub release.
 - npm publication uses GitHub Actions OIDC Trusted Publishing with provenance;
@@ -129,17 +130,17 @@ and publishes with provenance.
 ## CI And Repository Controls
 
 The public repository runs `.github/workflows/ci.yml` for pull requests and pushes to `main`.
-Its `verify` job installs the frozen pnpm lockfile on Node 24 and runs the tests,
-lint/typecheck, architecture check, and formatting check. Its `package-smoke`
-job verifies the packed and installed CLI on Node 20 and Node 24. The required
-`test` check aggregates both jobs, so the stable ruleset context passes only
-after every CI gate and both supported-runtime smoke runs succeed.
+Its `dependency-audit` job runs the official OSV-Scanner reusable workflow against `pnpm-lock.yaml` and fails on a known vulnerability.
+SARIF upload is disabled so the same read-only scan works for forked pull requests without elevated security-event permissions.
+Its `verify` job installs the frozen pnpm lockfile on Node 24 and runs the tests, lint/typecheck, architecture check, and formatting check.
+Its `package-smoke` job verifies the packed and installed CLI on Node 20 and Node 24.
+The required `test` check aggregates all three jobs, so the stable ruleset context passes only after the advisory scan, every repository gate, and both supported-runtime smoke runs succeed.
 
-The active repository ruleset was verified through the GitHub API on 2026-07-11.
+The active repository ruleset was verified through the GitHub API on 2026-07-16.
 It is named `Protect main` and targets `main`.
-It requires pull requests, stale-review dismissal after new pushes, review-thread resolution, the CI `test` check, deletion protection, and non-fast-forward protection.
-It currently requires zero approving reviews and does not require the checked branch to be up to date.
-Raise the required approving-review count to at least one before treating repository protection as complete; require up-to-date branches when practical. These are GitHub ruleset changes and cannot be enforced from repository source.
+It requires pull requests, at least one approving review, stale-review dismissal after new pushes, review-thread resolution, the CI `test` check, deletion protection, and non-fast-forward protection.
+It does not require the checked branch to be up to date; enable strict status checks later if concurrent merge traffic makes stale-base validation a practical risk.
+These are GitHub ruleset settings and cannot be enforced from repository source.
 
 GitHub Actions currently requires approval for workflows opened by first-time
 contributors. The Release Please PR is authored by `github-actions[bot]`, and
