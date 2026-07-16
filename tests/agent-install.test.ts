@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
+import { validate } from "../src/validator.js";
 
 test("npm package includes the operator skill and install guide", async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files?: string[] };
@@ -23,6 +26,8 @@ test("operator skill has complete frontmatter and conservative live-mutation rul
     "track",
     "reconcile",
     "repair",
+    "prune",
+    "promote",
     "import-target",
     "apply",
     "rollback",
@@ -32,8 +37,10 @@ test("operator skill has complete frontmatter and conservative live-mutation rul
     assert.ok(description.includes(trigger), `operator skill description must include ${trigger}`);
   }
   assert.doesNotMatch(skill, /TODO/);
-  assert.match(skill, /read-only commands as the default path/);
-  assert.match(skill, /Mutate live skill roots only after explicit human approval/);
+  assert.match(skill, /read-only command modes as the default path/);
+  assert.match(skill, /Mutate a catalog or live skill root only after explicit human approval/);
+  assert.match(skill, /## Phases/);
+  assert.match(skill, /## Output Format/);
   assert.match(skill, /Source And Target Matrix/);
   assert.match(skill, /Future provider/);
   assert.match(skill, /provider-specific prose/);
@@ -42,6 +49,72 @@ test("operator skill has complete frontmatter and conservative live-mutation rul
   assert.match(skill, /apply --artifact/);
   assert.match(skill, /\$HOME\/\.skill-suitcase\/skills/);
   assert.doesNotMatch(skill, /(?:~|\$HOME)\/repos\/skills(?:-catalog)?(?=[/"`\s]|$)/);
+});
+
+test("operator skill mirrors the public inspect-stage-mutate safety model", async () => {
+  const [skill, readme, agentMetadata] = await Promise.all([
+    readFile("skills/skill-suitcase/SKILL.md", "utf8"),
+    readFile("README.md", "utf8"),
+    readFile("skills/skill-suitcase/agents/openai.yaml", "utf8"),
+  ]);
+
+  const readOnlyModes = [
+    "`import`",
+    "`validate`",
+    "`targets`",
+    "`plan`",
+    "`status`",
+    "`diff`",
+    "`pack --dry-run`",
+    "`reconcile --dry-run`",
+    "`repair --dry-run`",
+    "`prune --dry-run`",
+    "`promote --dry-run`",
+    "`import-target --dry-run`",
+    "`upstream check`",
+    "`upstream fetch --dry-run`",
+  ];
+  for (const mode of readOnlyModes) {
+    assert.ok(readme.includes(mode), `README safety model must include ${mode}`);
+    assert.ok(skill.includes(mode), `operator skill safety contract must include ${mode}`);
+  }
+
+  assert.match(skill, /pack --output/);
+  assert.match(skill, /apply --artifact/);
+  assert.match(skill, /restart the read-only audit/);
+  assert.doesNotMatch(skill, /Refresh the catalog before inspecting/);
+  assert.match(agentMetadata, /audit my catalog and target first/);
+  assert.match(agentMetadata, /stage any approved skill changes safely/);
+});
+
+test("packaged operator skill passes catalog validation", async (t) => {
+  const source = await mkdtemp(path.join(tmpdir(), "skill-suitcase-operator-catalog-"));
+  t.after(async () => rm(source, { recursive: true, force: true }));
+  const skillDirectory = path.join(source, "skills", "skill-suitcase");
+  await mkdir(skillDirectory, { recursive: true });
+  await copyFile("skills/skill-suitcase/SKILL.md", path.join(skillDirectory, "SKILL.md"));
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  operator:
+    skills:
+      - skill-suitcase
+
+assignments:
+  codex:
+    suitcases:
+      - operator
+
+assignmentPaths:
+  codex:
+    assignment: codex
+`
+  );
+
+  const result = await validate({ source });
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.referencedSkills, 1);
+  assert.deepEqual(result.findings.filter((finding) => finding.level === "error"), []);
 });
 
 test("agent install guide tells agents how to install and verify the skill", async () => {
