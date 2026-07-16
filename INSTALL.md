@@ -145,7 +145,7 @@ Inspect an existing checkout before deciding whether it needs an update:
 ```bash
 unset SRC
 CATALOG_DIR="$HOME/.skill-suitcase/skills"
-if test -e "$CATALOG_DIR/.git"; then
+if test -e "$HOME/.skill-suitcase/skills/.git"; then
   git -C "$CATALOG_DIR" status --short --branch
   export SRC="$CATALOG_DIR"
 else
@@ -164,13 +164,20 @@ git -C "$CATALOG_DIR" status --short --branch
 ```
 
 If no checkout exists, obtain explicit approval naming the catalog remote and
-destination before cloning it:
+destination before cloning it.
+Replace `<your-catalog-remote>` with the approved HTTPS remote URL, then run:
 
 ```bash
+unset SRC
 CATALOG_REMOTE="<your-catalog-remote>"
-mkdir -p "$HOME/.skill-suitcase"
-git clone "$CATALOG_REMOTE" "$CATALOG_DIR"
-export SRC="$CATALOG_DIR"
+if mkdir -p "$HOME/.skill-suitcase" &&
+  git clone "$CATALOG_REMOTE" "$CATALOG_DIR"
+then
+  export SRC="$CATALOG_DIR"
+else
+  printf 'Catalog checkout update failed; SRC was not exported.\n' >&2
+  false
+fi
 ```
 
 If no catalog exists yet, create a minimal one by following
