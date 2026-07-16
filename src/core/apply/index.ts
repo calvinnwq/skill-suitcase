@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, symlink, unlink } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
@@ -38,6 +38,13 @@ import {
   resolveArtifactContext,
   resolveLockContext
 } from "./approval-context.js";
+import {
+  assertSafeMutationParent,
+  cleanupApplyBackups,
+  executeCopyWriteTransaction,
+  rollbackApplyWrites,
+  type WriteEntry
+} from "./copy-write-transaction.js";
 import {
   findReceiptInstallRecord,
   normalizeSymlinkRecordSourcePath,
@@ -454,12 +461,6 @@ export async function apply({
     statusBySkill.set(statusItem.skill, statusItem);
   }
 
-  const filesAppliedBySkill = new Map<string, number>();
-  const restorePlan: Array<{ targetPath: string; backupPath: string | null }> = [];
-  const successfulWritesRef = {
-    value: 0
-  };
-
   const failAfterSuccessfulWrites = typeof __test?.failAfterSuccessfulWrites === "number"
     && Number.isFinite(__test.failAfterSuccessfulWrites)
     && __test.failAfterSuccessfulWrites > 0
@@ -470,88 +471,37 @@ export async function apply({
     && __test.failAfterReceiptWrites > 0
       ? Math.trunc(__test.failAfterReceiptWrites)
       : null;
-  let writeResult: WritePlannedSkillResult;
 
-  const entriesBySkill = new Map<string, WriteEntry[]>();
-  for (const entry of writeEntries.items) {
-    const bucket = entriesBySkill.get(entry.skill);
-    if (bucket === undefined) {
-      entriesBySkill.set(entry.skill, [entry]);
-      continue;
-    }
-    bucket.push(entry);
-  }
-  const rollbackBySkill = new Map<string, RollbackRecord>();
+  const writeOutcome = await executeCopyWriteTransaction({
+    writeEntries: writeEntries.items,
+    installRoot,
+    sourceBySkill,
+    destinationBySkill,
+    failAfterSuccessfulWrites,
+    beforeWriteForSkill: __test?.beforeWriteForSkill,
+    afterBackup: __test?.afterCopyBackup
+  });
 
-  for (const [skill, entries] of entriesBySkill) {
-    const skillSource = sourceBySkill.get(skill);
-    if (!skillSource) {
-      return failure({
-        source: diffResult.source,
-        target,
-        mode: context.mode,
-        input: context.input,
-        assignment: diffResult.assignment,
-        planTarget: diffResult.target,
-        installRoot,
-        summary: asSummary(diffResult),
-        preApplyStatus: {
-          source: preStatus.source,
-          statuses: targetStatuses,
-          summary: preApplySummary
-        },
-        errors: [{ code: "missing_skill_source", message: `No source path for ${skill}` }]
-      });
-    }
-
-    await __test?.beforeWriteForSkill?.(skill);
-    rollbackBySkill.set(skill, await buildRollbackRecord({
-      targetPath: path.join(installRoot, destinationBySkill.get(skill) ?? skill),
-      entries
-    }));
-
-    writeResult = await writePlannedSkillEntries({
-      skill,
-      entries,
+  if (!writeOutcome.ok) {
+    return failure({
+      source: diffResult.source,
+      target,
+      mode: context.mode,
+      input: context.input,
+      assignment: diffResult.assignment,
+      planTarget: diffResult.target,
       installRoot,
-      failAfterSuccessfulWrites,
-      successfulWritesRef,
-      afterBackup: __test?.afterCopyBackup
+      summary: asSummary(diffResult),
+      preApplyStatus: {
+        source: preStatus.source,
+        statuses: targetStatuses,
+        summary: preApplySummary
+      },
+      errors: writeOutcome.errors
     });
-
-    if (!writeResult.ok) {
-      const recoveryErrors = [
-        ...writeResult.recoveryErrors,
-        ...await rollbackApplyWrites({
-          restorePlan,
-          installRoot
-        })
-      ];
-      return failure({
-        source: diffResult.source,
-        target,
-        mode: context.mode,
-        input: context.input,
-        assignment: diffResult.assignment,
-        planTarget: diffResult.target,
-        installRoot,
-        summary: asSummary(diffResult),
-        preApplyStatus: {
-          source: preStatus.source,
-          statuses: targetStatuses,
-          summary: preApplySummary
-        },
-        errors: [
-          { code: "write_error", message: writeResult.message },
-          ...recoveryErrors.map((message) => ({ code: "apply_recovery_failed", message }))
-        ]
-      });
-    }
-
-    filesAppliedBySkill.set(skill, entries.length);
-    restorePlan.push(...writeResult.restorePlan);
-    successfulWritesRef.value = writeResult.successfulWrites;
   }
+
+  const { rollbackBySkill, restorePlan, filesAppliedBySkill } = writeOutcome;
 
   const sourceCommit = context.sourceCommit;
   const backupPaths = restorePlan
@@ -1111,63 +1061,9 @@ async function listFiles(root: string): Promise<string[]> {
   return files.sort();
 }
 
-type WriteEntry = {
-  skill: string;
-  relativePath: string;
-  sourcePath: string;
-  targetPath: string;
-};
-
 type WriteEntries = {
   items: WriteEntry[];
   errors: ApplyFinding[];
-};
-
-type WritePlannedSkillInput = {
-  skill: string;
-  entries: WriteEntry[];
-  installRoot: string;
-  failAfterSuccessfulWrites: number | null;
-  successfulWritesRef: {
-    value: number;
-  };
-  afterBackup?: ((targetPath: string, backupPath: string) => Promise<void> | void) | undefined;
-};
-
-type WritePlannedSkillResult = {
-  ok: true;
-  successfulWrites: number;
-  restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
-} | {
-  ok: false;
-  message: string;
-  successfulWrites: number;
-  restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
-  recoveryErrors: string[];
-};
-
-type RollbackFileState = {
-  kind: "file";
-  sha256: string;
-  bytes: string;
-} | {
-  kind: "missing";
-} | {
-  kind: "restore-impossible";
-  reason: string;
-};
-
-type RollbackFileRecord = {
-  path: string;
-  targetPath: string;
-  previous: RollbackFileState;
-};
-
-type RollbackRecord = {
-  schema: "calvinnwq.skills.rollback.v0";
-  status: "available";
-  targetPath: string;
-  files: RollbackFileRecord[];
 };
 
 function collectApplyEntries(entries: DiffForApply["entries"]): WriteEntries {
@@ -1230,315 +1126,6 @@ function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {
   }
 
   return errors;
-}
-
-async function buildRollbackRecord({
-  targetPath,
-  entries
-}: {
-  targetPath: string;
-  entries: WriteEntry[];
-}): Promise<RollbackRecord> {
-  const files: RollbackFileRecord[] = [];
-  for (const entry of entries) {
-    files.push({
-      path: entry.relativePath,
-      targetPath: entry.targetPath,
-      previous: await readRollbackFileState(entry.targetPath)
-    });
-  }
-
-  return {
-    schema: "calvinnwq.skills.rollback.v0",
-    status: "available",
-    targetPath,
-    files: files.sort((left, right) => left.path.localeCompare(right.path))
-  };
-}
-
-async function readRollbackFileState(filePath: string): Promise<RollbackFileState> {
-  try {
-    const info = await lstat(filePath);
-    if (info.isSymbolicLink()) {
-      return {
-        kind: "restore-impossible",
-        reason: "target was a symbolic link"
-      };
-    }
-    if (!info.isFile()) {
-      return {
-        kind: "restore-impossible",
-        reason: "target was not a regular file"
-      };
-    }
-    const bytes = await readFile(filePath);
-    return {
-      kind: "file",
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      bytes: bytes.toString("base64")
-    };
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return { kind: "missing" };
-    }
-    return {
-      kind: "restore-impossible",
-      reason: error instanceof Error ? error.message : "target could not be read"
-    };
-  }
-}
-
-async function writePlannedSkillEntries(
-  {
-    skill,
-    entries,
-    installRoot,
-    failAfterSuccessfulWrites,
-    successfulWritesRef,
-    afterBackup
-  }: WritePlannedSkillInput
-): Promise<WritePlannedSkillResult> {
-  const tempSuffix = `suitcase-apply-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const nextRestorePlan: Array<{ targetPath: string; backupPath: string | null }> = [];
-
-  try {
-    for (const entry of entries) {
-      await writePlannedEntryWithRollback({
-        entry,
-        restorePlan: nextRestorePlan,
-        tempSuffix,
-        installRoot,
-        afterBackup
-      });
-
-      successfulWritesRef.value += 1;
-      const wroteCount = successfulWritesRef.value;
-
-      if (failAfterSuccessfulWrites !== null && wroteCount === failAfterSuccessfulWrites) {
-        throw new Error(`Injected write failure for ${skill} after ${wroteCount} successful writes`);
-      }
-    }
-
-    return {
-      ok: true,
-      successfulWrites: successfulWritesRef.value,
-      restorePlan: nextRestorePlan
-    };
-  } catch (error) {
-    const recoveryErrors: string[] = [];
-    const retainedRestorePlan: Array<{ targetPath: string; backupPath: string | null }> = [];
-    for (const plannedRestore of [...nextRestorePlan].reverse()) {
-      const recovery = await rollbackPlannedEntry(plannedRestore, installRoot);
-      if (!recovery.ok) {
-        recoveryErrors.push(recovery.message);
-        retainedRestorePlan.push(plannedRestore);
-      }
-    }
-
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : "Unknown write error",
-      successfulWrites: successfulWritesRef.value,
-      restorePlan: retainedRestorePlan.reverse(),
-      recoveryErrors
-    };
-  }
-}
-
-async function writePlannedEntryWithRollback({
-  entry,
-  tempSuffix,
-  restorePlan,
-  installRoot,
-  afterBackup
-}: {
-  entry: WriteEntry;
-  tempSuffix: string;
-  restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
-  installRoot: string;
-  afterBackup?: ((targetPath: string, backupPath: string) => Promise<void> | void) | undefined;
-}): Promise<void> {
-  const targetPath = entry.targetPath;
-  const sourcePath = entry.sourcePath;
-  const tmpPath = `${targetPath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  let backupPath: string | null = null;
-
-  try {
-    await assertSafeMutationParent(targetPath, installRoot, true);
-
-    if (await statSafe(targetPath) !== null) {
-      backupPath = `${targetPath}.previous-${tempSuffix}`;
-      await assertSafeMutationParent(targetPath, installRoot, false);
-      await rename(targetPath, backupPath);
-      await afterBackup?.(targetPath, backupPath);
-    }
-
-    const sourceMode = (await stat(sourcePath)).mode & 0o777;
-    const contents = await readFile(sourcePath);
-    await assertSafeMutationParent(targetPath, installRoot, false);
-    await writeFile(tmpPath, contents, { mode: sourceMode });
-    await chmod(tmpPath, sourceMode);
-    await assertSafeMutationParent(targetPath, installRoot, false);
-    await rename(tmpPath, targetPath);
-    restorePlan.push({
-      targetPath,
-      backupPath
-    });
-  } catch (error) {
-    const recoveryErrors: string[] = [];
-    const plannedRestore = {
-      targetPath,
-      backupPath
-    };
-    const recovery = await rollbackPlannedEntry(plannedRestore, installRoot);
-    if (!recovery.ok) {
-      recoveryErrors.push(recovery.message);
-      restorePlan.push(plannedRestore);
-    }
-    try {
-      await assertSafeMutationParent(tmpPath, installRoot, false);
-      await unlink(tmpPath);
-    } catch (cleanupError) {
-      if (!isNodeError(cleanupError) || cleanupError.code !== "ENOENT") {
-        recoveryErrors.push(`Temporary apply path retained at ${tmpPath}: ${errorMessage(cleanupError)}`);
-      }
-    }
-    const message = errorMessage(error);
-    throw new Error(recoveryErrors.length === 0
-      ? message
-      : `${message}; recovery errors: ${recoveryErrors.join("; ")}`);
-  }
-}
-
-async function rollbackPlannedEntry({
-  targetPath,
-  backupPath
-}: {
-  targetPath: string;
-  backupPath: string | null;
-}, installRoot: string): Promise<{ ok: true } | { ok: false; message: string }> {
-  try {
-    await assertSafeMutationParent(targetPath, installRoot, false);
-    if (backupPath !== null) await assertSafeMutationParent(backupPath, installRoot, false);
-  } catch (error) {
-    return {
-      ok: false,
-      message: `Apply recovery refused for ${targetPath}${backupPath === null ? "" : `; backup retained at ${backupPath}`}: ${errorMessage(error)}`
-    };
-  }
-  if (backupPath === null) {
-    try {
-      await unlink(targetPath);
-      return { ok: true };
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") return { ok: true };
-      return { ok: false, message: `Apply recovery could not remove ${targetPath}: ${errorMessage(error)}` };
-    }
-  }
-
-  try {
-    await rename(backupPath, targetPath);
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      message: `Apply recovery could not restore ${targetPath}; backup retained at ${backupPath}: ${errorMessage(error)}`
-    };
-  }
-}
-
-async function rollbackApplyWrites({
-  restorePlan,
-  installRoot
-}: {
-  restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
-  installRoot: string;
-}): Promise<string[]> {
-  const recoveryErrors: string[] = [];
-  for (const plannedRestore of [...restorePlan].reverse()) {
-    const recovery = await rollbackPlannedEntry(plannedRestore, installRoot);
-    if (!recovery.ok) recoveryErrors.push(recovery.message);
-  }
-  return recoveryErrors;
-}
-
-async function cleanupApplyBackups({
-  restorePlan,
-  installRoot,
-  beforeCleanup
-}: {
-  restorePlan: Array<{ targetPath: string; backupPath: string | null }>;
-  installRoot: string;
-  beforeCleanup?: ((targetPath: string, backupPath: string) => Promise<void> | void) | undefined;
-}): Promise<string[]> {
-  const errors: string[] = [];
-  for (const plannedRestore of restorePlan) {
-    if (plannedRestore.backupPath !== null) {
-      try {
-        await beforeCleanup?.(plannedRestore.targetPath, plannedRestore.backupPath);
-        await assertSafeMutationParent(plannedRestore.backupPath, installRoot, false);
-        await unlink(plannedRestore.backupPath);
-      } catch (error) {
-        if (isNodeError(error) && error.code === "ENOENT") continue;
-        errors.push(`Apply backup retained at ${plannedRestore.backupPath}: ${errorMessage(error)}`);
-      }
-    }
-  }
-  return errors;
-}
-
-async function assertSafeMutationParent(
-  targetPath: string,
-  installRoot: string,
-  createMissing: boolean
-): Promise<void> {
-  const lexicalRoot = path.resolve(installRoot);
-  const lexicalParent = path.resolve(path.dirname(targetPath));
-  if (!isInsideOrEqual(lexicalParent, lexicalRoot)) {
-    throw new Error(`Target parent ${lexicalParent} escapes install root ${lexicalRoot}.`);
-  }
-
-  let current = lexicalRoot;
-  const relativeParts = path.relative(lexicalRoot, lexicalParent).split(path.sep).filter(Boolean);
-  for (const part of relativeParts) {
-    current = path.join(current, part);
-    try {
-      const info = await lstat(current);
-      if (info.isSymbolicLink()) throw new Error(`Target parent component ${current} is a symlink.`);
-      if (!info.isDirectory()) throw new Error(`Target parent component ${current} is not a directory.`);
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") break;
-      throw error;
-    }
-  }
-
-  const canonicalRoot = await realpath(lexicalRoot);
-  let existingParent = lexicalParent;
-  while (true) {
-    try {
-      const canonicalExistingParent = await realpath(existingParent);
-      if (!isInsideOrEqual(canonicalExistingParent, canonicalRoot)) {
-        throw new Error(`Target parent ${lexicalParent} resolves outside install root ${lexicalRoot}.`);
-      }
-      break;
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "ENOENT") throw error;
-      const parent = path.dirname(existingParent);
-      if (parent === existingParent) throw error;
-      existingParent = parent;
-    }
-  }
-
-  if (createMissing) await mkdir(lexicalParent, { recursive: true });
-  const canonicalParent = await realpath(lexicalParent);
-  if (!isInsideOrEqual(canonicalParent, canonicalRoot)) {
-    throw new Error(`Target parent ${lexicalParent} resolves outside install root ${lexicalRoot}.`);
-  }
-}
-
-function isInsideOrEqual(candidate: string, root: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 async function readFileSafeText(filePath: string): Promise<string | null> {
@@ -1677,15 +1264,4 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function statSafe(filePath: string): Promise<import("node:fs").Stats | null> {
-  try {
-    return await stat(filePath);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return null;
-    }
-    return null;
-  }
 }
