@@ -42,17 +42,36 @@ test("CI preserves the required aggregate gate and supported Node runtimes", asy
   );
   assert.equal(stepByName(workflow.jobs["package-smoke"], "Pack and install smoke").run, "pnpm run package:smoke");
 
+  const dependencyAudit = workflow.jobs["dependency-audit"];
+  assert.equal(
+    dependencyAudit.uses,
+    "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.8",
+  );
+  assert.deepEqual(dependencyAudit.with, {
+    "scan-args": "--lockfile=pnpm-lock.yaml",
+    "upload-sarif": false,
+    "fail-on-vuln": true,
+  });
+  assert.deepEqual(dependencyAudit.permissions, {
+    actions: "read",
+    contents: "read",
+    "security-events": "write",
+  });
+
   assert.equal(workflow.jobs.test.name, "test");
   assert.equal(workflow.jobs.test.if, "${{ always() }}");
-  assert.deepEqual(workflow.jobs.test.needs, ["verify", "package-smoke"]);
+  assert.deepEqual(workflow.jobs.test.needs, ["dependency-audit", "verify", "package-smoke"]);
   const aggregate = stepByName(workflow.jobs.test, "Confirm required CI gates passed");
   assert.deepEqual(aggregate.env, {
+    DEPENDENCY_AUDIT_RESULT: "${{ needs.dependency-audit.result }}",
     VERIFY_RESULT: "${{ needs.verify.result }}",
     PACKAGE_SMOKE_RESULT: "${{ needs.package-smoke.result }}",
   });
   assert.equal(
     aggregate.run,
-    'test "$VERIFY_RESULT" = "success"\ntest "$PACKAGE_SMOKE_RESULT" = "success"\n',
+    'test "$DEPENDENCY_AUDIT_RESULT" = "success"\n' +
+      'test "$VERIFY_RESULT" = "success"\n' +
+      'test "$PACKAGE_SMOKE_RESULT" = "success"\n',
   );
 });
 
