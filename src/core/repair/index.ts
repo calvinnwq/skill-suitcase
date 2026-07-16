@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
-import type { Dirent, Stats } from "node:fs";
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import path from "node:path";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { diff } from "../diffing/index.js";
@@ -22,19 +20,13 @@ import {
 import { SYMLINK_MODE } from "../install-modes.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import {
-  sourcePolicyDecision,
-  sourcePolicyPrunesDirectory,
-  type SourcePolicy
-} from "../source-policy.js";
-import {
   beginStagedSwap,
   hashDirectory,
-  listDirectories,
-  listFiles,
   recoverSwappedTarget,
   transactionDirectoryForTarget
 } from "../staged-swap.js";
 import { status } from "../status/index.js";
+import { buildRollbackFiles, validateDirectoryTree } from "./filesystem-state.js";
 
 type RepairInput = {
   source: string;
@@ -102,23 +94,6 @@ type RepairedBackup = {
   skill: string;
   targetPath: string;
   backupPath: string;
-};
-
-type RollbackFileState = {
-  kind: "file";
-  sha256: string;
-  bytes: string;
-} | {
-  kind: "missing";
-} | {
-  kind: "restore-impossible";
-  reason: string;
-};
-
-type RollbackFileRecord = {
-  path: string;
-  targetPath: string;
-  previous: RollbackFileState;
 };
 
 type RepairBaseResult = {
@@ -1191,274 +1166,6 @@ function refusedSkillsFromErrors(errors: RepairError[]): string[] {
 
 function backupPathTemplate(installRoot: string, targetPath: string, skill: string): string {
   return path.join(transactionDirectoryForTarget(targetPath, installRoot), `.${skill}.suitcase-pre-repair-<timestamp>`);
-}
-
-type DirectoryTreeValidationResult =
-  | { ok: true }
-  | { ok: false; error: RepairError };
-
-async function validateDirectoryTree(
-  rootPath: string,
-  codes: {
-    symlinkCode: string;
-    unreadableCode: string;
-    missingCode: string;
-    label: string;
-    rejectEmptyDirectories?: boolean;
-    sourcePolicy?: SourcePolicy | undefined;
-  }
-): Promise<DirectoryTreeValidationResult> {
-  let info: Stats;
-  try {
-    info = await lstat(rootPath);
-  } catch (error) {
-    return {
-      ok: false,
-      error: repairError({
-        code: isNodeError(error) && error.code === "ENOENT" ? codes.missingCode : codes.unreadableCode,
-        message: `${codes.label} directory ${rootPath} could not be read: ${errorMessage(error)}`,
-        path: rootPath
-      })
-    };
-  }
-
-  if (info.isSymbolicLink()) {
-    return {
-      ok: false,
-      error: repairError({
-        code: codes.symlinkCode,
-        message: `${codes.label} directory ${rootPath} is a symlink and cannot be repaired safely.`,
-        path: rootPath
-      })
-    };
-  }
-
-  if (!info.isDirectory()) {
-    return {
-      ok: false,
-      error: repairError({
-        code: codes.unreadableCode,
-        message: `${codes.label} path ${rootPath} is not a directory.`,
-        path: rootPath
-      })
-    };
-  }
-
-  return validateDirectoryEntries(rootPath, rootPath, codes);
-}
-
-async function validateDirectoryEntries(
-  rootPath: string,
-  currentPath: string,
-  codes: {
-    symlinkCode: string;
-    unreadableCode: string;
-    missingCode: string;
-    label: string;
-    rejectEmptyDirectories?: boolean;
-    sourcePolicy?: SourcePolicy | undefined;
-  }
-): Promise<DirectoryTreeValidationResult> {
-  let entries: Dirent[];
-  try {
-    entries = await readdir(currentPath, { withFileTypes: true });
-  } catch (error) {
-    return {
-      ok: false,
-      error: repairError({
-        code: codes.unreadableCode,
-        message: `${codes.label} directory ${rootPath} could not be scanned: ${errorMessage(error)}`,
-        path: currentPath
-      })
-    };
-  }
-
-  if (codes.rejectEmptyDirectories === true && currentPath !== rootPath && entries.length === 0) {
-    return {
-      ok: false,
-      error: repairError({
-        code: codes.symlinkCode,
-        message: `${codes.label} tree ${rootPath} contains an empty directory at ${currentPath} and cannot be rollback-recorded safely.`,
-        path: currentPath
-      })
-    };
-  }
-
-  for (const entry of entries) {
-    const entryPath = path.join(currentPath, entry.name);
-    const relativePath = path.relative(rootPath, entryPath);
-    const policyDecision = codes.sourcePolicy === undefined
-      ? { action: "include" as const, pattern: null }
-      : sourcePolicyDecision(relativePath, codes.sourcePolicy);
-    if (policyDecision.action === "exclude") {
-      continue;
-    }
-    if (policyDecision.action === "deny") {
-      return {
-        ok: false,
-        error: repairError({
-          code: codes.symlinkCode,
-          message: `${codes.label} tree ${rootPath} contains a source-policy denied path at ${entryPath} and cannot be repaired safely.`,
-          path: entryPath
-        })
-      };
-    }
-    if (entry.isSymbolicLink()) {
-      return {
-        ok: false,
-        error: repairError({
-          code: codes.symlinkCode,
-          message: `${codes.label} tree ${rootPath} contains a symlink at ${entryPath} and cannot be repaired safely.`,
-          path: entryPath
-        })
-      };
-    }
-    if (entry.isDirectory()) {
-      if (codes.sourcePolicy !== undefined && sourcePolicyPrunesDirectory(relativePath, codes.sourcePolicy)) {
-        continue;
-      }
-      const nested = await validateDirectoryEntries(rootPath, entryPath, codes);
-      if (!nested.ok) {
-        return nested;
-      }
-      continue;
-    }
-    if (entry.isFile()) {
-      continue;
-    }
-    return {
-      ok: false,
-      error: repairError({
-        code: codes.symlinkCode,
-        message: `${codes.label} tree ${rootPath} contains an unsupported filesystem entry at ${entryPath} and cannot be repaired safely.`,
-        path: entryPath
-      })
-    };
-  }
-  return { ok: true };
-}
-
-async function buildRollbackFiles({
-  previousTargetPath,
-  appliedTargetPath
-}: {
-  previousTargetPath: string;
-  appliedTargetPath: string;
-}): Promise<RollbackFileRecord[]> {
-  const previousFiles = await listFiles(previousTargetPath);
-  const appliedFiles = await listFiles(appliedTargetPath);
-  const appliedDirectories = await listDirectories(appliedTargetPath);
-  const replacedDirectories: string[] = [];
-  const replacedFiles: string[] = [];
-  const createdDirectories: string[] = [];
-  for (const relativePath of appliedDirectories.sort(compareShallowestPathFirst)) {
-    if (hasPathAncestor(replacedDirectories, relativePath)) {
-      continue;
-    }
-    const previousDirectoryState = await lstat(path.join(previousTargetPath, relativePath)).catch((error: unknown) => {
-      if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
-        return null;
-      }
-      throw error;
-    });
-    if (previousDirectoryState === null) {
-      createdDirectories.push(relativePath);
-      continue;
-    }
-    if (!previousDirectoryState.isDirectory()) {
-      replacedDirectories.push(relativePath);
-    }
-  }
-  for (const relativePath of appliedFiles.sort(compareShallowestPathFirst)) {
-    if (hasPathAncestor(replacedDirectories, relativePath)) {
-      continue;
-    }
-    const previousFileState = await lstat(path.join(previousTargetPath, relativePath)).catch((error: unknown) => {
-      if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
-        return null;
-      }
-      throw error;
-    });
-    if (previousFileState?.isDirectory() === true) {
-      replacedFiles.push(relativePath);
-    }
-  }
-  const relativePaths = [...new Set([...previousFiles, ...appliedFiles])].sort();
-  const records: RollbackFileRecord[] = [];
-  for (const relativePath of [...replacedDirectories, ...replacedFiles].sort(compareShallowestPathFirst)) {
-    records.push({
-      path: relativePath,
-      targetPath: path.join(appliedTargetPath, relativePath),
-      previous: { kind: "missing" }
-    });
-  }
-  for (const relativePath of relativePaths) {
-    if (hasPathAncestor(replacedDirectories, relativePath) || replacedFiles.includes(relativePath)) {
-      continue;
-    }
-    records.push({
-      path: relativePath,
-      targetPath: path.join(appliedTargetPath, relativePath),
-      previous: await readRollbackFileState(path.join(previousTargetPath, relativePath))
-    });
-  }
-  for (const relativePath of createdDirectories.sort(compareDeepestPathFirst)) {
-    records.push({
-      path: relativePath,
-      targetPath: path.join(appliedTargetPath, relativePath),
-      previous: { kind: "missing" }
-    });
-  }
-  return records;
-}
-
-async function readRollbackFileState(filePath: string): Promise<RollbackFileState> {
-  try {
-    const info = await lstat(filePath);
-    if (info.isSymbolicLink()) {
-      return {
-        kind: "restore-impossible",
-        reason: "target was a symbolic link"
-      };
-    }
-    if (!info.isFile()) {
-      return {
-        kind: "restore-impossible",
-        reason: "target was not a regular file"
-      };
-    }
-    const bytes = await readFile(filePath);
-    return {
-      kind: "file",
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      bytes: bytes.toString("base64")
-    };
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return { kind: "missing" };
-    }
-    return {
-      kind: "restore-impossible",
-      reason: errorMessage(error)
-    };
-  }
-}
-
-function compareDeepestPathFirst(left: string, right: string): number {
-  const depthDifference = right.split(path.sep).length - left.split(path.sep).length;
-  return depthDifference === 0 ? left.localeCompare(right) : depthDifference;
-}
-
-function compareShallowestPathFirst(left: string, right: string): number {
-  const depthDifference = left.split(path.sep).length - right.split(path.sep).length;
-  return depthDifference === 0 ? left.localeCompare(right) : depthDifference;
-}
-
-function hasPathAncestor(ancestors: string[], candidate: string): boolean {
-  return ancestors.some((ancestor) => {
-    const relativePath = path.relative(ancestor, candidate);
-    return relativePath !== "" && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
-  });
 }
 
 function compareBackups(left: RepairedBackup, right: RepairedBackup): number {
