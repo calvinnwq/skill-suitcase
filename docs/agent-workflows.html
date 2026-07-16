@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Agent workflows · Skill Suitcase docs</title>
-    <meta name="description" content="The agent operating loop: read-only audit first, a six-way recovery decision tree, drift heartbeats, and fresh-machine setup through the catalog.">
+    <meta name="description" content="The agent operating loop plus ten executable recipes: read-only audit first, state-specific staging and approval-gated mutation, drift heartbeats, upstream refresh, and provider boundaries.">
     <script>(function(){var stored=null;try{stored=localStorage.getItem("skill-suitcase-docs-theme");}catch(e){}var dark=false;try{dark=matchMedia("(prefers-color-scheme: dark)").matches;}catch(e){}document.documentElement.dataset.theme=stored||(dark?"dark":"light");})();</script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%B3%3C/text%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -40,7 +40,8 @@
           <p class="lede">
             Agents run the read-only audit loop freely, report what they find, and
             cross a mutation boundary only after a human approves the exact source,
-            target, and mode. The packaged operator skill encodes this loop.
+            target, and mode. The recipes below turn each observed state into the
+            exact command sequence, so no step is guessed.
           </p>
 
           <section>
@@ -106,46 +107,517 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
               <code>import-target</code>. Use receipt-backed
               <code>rollback</code> only to reverse eligible
               <code>apply</code>, <code>reconcile</code>, or <code>repair</code>
-              state.
+              state. The recipes below execute this tree state by state.
             </p>
           </section>
 
           <section>
-            <h2>Drift audit and heartbeat</h2>
-            <div class="callout" data-kind="readonly">
-              <p class="callout-label">Heartbeat</p>
+            <h2>How to read a recipe</h2>
+            <p>
+              Every recipe uses the same conventions. <code>SRC</code> points at
+              the approved catalog checkout, for example
+              <code>SRC="/path/to/skills-catalog"</code>. Examples use the
+              <code>codex</code> target with its <code>--codex-home</code>
+              override; for another runtime, swap only the target ID and override
+              flag from <a href="reference.html#targets">the target registry</a>.
+              Every invocation passes <code>--json</code> and returns a
+              deterministic result object on stdout, including structured
+              <code>ok: false</code> refusals.
+            </p>
+            <p>Each step carries exactly one write classification:</p>
+            <div class="def-rows">
+              <div><span class="k">read-only</span><span class="v">Writes nothing anywhere. Safe to run and repeat without approval.</span></div>
+              <div><span class="k">staging-only</span><span class="v">Writes only a disposable output directory outside the catalog and every resolved target root. The live target and catalog are untouched.</span></div>
+              <div><span class="k">catalog-mutating</span><span class="v">Writes the catalog working tree as ordinary uncommitted Git changes. Nothing auto-commits; review the diff.</span></div>
+              <div><span class="k">live-target-mutating</span><span class="v">Writes a live agent skill root and its receipt. Runs only after the approval named in the recipe.</span></div>
+            </div>
+            <div class="callout" data-kind="boundary">
+              <p class="callout-label">Approval</p>
               <p>
-                Re-run <code>status --json</code> and <code>diff --json</code>
-                periodically as the drift-audit heartbeat. Reporting drift is
-                automatic; importing or overwriting it is not. Drift detection is
-                never permission to mutate either side.
+                No catalog-mutating or live-target-mutating step runs until a
+                human gives explicit approval naming the source catalog, target,
+                exact skills, action, and mode, with the recipe's dry-run or diff
+                evidence in front of them. Read-only and staging-only steps never
+                need approval. Work one target at a time.
               </p>
             </div>
             <p>
-              When a catalog-owned skill goes <code>dirty</code> in a writable
-              target, stop and inspect. <code>repair --dry-run</code> previews
-              discarding the edit; <code>import-target --dry-run</code> previews
-              keeping it, reporting the receipt hash, catalog hash, target hash,
-              and planned repo writes. Either apply runs only after explicit
-              approval that names the outcome.
+              Recipes show the canonical command shapes;
+              the <a href="reference.html">command reference</a> documents
+              exhaustive options and refusal codes.
             </p>
           </section>
 
           <section>
-            <h2>Fresh machine setup</h2>
-            <p>New-machine setup installs from the skills repo through Suitcase:</p>
-            <ol>
-              <li>Install <code>skill-suitcase</code> and the packaged operator skill.</li>
-              <li>Clone or update the approved skills catalog at any local path.</li>
-              <li>Run <code>import</code>, strict <code>validate</code>, <code>targets</code>, <code>plan</code>, <code>status</code>, and <code>diff</code>.</li>
-              <li>Stage or lock the reviewed plan.</li>
-              <li>Apply only the approved target changes and verify receipts and status.</li>
-            </ol>
-            <p>
-              The <a href="upstream-refresh.html">catalog-only upstream lane</a>
-              may refresh selected reviewed source before this flow, but it is not
-              a shortcut for writing into live agent homes.
-            </p>
+            <h2>The recipes</h2>
+
+            <section>
+              <h3 id="recipe-new-machine-setup">1. New-machine setup from an approved catalog</h3>
+              <p>
+                <strong>Select when</strong> a fresh machine has agent runtimes but
+                no Suitcase-managed skills yet, and the operator has named an
+                approved catalog. New-machine setup installs from the skills repo
+                through Suitcase, never by letting upstream tooling write into
+                managed runtime roots. Install the CLI, the packaged operator
+                skill, and the approved catalog checkout at a portable root such as
+                <code>$HOME/.skill-suitcase/skills</code> by following
+                <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md">INSTALL.md</a>,
+                then run this recipe once per target.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v"><code>import</code>, <code>validate --strict</code>, <code>targets</code>, <code>plan</code>, <code>status</code>, <code>diff</code></span></div>
+                <div><span class="k">staging-only</span><span class="v"><code>pack --output</code> into a temporary directory</span></div>
+                <div><span class="k">live-target-mutating</span><span class="v"><code>apply --artifact</code>, only after approval</span></div>
+              </div>
+              <pre><code><span class="c"># read-only: prove the catalog and this target before staging anything</span>
+skill-suitcase import --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --strict --json
+skill-suitcase targets --source "$SRC" --json
+skill-suitcase plan --source "$SRC" --target codex --json
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+
+<span class="c"># staging-only: bundle outside the catalog and every resolved target root</span>
+OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
+skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json</code></pre>
+              <div class="callout" data-kind="boundary">
+                <p class="callout-label">Approval</p>
+                <p>
+                  The apply step below runs only after explicit approval naming
+                  the catalog, the target and its resolved install root, the
+                  planned skills, artifact mode, and copy versus symlink mode.
+                </p>
+              </div>
+              <pre><code><span class="c"># live-target-mutating: after approval</span>
+ARTIFACT="$(find "$OUT" -name skill-suitcase-bundle.json -print -quit)"
+skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+              <p>
+                <strong>Evidence.</strong> <code>import</code> and
+                <code>validate --strict</code> must return <code>ok: true</code>
+                with no error-level findings. On a fresh machine the status
+                entries read <code>missing</code>; after apply, every planned
+                skill reads <code>current</code> and the receipt path appears in
+                the apply result. Refusals such as
+                <code>source_untracked_files</code>,
+                <code>unsafe_target_state</code>, or
+                <code>read_only_target</code> arrive as structured
+                <code>ok: false</code> JSON.
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Re-run <code>status</code> and
+                confirm zero non-<code>current</code> entries for the target, then
+                repeat the recipe for the next target, one at a time. Stop and
+                escalate if strict validation reports errors or if the supposedly
+                fresh target already reports <code>unknown</code> or
+                <code>dirty</code> entries; those route to recipes 5 through 8
+                instead of being overwritten by apply.
+              </p>
+            </section>
+
+            <section>
+              <h3 id="recipe-read-only-audit">2. Read-only catalog and target audit</h3>
+              <p>
+                <strong>Select when</strong> asked to report the state of the
+                catalog and targets, or as the mandatory first phase of every
+                other recipe. Every step is read-only, so this recipe never needs
+                approval.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v">every step in this recipe</span></div>
+              </div>
+              <pre><code>skill-suitcase import --source "$SRC" --json
+skill-suitcase validate --source "$SRC" --strict --json
+skill-suitcase targets --source "$SRC" --json
+skill-suitcase status --source "$SRC" --json
+
+<span class="c"># per target, with explicit path overrides</span>
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+              <p>
+                <strong>Evidence.</strong> Inspect finding levels from
+                <code>import</code> and <code>validate</code>, safety
+                classification per target from <code>targets</code>, the
+                seven-state status enum (<code>current</code>,
+                <code>missing</code>, <code>version</code>, <code>behind</code>,
+                <code>dirty</code>, <code>blocked</code>, <code>unknown</code>),
+                and per-file diff actions (<code>create</code>,
+                <code>update</code>, <code>unchanged</code>, <code>extra</code>,
+                <code>missing</code>, <code>blocked</code>).
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Report catalog branch and SHA,
+                target IDs inspected, and summary counts. Any state other than
+                <code>current</code> is a report, not permission to mutate: route
+                <code>missing</code>/<code>behind</code>/<code>version</code> to
+                recipe 4, exact receiptless matches to recipe 5, receiptless
+                mismatches to recipe 6, and <code>dirty</code> to recipe 7 or 8.
+                Stop on catalog error findings before touching any target.
+              </p>
+            </section>
+
+            <section>
+              <h3 id="recipe-drift-heartbeat">3. Periodic target drift report</h3>
+              <p>
+                <strong>Select when</strong> running the recurring drift-audit
+                heartbeat: at session start, on a schedule, or after any change to
+                the catalog checkout. Every step is read-only.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v">every step in this recipe</span></div>
+              </div>
+              <pre><code><span class="c"># re-run per writable target and compare against the previous report</span>
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+              <div class="callout" data-kind="readonly">
+                <p class="callout-label">Heartbeat</p>
+                <p>
+                  Reporting drift is automatic; importing or overwriting it is
+                  not. Drift detection is never permission to mutate either side.
+                </p>
+              </div>
+              <p>
+                <strong>Evidence.</strong> Compare the new status entries with the
+                previous heartbeat: a skill that moved to <code>behind</code> or
+                <code>version</code> means the catalog advanced; a move to
+                <code>dirty</code> means the live receipt-owned copy drifted; a
+                new <code>unknown</code> means receiptless target state appeared.
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Report each drifted skill with
+                its target, resolved path, and status, then stop. Escalate by
+                naming the matching recipe (4 for behind or missing, 5 or 6 for
+                unknown, 7 or 8 for dirty) and wait for a decision; a heartbeat
+                run must never trigger an implicit repair or import.
+              </p>
+            </section>
+
+            <section>
+              <h3 id="recipe-missing-behind-pack-apply">4. Missing or behind install, staged then applied</h3>
+              <p>
+                <strong>Select when</strong> status reports <code>missing</code>,
+                <code>behind</code>, or <code>version</code> for catalog-planned
+                skills on a writable target. Missing and behind route to
+                <code>pack</code> plus <code>apply</code>, never to repair or
+                reconcile.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v"><code>status</code>, <code>pack --dry-run</code></span></div>
+                <div><span class="k">staging-only</span><span class="v"><code>pack --output</code> into a temporary directory</span></div>
+                <div><span class="k">live-target-mutating</span><span class="v"><code>apply --artifact</code>, only after approval</span></div>
+              </div>
+              <pre><code><span class="c"># read-only: confirm the states and preview the bundle plan</span>
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --dry-run --json
+
+<span class="c"># staging-only: write the immutable bundle outside catalog and target roots</span>
+OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
+skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json</code></pre>
+              <div class="callout" data-kind="boundary">
+                <p class="callout-label">Approval</p>
+                <p>
+                  Apply runs only after explicit approval naming the target, the
+                  staged artifact, the skills it writes, and the install mode.
+                  Re-run <code>pack</code> immediately before apply: ordinary
+                  missing and behind writes are rebuilt from current catalog
+                  source, so an older artifact is not byte-for-byte
+                  authorization.
+                </p>
+              </div>
+              <pre><code><span class="c"># live-target-mutating: after approval</span>
+ARTIFACT="$(find "$OUT" -name skill-suitcase-bundle.json -print -quit)"
+skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+              <p>
+                <strong>Evidence.</strong> The pack manifest lists source
+                provenance, selected skills, file hashes, and planned target
+                entries; blocked entries appear explicitly. A successful apply
+                returns <code>ok: true</code> and updates the target receipt.
+                Expected refusals include <code>source_untracked_files</code>,
+                <code>unsafe_target_state</code>,
+                <code>artifact_destination_mismatch</code>, and
+                <code>read_only_target</code>.
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Confirm the selected skills
+                now read <code>current</code> and record the receipt path for
+                rollback. Stop and escalate if apply refuses, if pack reports
+                blocked or denied source paths, or if any selected skill is
+                <code>dirty</code>: apply does not fix dirty state, recipes 7 and
+                8 do.
+              </p>
+            </section>
+
+            <section>
+              <h3 id="recipe-exact-match-track">5. Exact unreceipted match adopted with track</h3>
+              <p>
+                <strong>Select when</strong> status reports <code>unknown</code>
+                for a catalog-planned skill and <code>diff</code> proves the live
+                directory already matches catalog source exactly. Exact unknown
+                matches route to <code>track</code>, which writes only a receipt
+                and never rewrites skill files.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v"><code>status</code>, <code>diff</code> as the preview evidence</span></div>
+                <div><span class="k">live-target-mutating</span><span class="v"><code>track</code> writes the receipt file, only after approval</span></div>
+              </div>
+              <pre><code><span class="c"># read-only: track has no --dry-run flag, so diff is its preview</span>
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+              <div class="callout" data-kind="boundary">
+                <p class="callout-label">Approval</p>
+                <p>
+                  Track mutates the target receipt on invocation. Run it only
+                  after explicit approval naming the target and the exact
+                  <code>--skill</code> list, with the diff evidence showing every
+                  planned file for those skills as <code>unchanged</code>.
+                </p>
+              </div>
+              <pre><code><span class="c"># live-target-mutating: after approval</span>
+skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --json
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+              <p>
+                <strong>Evidence.</strong> Before track, the diff for the selected
+                skill must contain no <code>create</code>, <code>update</code>,
+                <code>extra</code>, or <code>missing</code> file action. After
+                track, the skill reads <code>current</code> and the receipt
+                records the adopted install.
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Confirm <code>current</code>
+                status. Stop if the diff shows any content difference: that is not
+                an exact match, so use recipe 6 instead of forcing a receipt onto
+                mismatched files. Stop if track itself refuses; the refusal names
+                the state that failed its exact-match contract.
+              </p>
+            </section>
+
+            <section>
+              <h3 id="recipe-receiptless-mismatch-reconcile">6. Receiptless mismatch reconciled from the catalog</h3>
+              <p>
+                <strong>Select when</strong> status reports <code>unknown</code>
+                for a receiptless catalog-planned skill whose live directory
+                differs from catalog source, and catalog source should replace it.
+                Only this receiptless mismatched-directory case routes to
+                <code>reconcile</code>; receipt-owned drift routes to recipe 7 or
+                8 instead.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v"><code>reconcile --dry-run</code></span></div>
+                <div><span class="k">live-target-mutating</span><span class="v"><code>reconcile --apply</code>, only after approval</span></div>
+              </div>
+              <pre><code><span class="c"># read-only: inspect the planned replacement and its backup path</span>
+skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json</code></pre>
+              <div class="callout" data-kind="boundary">
+                <p class="callout-label">Approval</p>
+                <p>
+                  Apply runs only after explicit approval naming the target, the
+                  exact skill list, and the outcome: the live receiptless content
+                  is replaced by catalog source, with the prior content preserved
+                  as rollback state.
+                </p>
+              </div>
+              <pre><code><span class="c"># live-target-mutating: after approval</span>
+skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+              <p>
+                <strong>Evidence.</strong> The dry-run reports the target and
+                catalog differences plus the backup path the apply will use. A
+                successful apply preserves the prior target as rollback state,
+                installs catalog source, writes the receipt, and verifies status
+                itself; the result names the backup location.
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Confirm <code>current</code>
+                status and record the backup path. Stop if reconcile refuses
+                because the skill does not meet its receiptless-unknown contract,
+                and stop if the operator wants to keep the live content: keeping
+                receiptless content is a promotion or import decision, not a
+                reconcile.
+              </p>
+            </section>
+
+            <section>
+              <h3 id="recipe-accidental-dirty-repair">7. Accidental dirty copy repaired from the catalog</h3>
+              <p>
+                <strong>Select when</strong> status reports <code>dirty</code> for
+                a receipt-owned copy install and the operator confirms the edit
+                was accidental, so the catalog should win. Dirty means stop and
+                inspect first; accidental dirty routes to <code>repair</code>.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v"><code>repair --dry-run</code></span></div>
+                <div><span class="k">live-target-mutating</span><span class="v"><code>repair --apply</code>, only after approval</span></div>
+              </div>
+              <pre><code><span class="c"># read-only: inspect hashes, file changes, and the backup plan</span>
+skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json</code></pre>
+              <div class="callout" data-kind="boundary">
+                <p class="callout-label">Approval</p>
+                <p>
+                  Apply runs only after explicit approval that names the target,
+                  the exact skill list, and the outcome: the live edit is
+                  discarded and catalog source wins. Never bulk-repair every
+                  target after one mixed status report.
+                </p>
+              </div>
+              <pre><code><span class="c"># live-target-mutating: after approval</span>
+skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+              <p>
+                <strong>Evidence.</strong> The dry-run reports the receipt hash,
+                catalog hash, and live hash per file plus the backup plan, which
+                is how you tell an accidental edit from an intentional one. A
+                successful apply backs up the live content, installs catalog
+                source, refreshes the receipt, and verifies <code>current</code>
+                status.
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Confirm <code>current</code>
+                status and keep the backup path. Receipt-backed
+                <code>rollback</code> restores the pre-repair dirty content if the
+                replacement was wrong. Stop and switch to recipe 8 if inspection
+                suggests the edit was intentional or the operator is unsure;
+                repair and import-target see the same dirty state, and only the
+                operator knows which outcome is right.
+              </p>
+            </section>
+
+            <section>
+              <h3 id="recipe-intentional-dirty-import-target">8. Intentional dirty edit imported into the catalog</h3>
+              <p>
+                <strong>Select when</strong> a receipt-owned, catalog-owned skill
+                reads <code>dirty</code> and the operator confirms the live edit
+                is intentional and should become the repo version. Intentional
+                dirty routes to <code>import-target</code>, the inverse of repair:
+                it moves target content into the catalog through ordinary Git
+                review.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v"><code>import-target --dry-run</code></span></div>
+                <div><span class="k">catalog-mutating</span><span class="v"><code>import-target --apply</code> writes catalog files and refreshes the receipt, only after approval; the Git diff stays uncommitted for review</span></div>
+              </div>
+              <pre><code><span class="c"># read-only: inspect hashes and the planned repository writes</span>
+skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json</code></pre>
+              <div class="callout" data-kind="boundary">
+                <p class="callout-label">Approval</p>
+                <p>
+                  Apply runs only after explicit approval that names the target,
+                  the exact skill list, and the outcome: the live edit is kept and
+                  copied into the catalog. A drift report alone must never
+                  trigger this import.
+                </p>
+              </div>
+              <pre><code><span class="c"># catalog-mutating: after approval</span>
+skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+
+<span class="c"># then ordinary Git review of the catalog working tree</span>
+git -C "$SRC" status --short --branch
+git -C "$SRC" diff</code></pre>
+              <p>
+                <strong>Evidence.</strong> The dry-run reports the receipt hash,
+                catalog hash, and target hash plus the planned repository writes.
+                A successful apply copies the target content into the catalog
+                atomically, refreshes the receipt, and leaves normal uncommitted
+                Git changes; nothing auto-commits.
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Confirm the skill reads
+                <code>current</code> and review the catalog diff through the
+                ordinary Git review flow before committing. Stop if review
+                rejects the change: revert the catalog working tree and decide
+                between keeping the live edit unrecorded or repairing it with
+                recipe 7.
+              </p>
+            </section>
+
+            <section>
+              <h3 id="recipe-upstream-source-refresh">9. Upstream-managed source refreshed into the catalog</h3>
+              <p>
+                <strong>Select when</strong> the task explicitly asks to refresh
+                an upstream-managed skill's catalog source from its pinned
+                provider. This
+                <a href="upstream-refresh.html">catalog-only upstream lane</a> is
+                deliberately separate from target synchronization: it never
+                installs into a live target, and upstream tooling never writes
+                into managed runtime roots.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v"><code>upstream check</code>, <code>upstream fetch --dry-run</code> (isolated temporary workspace)</span></div>
+                <div><span class="k">catalog-mutating</span><span class="v"><code>upstream import --apply</code> writes only the selected skill directory and the upstream lock, only after approval</span></div>
+              </div>
+              <pre><code><span class="c"># read-only: report declarations, then fetch into an isolated temp workspace</span>
+skill-suitcase upstream check --source "$SRC" --json
+skill-suitcase upstream fetch --source "$SRC" --skill existing-skill --dry-run --json</code></pre>
+              <div class="callout" data-kind="boundary">
+                <p class="callout-label">Approval</p>
+                <p>
+                  Import runs only after explicit approval naming the catalog and
+                  the selected skill, for a catalog-only source refresh. It is not
+                  approval to touch any live target.
+                </p>
+              </div>
+              <pre><code><span class="c"># catalog-mutating: after approval</span>
+skill-suitcase upstream import --source "$SRC" --skill existing-skill --apply --json
+
+<span class="c"># then ordinary Git review before any target synchronization</span>
+git -C "$SRC" status --short --branch
+git -C "$SRC" diff</code></pre>
+              <p>
+                <strong>Evidence.</strong> <code>upstream check</code> reports the
+                validated lock declarations and imported lineage;
+                <code>upstream fetch --dry-run</code> reports the file-level diff
+                between the pinned upstream and the catalog. A successful import
+                writes only <code>skills/&lt;name&gt;</code> plus
+                <code>.skill-suitcase/upstream-lock.json</code> and does not
+                auto-commit. Dirty selected catalog source is a refusal, not
+                something import overwrites.
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Finish the lane with ordinary
+                Git review and an explicit commit decision. Only after that
+                review does normal catalog-to-target synchronization start, as a
+                separate flow through recipes 2 and 4. Stop if the fetched diff
+                looks unexpected for the pinned version, and stop rather than
+                point any upstream installer at a live agent home.
+              </p>
+            </section>
+
+            <section>
+              <h3 id="recipe-provider-read-only">10. Provider-owned read-only target reported and skipped</h3>
+              <p>
+                <strong>Select when</strong> <code>targets</code> classifies a
+                target as provider-backed and read-only, such as the OpenCode and
+                Pi compatibility surfaces, or when any target-aware flow returns
+                <code>read_only_target</code>. This recipe has no mutation step by
+                design: the boundary is reported and the target is skipped without
+                attempting a write.
+              </p>
+              <div class="def-rows">
+                <div><span class="k">read-only</span><span class="v">every step in this recipe; there is no staging or mutation step</span></div>
+              </div>
+              <pre><code><span class="c"># read-only: report the safety classification and any fallback inventory</span>
+skill-suitcase targets --source "$SRC" --json
+skill-suitcase status --source "$SRC" --json</code></pre>
+              <p>
+                <strong>Evidence.</strong> The targets report carries each
+                target's safety classification. Provider fallback inventory
+                without a catalog assignment appears with
+                <code>statusCount: 0</code> and no status entries. A custom
+                provider path tied to a catalog assignment may show ordinary
+                status entries while remaining read-only: target-aware
+                materialization and mutation flows refuse it with
+                <code>read_only_target</code>.
+              </p>
+              <p>
+                <strong>Verify, then stop.</strong> Record the provider-owned
+                target as skipped in the session report, with the classification
+                or refusal JSON as evidence. A <code>read_only_target</code>
+                refusal is the correct final state, not an error: never retry
+                with different flags, manual file copies, or path overrides to
+                work around it.
+              </p>
+            </section>
           </section>
 
           <section>

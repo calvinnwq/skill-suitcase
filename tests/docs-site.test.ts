@@ -594,6 +594,128 @@ test("agent workflows page contrasts the recovery decision tree", () => {
   assert.ok(normalized.includes("New-machine setup installs from the skills repo through Suitcase"));
 });
 
+test("agent workflows page carries the ten operational recipes", () => {
+  const workflows = read("docs/agent-workflows.html");
+  const normalized = workflows.replace(/\s+/g, " ");
+
+  const RECIPE_IDS = [
+    "recipe-new-machine-setup",
+    "recipe-read-only-audit",
+    "recipe-drift-heartbeat",
+    "recipe-missing-behind-pack-apply",
+    "recipe-exact-match-track",
+    "recipe-receiptless-mismatch-reconcile",
+    "recipe-accidental-dirty-repair",
+    "recipe-intentional-dirty-import-target",
+    "recipe-upstream-source-refresh",
+    "recipe-provider-read-only"
+  ];
+  for (const id of RECIPE_IDS) {
+    assert.match(workflows, new RegExp(`<h3 id="${id}">`), `agent workflows should keep the recipe section ${id}`);
+  }
+
+  function recipeSection(id: string): string {
+    const start = workflows.indexOf(`<h3 id="${id}">`);
+    assert.ok(start >= 0, `missing recipe section ${id}`);
+    const end = workflows.indexOf("<h3 id=", start + 1);
+    return workflows.slice(start, end < 0 ? workflows.length : end);
+  }
+
+  // Every recipe labels its steps with the shared write classifications.
+  for (const classification of ["read-only", "staging-only", "catalog-mutating", "live-target-mutating"]) {
+    assert.ok(
+      workflows.includes(`<span class="k">${classification}</span>`),
+      `agent workflows should classify recipe steps as ${classification}`
+    );
+  }
+
+  // The state-to-command routing distinctions must stay explicit.
+  assert.ok(normalized.includes("Missing and behind route to <code>pack</code> plus <code>apply</code>"));
+  assert.ok(normalized.includes("Exact unknown matches route to <code>track</code>"));
+  assert.ok(normalized.includes("receiptless mismatched-directory case routes to <code>reconcile</code>"));
+  assert.ok(normalized.includes("accidental dirty routes to <code>repair</code>"));
+  assert.ok(normalized.includes("Intentional dirty routes to <code>import-target</code>"));
+
+  // track has no dry-run mode; diff is its preview, and no example invents one.
+  assert.ok(normalized.includes("track has no dry-run flag"));
+  const preBlocks = [...workflows.matchAll(/<pre><code>[\s\S]*?<\/code><\/pre>/g)].map((match) => match[0]);
+  assert.ok(preBlocks.length > 0, "agent workflows should keep literal command blocks");
+  for (const block of preBlocks) {
+    if (block.includes("skill-suitcase track")) {
+      assert.doesNotMatch(block, /--dry-run/, "track must not be documented with a --dry-run flag");
+    }
+  }
+
+  // Every mutation-capable recipe separates its read-only or staging evidence
+  // from the approval-gated mutation step.
+  const APPROVAL_GATED: ReadonlyArray<readonly [string, string, string]> = [
+    ["recipe-new-machine-setup", "--output", "skill-suitcase apply"],
+    ["recipe-missing-behind-pack-apply", "--dry-run", "skill-suitcase apply"],
+    ["recipe-exact-match-track", "skill-suitcase diff", "skill-suitcase track"],
+    ["recipe-receiptless-mismatch-reconcile", "--dry-run", "--apply"],
+    ["recipe-accidental-dirty-repair", "--dry-run", "--apply"],
+    ["recipe-intentional-dirty-import-target", "--dry-run", "--apply"],
+    ["recipe-upstream-source-refresh", "--dry-run", "--apply"]
+  ];
+  for (const [id, preview, mutation] of APPROVAL_GATED) {
+    const section = recipeSection(id);
+    const approval = section.indexOf('<p class="callout-label">Approval</p>');
+    assert.ok(approval >= 0, `${id} must carry an approval callout`);
+    const previewIndex = section.indexOf(preview);
+    assert.ok(
+      previewIndex >= 0 && previewIndex < approval,
+      `${id} must show its ${preview} evidence before the approval callout`
+    );
+    const mutationIndex = section.indexOf(mutation, approval);
+    assert.ok(mutationIndex > approval, `${id} must gate ${mutation} behind the approval callout`);
+  }
+  assert.ok(
+    normalized.includes("explicit approval naming the source catalog, target, exact skills, action, and mode"),
+    "agent workflows should state the shared approval contract"
+  );
+
+  // Read-only recipes must stay mutation-free.
+  for (const id of ["recipe-read-only-audit", "recipe-drift-heartbeat", "recipe-provider-read-only"]) {
+    assert.doesNotMatch(
+      recipeSection(id),
+      /skill-suitcase (?:apply|pack|track|reconcile|repair|prune|promote|import-target|rollback)\b/,
+      `${id} must not run a staging or mutation command`
+    );
+  }
+  assert.ok(normalized.includes("a heartbeat run must never trigger an implicit repair or import"));
+
+  // Upstream refresh ends with ordinary Git review before any target sync.
+  const upstream = recipeSection("recipe-upstream-source-refresh");
+  assert.ok(upstream.indexOf("upstream import") >= 0);
+  assert.ok(
+    upstream.indexOf("upstream import") < upstream.indexOf('git -C "$SRC" diff'),
+    "upstream import must be followed by ordinary Git review"
+  );
+  assert.ok(normalized.includes("Only after that review does normal catalog-to-target synchronization start"));
+
+  // Provider-owned targets are reported as boundaries, never bypassed.
+  const provider = recipeSection("recipe-provider-read-only");
+  assert.ok(provider.includes("read_only_target"));
+  assert.ok(provider.includes("skipped"));
+  assert.ok(provider.includes("never retry"));
+
+  // New-machine setup stays on an approved catalog at portable roots.
+  const newMachine = recipeSection("recipe-new-machine-setup");
+  assert.ok(newMachine.includes("$HOME/.skill-suitcase/skills"));
+  assert.ok(newMachine.includes("INSTALL.md"));
+
+  // Every literal workflow command keeps the portable deterministic contract.
+  const commandLines = workflows
+    .split("\n")
+    .map((line) => line.replace(/<[^>]+>/g, "").trim())
+    .filter((line) => line.startsWith("skill-suitcase "));
+  assert.ok(commandLines.length >= 20, "agent workflows should keep its literal recipe commands");
+  for (const line of commandLines) {
+    assert.ok(line.includes("--json"), `workflow command must use --json: ${line}`);
+    assert.ok(!line.includes('--source "$HOME/'), `workflow command must reference the catalog through SRC: ${line}`);
+  }
+});
+
 test("troubleshooting page collects the common refusal codes", () => {
   const troubleshooting = read("docs/troubleshooting.html");
 
