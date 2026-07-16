@@ -84,9 +84,9 @@ type WritePlannedSkillResult = {
 
 /**
  * Write every planned copy-mode entry, skill by skill, capturing rollback
- * state before each skill mutates. A failed skill rolls back its own entries
- * and every previously written skill before returning the failure findings,
- * so the target root is never left half-applied by this operation.
+ * state before each skill mutates. A failed skill attempts to roll back its
+ * own entries and every previously written skill before returning the write
+ * and any recovery-failure findings.
  */
 export async function executeCopyWriteTransaction({
   writeEntries,
