@@ -628,12 +628,18 @@ test("agent workflows page carries the ten operational recipes", () => {
       .filter((line) => line.startsWith("skill-suitcase ") || line.startsWith('git -C "$SRC" '));
   }
 
-  // Every recipe labels its steps with its exact shared write classifications.
+  // Every recipe labels its steps with its exact shared write classifications
+  // and carries a recipe-local approval boundary callout, including the
+  // explicit no-apply boundaries in the read-only recipes.
   for (const [id, expectedClassifications] of RECIPES) {
     const actualClassifications = [...recipeSection(id).matchAll(/<span class="k">([^<]+)<\/span>/g)].map(
       (match) => match[1]
     );
     assert.deepEqual(actualClassifications, expectedClassifications, `${id} must classify every recipe step`);
+    assert.ok(
+      recipeSection(id).includes('<p class="callout-label">Approval</p>'),
+      `${id} must carry a recipe-local approval boundary callout`
+    );
   }
 
   // The state-to-command routing distinctions must stay explicit.
@@ -656,7 +662,7 @@ test("agent workflows page carries the ten operational recipes", () => {
   // Every mutation-capable recipe separates its read-only or staging evidence
   // from the approval-gated mutation step.
   const APPROVAL_GATED: ReadonlyArray<readonly [string, string, string]> = [
-    ["recipe-new-machine-setup", "--output", "skill-suitcase apply"],
+    ["recipe-new-machine-setup", "--dry-run", "skill-suitcase apply"],
     ["recipe-missing-behind-pack-apply", "--dry-run", "skill-suitcase apply"],
     ["recipe-exact-match-track", "skill-suitcase diff", "skill-suitcase track"],
     ["recipe-receiptless-mismatch-reconcile", "--dry-run", "--apply"],
@@ -682,11 +688,41 @@ test("agent workflows page carries the ten operational recipes", () => {
     "agent workflows should state the shared approval contract"
   );
 
+  // Artifact recipes must not treat a pre-approval bundle as authorization:
+  // the approved sequence itself re-runs diff, stages a fresh bundle, and
+  // applies that just-staged artifact with an explicit install mode.
+  for (const id of ["recipe-new-machine-setup", "recipe-missing-behind-pack-apply"]) {
+    const section = recipeSection(id);
+    const approval = section.indexOf('<p class="callout-label">Approval</p>');
+    assert.ok(
+      literalCommandLines(section.slice(0, approval)).every((command) => !command.includes("--output")),
+      `${id} must not stage an applied bundle before the approval callout`
+    );
+    const approved = literalCommandLines(section.slice(approval));
+    const freshDiff = approved.findIndex((command) => command.startsWith("skill-suitcase diff "));
+    const freshPack = approved.findIndex((command) => command.includes('--output "$OUT"'));
+    const freshApply = approved.findIndex((command) => command.startsWith("skill-suitcase apply "));
+    assert.ok(
+      freshDiff >= 0 && freshPack > freshDiff && freshApply > freshPack,
+      `${id} must re-run diff and pack immediately before the approved apply`
+    );
+  }
+  for (const command of literalCommands) {
+    if (command.startsWith("skill-suitcase apply ")) {
+      assert.ok(command.includes("--mode copy"), `apply must encode the approved install mode: ${command}`);
+    }
+  }
+
+  // The guarded dirty-behind exception stays distinguished from ordinary
+  // dirty edits, which still route to repair or import-target.
+  assert.ok(normalized.includes("guarded dirty-behind case"));
+  assert.ok(normalized.includes("An ordinary <code>dirty</code> edit is never fixed by apply"));
+
   // Read-only recipes must stay mutation-free.
   for (const id of ["recipe-read-only-audit", "recipe-drift-heartbeat", "recipe-provider-read-only"]) {
     assert.doesNotMatch(
       recipeSection(id),
-      /skill-suitcase (?:apply|pack|track|reconcile|repair|prune|promote|import-target|rollback)\b/,
+      /skill-suitcase (?:apply|pack|track|reconcile|repair|prune|promote|import-target|rollback|upstream import)\b/,
       `${id} must not run a staging or mutation command`
     );
   }

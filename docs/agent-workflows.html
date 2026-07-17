@@ -165,32 +165,40 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                 then run this recipe once per target.
               </p>
               <div class="def-rows">
-                <div><span class="k">read-only</span><span class="v"><code>import</code>, <code>validate --strict</code>, <code>targets</code>, <code>plan</code>, <code>status</code>, <code>diff</code></span></div>
-                <div><span class="k">staging-only</span><span class="v"><code>pack --output</code> into a temporary directory</span></div>
-                <div><span class="k">live-target-mutating</span><span class="v"><code>apply --artifact</code>, only after approval</span></div>
+                <div><span class="k">read-only</span><span class="v"><code>import</code>, <code>validate --strict</code>, <code>targets</code>, <code>plan</code>, <code>status</code>, <code>diff</code>, <code>pack --dry-run</code></span></div>
+                <div><span class="k">staging-only</span><span class="v"><code>pack --output</code> into a temporary directory, staged fresh inside the approved sequence</span></div>
+                <div><span class="k">live-target-mutating</span><span class="v"><code>apply --artifact --mode copy</code>, only after approval</span></div>
               </div>
-              <pre><code><span class="c"># read-only: prove the catalog and this target before staging anything</span>
+              <pre><code><span class="c"># read-only: prove the catalog and this target, then preview the bundle plan</span>
 skill-suitcase import --source "$SRC" --json
 skill-suitcase validate --source "$SRC" --strict --json
 skill-suitcase targets --source "$SRC" --json
 skill-suitcase plan --source "$SRC" --target codex --json
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
-
-<span class="c"># staging-only: bundle outside the catalog and every resolved target root</span>
-OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
-skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json</code></pre>
+skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --dry-run --json</code></pre>
               <div class="callout" data-kind="boundary">
                 <p class="callout-label">Approval</p>
                 <p>
-                  The apply step below runs only after explicit approval naming
-                  the catalog, the target and its resolved install root, the
-                  planned skills, artifact mode, and copy versus symlink mode.
+                  The staging and apply steps below run only after explicit
+                  approval naming the catalog, the target and its resolved
+                  install root, the planned skills from the bundle plan,
+                  artifact mode, and the install mode, encoded below as
+                  <code>--mode copy</code>; a symlink install needs its own
+                  approval and <code>--mode symlink</code>. Ordinary missing and
+                  behind writes are rebuilt from current catalog source, so a
+                  bundle staged before approval is not byte-for-byte
+                  authorization: stage fresh and apply immediately.
                 </p>
               </div>
-              <pre><code><span class="c"># live-target-mutating: after approval</span>
+              <pre><code><span class="c"># staging-only, after approval: re-check drift, then stage a fresh bundle</span>
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
+skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json
 ARTIFACT="$(find "$OUT" -name skill-suitcase-bundle.json -print -quit)"
-skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
+
+<span class="c"># live-target-mutating: apply the just-staged artifact immediately</span>
+skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --mode copy --json
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
                 <strong>Evidence.</strong> <code>import</code> and
@@ -198,7 +206,9 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
                 with no error-level findings. On a fresh machine the status
                 entries read <code>missing</code>; after apply, every planned
                 skill reads <code>current</code> and the receipt path appears in
-                the apply result. Refusals such as
+                the apply result. The post-approval <code>diff</code> must still
+                match the approved bundle plan; new drift there voids the
+                approval. Refusals such as
                 <code>source_untracked_files</code>,
                 <code>unsafe_target_state</code>, or
                 <code>read_only_target</code> arrive as structured
@@ -323,31 +333,36 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                 reconcile.
               </p>
               <div class="def-rows">
-                <div><span class="k">read-only</span><span class="v"><code>status</code>, <code>pack --dry-run</code></span></div>
-                <div><span class="k">staging-only</span><span class="v"><code>pack --output</code> into a temporary directory</span></div>
-                <div><span class="k">live-target-mutating</span><span class="v"><code>apply --artifact</code>, only after approval</span></div>
+                <div><span class="k">read-only</span><span class="v"><code>status</code>, <code>diff</code>, <code>pack --dry-run</code></span></div>
+                <div><span class="k">staging-only</span><span class="v"><code>pack --output</code> into a temporary directory, staged fresh inside the approved sequence</span></div>
+                <div><span class="k">live-target-mutating</span><span class="v"><code>apply --artifact --mode copy</code>, only after approval</span></div>
               </div>
               <pre><code><span class="c"># read-only: confirm the states and preview the bundle plan</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
-skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --dry-run --json
-
-<span class="c"># staging-only: write the immutable bundle outside catalog and target roots</span>
-OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
-skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json</code></pre>
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --dry-run --json</code></pre>
               <div class="callout" data-kind="boundary">
                 <p class="callout-label">Approval</p>
                 <p>
                   Apply runs only after explicit approval naming the target, the
-                  staged artifact, the skills it writes, and the install mode.
-                  Re-run <code>pack</code> immediately before apply: ordinary
-                  missing and behind writes are rebuilt from current catalog
-                  source, so an older artifact is not byte-for-byte
-                  authorization.
+                  skills the bundle plan writes, and the install mode, encoded
+                  below as <code>--mode copy</code>; a symlink install needs its
+                  own approval and <code>--mode symlink</code>. Ordinary missing
+                  and behind writes are rebuilt from current catalog source, so
+                  a bundle staged before approval is not byte-for-byte
+                  authorization: the approved sequence re-checks
+                  <code>diff</code>, stages a fresh bundle, and applies it
+                  immediately.
                 </p>
               </div>
-              <pre><code><span class="c"># live-target-mutating: after approval</span>
+              <pre><code><span class="c"># staging-only, after approval: re-check drift, then stage a fresh bundle</span>
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
+skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json
 ARTIFACT="$(find "$OUT" -name skill-suitcase-bundle.json -print -quit)"
-skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --json
+
+<span class="c"># live-target-mutating: apply the just-staged artifact immediately</span>
+skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --mode copy --json
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
                 <strong>Evidence.</strong> The pack manifest lists source
@@ -362,10 +377,16 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
               <p>
                 <strong>Verify, then stop.</strong> Confirm the selected skills
                 now read <code>current</code> and record the receipt path for
-                rollback. Stop and escalate if apply refuses, if pack reports
-                blocked or denied source paths, or if any selected skill is
-                <code>dirty</code>: apply does not fix dirty state, recipes 7 and
-                8 do.
+                rollback. Stop and escalate if apply refuses or if pack reports
+                blocked or denied source paths. An ordinary <code>dirty</code>
+                edit is never fixed by apply: route it to recipe 7 or 8. The one
+                exception is the guarded dirty-behind case: a receipt-owned copy
+                install whose receipt hash is behind the catalog while its live
+                receipt-owned files still match the last install may take this
+                same staged route, because matching per-file artifact hashes
+                prove apply overwrites nothing unrecorded. <code>repair</code>
+                and <code>import-target</code> refuse that diverged-catalog
+                state, so routing it to recipes 7 or 8 is a dead end.
               </p>
             </section>
 
@@ -470,7 +491,11 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
                 <strong>Select when</strong> status reports <code>dirty</code> for
                 a receipt-owned copy install and the operator confirms the edit
                 was accidental, so the catalog should win. Dirty means stop and
-                inspect first; accidental dirty routes to <code>repair</code>.
+                inspect first; accidental dirty routes to <code>repair</code>. A
+                skill whose receipt hash is also behind the catalog while its
+                live files still match the last install is the guarded
+                dirty-behind case and routes through recipe 4's staged apply
+                instead.
               </p>
               <div class="def-rows">
                 <div><span class="k">read-only</span><span class="v"><code>repair --dry-run</code></span></div>
