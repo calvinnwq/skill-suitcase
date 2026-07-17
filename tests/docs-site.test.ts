@@ -606,7 +606,7 @@ test("agent workflows page carries the ten operational recipes", () => {
     ["recipe-exact-match-track", ["read-only", "live-target-mutating"]],
     ["recipe-receiptless-mismatch-reconcile", ["read-only", "live-target-mutating"]],
     ["recipe-accidental-dirty-repair", ["read-only", "live-target-mutating"]],
-    ["recipe-intentional-dirty-import-target", ["read-only", "catalog-mutating"]],
+    ["recipe-intentional-dirty-import-target", ["read-only", "catalog-mutating", "live-target-mutating"]],
     ["recipe-upstream-source-refresh", ["read-only", "catalog-mutating"]],
     ["recipe-provider-read-only", ["read-only"]]
   ];
@@ -619,6 +619,13 @@ test("agent workflows page carries the ten operational recipes", () => {
     assert.ok(start >= 0, `missing recipe section ${id}`);
     const end = workflows.indexOf("<h3 id=", start + 1);
     return workflows.slice(start, end < 0 ? workflows.length : end);
+  }
+
+  function literalCommandLines(section: string): string[] {
+    return [...section.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
+      .flatMap((match) => match[1]?.split("\n") ?? [])
+      .map((line) => line.replace(/<[^>]+>/g, "").trim())
+      .filter((line) => line.startsWith("skill-suitcase ") || line.startsWith('git -C "$SRC" '));
   }
 
   // Every recipe labels its steps with its exact shared write classifications.
@@ -638,11 +645,11 @@ test("agent workflows page carries the ten operational recipes", () => {
 
   // track has no dry-run mode; diff is its preview, and no example invents one.
   assert.ok(normalized.includes("track has no dry-run flag"));
-  const preBlocks = [...workflows.matchAll(/<pre><code>[\s\S]*?<\/code><\/pre>/g)].map((match) => match[0]);
-  assert.ok(preBlocks.length > 0, "agent workflows should keep literal command blocks");
-  for (const block of preBlocks) {
-    if (block.includes("skill-suitcase track")) {
-      assert.doesNotMatch(block, /--dry-run/, "track must not be documented with a --dry-run flag");
+  const literalCommands = literalCommandLines(workflows);
+  assert.ok(literalCommands.length > 0, "agent workflows should keep literal commands");
+  for (const command of literalCommands) {
+    if (command.startsWith("skill-suitcase track ")) {
+      assert.doesNotMatch(command, /--dry-run/, "track must not be documented with a --dry-run flag");
     }
   }
 
@@ -661,13 +668,14 @@ test("agent workflows page carries the ten operational recipes", () => {
     const section = recipeSection(id);
     const approval = section.indexOf('<p class="callout-label">Approval</p>');
     assert.ok(approval >= 0, `${id} must carry an approval callout`);
-    const previewIndex = section.indexOf(preview);
     assert.ok(
-      previewIndex >= 0 && previewIndex < approval,
-      `${id} must show its ${preview} evidence before the approval callout`
+      literalCommandLines(section.slice(0, approval)).some((command) => command.includes(preview)),
+      `${id} must show its literal ${preview} command before the approval callout`
     );
-    const mutationIndex = section.indexOf(mutation, approval);
-    assert.ok(mutationIndex > approval, `${id} must gate ${mutation} behind the approval callout`);
+    assert.ok(
+      literalCommandLines(section.slice(approval)).some((command) => command.includes(mutation)),
+      `${id} must gate its literal ${mutation} command behind the approval callout`
+    );
   }
   assert.ok(
     normalized.includes("explicit approval naming the source catalog, target, exact skills, action, and mode"),
@@ -686,9 +694,12 @@ test("agent workflows page carries the ten operational recipes", () => {
 
   // Upstream refresh ends with ordinary Git review before any target sync.
   const upstream = recipeSection("recipe-upstream-source-refresh");
-  assert.ok(upstream.indexOf("upstream import") >= 0);
+  const upstreamCommands = literalCommandLines(upstream);
+  const upstreamImport = upstreamCommands.findIndex((command) => command.startsWith("skill-suitcase upstream import "));
+  const upstreamGitReview = upstreamCommands.findIndex((command) => command === 'git -C "$SRC" diff');
+  assert.ok(upstreamImport >= 0, "upstream refresh must carry a literal import command");
   assert.ok(
-    upstream.indexOf("upstream import") < upstream.indexOf('git -C "$SRC" diff'),
+    upstreamGitReview > upstreamImport,
     "upstream import must be followed by ordinary Git review"
   );
   assert.ok(normalized.includes("Only after that review does normal catalog-to-target synchronization start"));
@@ -704,15 +715,21 @@ test("agent workflows page carries the ten operational recipes", () => {
   assert.ok(newMachine.includes("$HOME/.skill-suitcase/skills"));
   assert.ok(newMachine.includes("INSTALL.md"));
 
+  const intentionalImport = recipeSection("recipe-intentional-dirty-import-target").replace(/\s+/g, " ");
+  assert.ok(intentionalImport.includes("Revert only the imported skill paths"));
+  assert.ok(intentionalImport.includes("<code>behind</code> or <code>version</code>"));
+  assert.ok(intentionalImport.includes("repair will refuse it"));
+  assert.ok(intentionalImport.includes("recipe 4's fresh"));
+
   // Every literal workflow command keeps the portable deterministic contract.
-  const commandLines = workflows
-    .split("\n")
-    .map((line) => line.replace(/<[^>]+>/g, "").trim())
-    .filter((line) => line.startsWith("skill-suitcase "));
+  const commandLines = literalCommands.filter((line) => line.startsWith("skill-suitcase "));
   assert.ok(commandLines.length >= 20, "agent workflows should keep its literal recipe commands");
   for (const line of commandLines) {
     assert.ok(line.includes("--json"), `workflow command must use --json: ${line}`);
-    assert.ok(!line.includes('--source "$HOME/'), `workflow command must reference the catalog through SRC: ${line}`);
+    assert.ok(
+      line.includes('--source "$SRC"') || line.startsWith("skill-suitcase rollback --receipt "),
+      `workflow command must reference the catalog through SRC: ${line}`
+    );
   }
 });
 

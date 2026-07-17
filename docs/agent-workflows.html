@@ -124,12 +124,12 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
               deterministic result object on stdout, including structured
               <code>ok: false</code> refusals.
             </p>
-            <p>Each step carries exactly one write classification:</p>
+            <p>Each step carries every write classification that applies:</p>
             <div class="def-rows">
               <div><span class="k">read-only</span><span class="v">Writes nothing anywhere. Safe to run and repeat without approval.</span></div>
               <div><span class="k">staging-only</span><span class="v">Writes only a disposable output directory outside the catalog and every resolved target root. The live target and catalog are untouched.</span></div>
               <div><span class="k">catalog-mutating</span><span class="v">Writes the catalog working tree as ordinary uncommitted Git changes. Nothing auto-commits; review the diff.</span></div>
-              <div><span class="k">live-target-mutating</span><span class="v">Writes a live agent skill root and its receipt. Runs only after the approval named in the recipe.</span></div>
+              <div><span class="k">live-target-mutating</span><span class="v">Writes a live agent skill root or its receipt. Runs only after the approval named in the recipe.</span></div>
             </div>
             <div class="callout" data-kind="boundary">
               <p class="callout-label">Approval</p>
@@ -494,7 +494,8 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
               </p>
               <div class="def-rows">
                 <div><span class="k">read-only</span><span class="v"><code>import-target --dry-run</code></span></div>
-                <div><span class="k">catalog-mutating</span><span class="v"><code>import-target --apply</code> writes catalog files and refreshes the receipt, only after approval; the Git diff stays uncommitted for review</span></div>
+                <div><span class="k">catalog-mutating</span><span class="v"><code>import-target --apply</code> writes catalog files; the Git diff stays uncommitted for review</span></div>
+                <div><span class="k">live-target-mutating</span><span class="v"><code>import-target --apply</code> refreshes the live target receipt, only after approval</span></div>
               </div>
               <pre><code><span class="c"># read-only: inspect hashes and the planned repository writes</span>
 skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json</code></pre>
@@ -507,7 +508,7 @@ skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/
                   trigger this import.
                 </p>
               </div>
-              <pre><code><span class="c"># catalog-mutating: after approval</span>
+              <pre><code><span class="c"># catalog-mutating + live-target-mutating: after approval</span>
 skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 
@@ -525,9 +526,15 @@ git -C "$SRC" diff</code></pre>
                 <strong>Verify, then stop.</strong> Confirm the skill reads
                 <code>current</code> and review the catalog diff through the
                 ordinary Git review flow before committing. Stop if review
-                rejects the change: revert the catalog working tree and decide
-                between keeping the live edit unrecorded or repairing it with
-                recipe 7.
+                rejects the change. Revert only the imported skill paths listed
+                in <code>repoWrites</code>, including added untracked files, and
+                preserve every unrelated working-tree path. The receipt still
+                records the imported content, so status reads
+                <code>behind</code> or <code>version</code> after that scoped
+                revert and repair will refuse it. Restore the live target from
+                the reverted catalog through recipe 4's fresh
+                <code>pack --dry-run</code>, <code>pack --output</code>, and
+                separately approved <code>apply</code> flow.
               </p>
             </section>
 
