@@ -10,11 +10,15 @@ const sampleCatalog = path.join(process.cwd(), "examples", "sample-catalog");
 const cliPath = path.join(process.cwd(), "dist", "src", "cli.js");
 
 function runCli<T>(args: string[]): T {
+  return runCliWithStdout<T>(args).json;
+}
+
+function runCliWithStdout<T>(args: string[]): { json: T; stdout: string } {
   const result = spawnSync("node", [cliPath, ...args], { encoding: "utf8" });
   assert.equal(result.status, 0, cliFailure(result));
   assert.equal(result.stderr, "");
   assert.notEqual(result.stdout.trim(), "");
-  return JSON.parse(result.stdout) as T;
+  return { json: JSON.parse(result.stdout) as T, stdout: result.stdout };
 }
 
 function cliFailure(result: SpawnSyncReturns<string>): string {
@@ -51,16 +55,26 @@ type TreeSnapshotEntry = {
   value: string | null;
 };
 
-async function snapshotTree(root: string): Promise<TreeSnapshotEntry[]> {
+async function snapshotTree(
+  root: string,
+  excludedRelativePaths: string[] = []
+): Promise<TreeSnapshotEntry[]> {
   const snapshot: TreeSnapshotEntry[] = [];
+  const exclusions = excludedRelativePaths.map((entry) => path.normalize(entry));
 
   async function visit(relativePath: string): Promise<void> {
+    const normalizedRelativePath = path.normalize(relativePath);
+    if (exclusions.some((excluded) =>
+      normalizedRelativePath === excluded || normalizedRelativePath.startsWith(`${excluded}${path.sep}`)
+    )) {
+      return;
+    }
     const entryPath = path.join(root, relativePath);
     const entryStat = await lstat(entryPath);
     const shared = {
       path: relativePath || ".",
       mode: entryStat.mode & 0o777,
-      mtimeMs: entryStat.mtimeMs
+      mtimeMs: relativePath || exclusions.length === 0 ? entryStat.mtimeMs : 0
     };
 
     if (entryStat.isDirectory()) {
@@ -88,6 +102,17 @@ async function snapshotTree(root: string): Promise<TreeSnapshotEntry[]> {
 
   await visit("");
   return snapshot;
+}
+
+function snapshotRepositoryStatus(): string {
+  const result = spawnSync(
+    "git",
+    ["status", "--porcelain=v1", "--untracked-files=all"],
+    { cwd: process.cwd(), encoding: "utf8" }
+  );
+  assert.equal(result.status, 0, cliFailure(result));
+  assert.equal(result.stderr, "");
+  return result.stdout;
 }
 
 test("portable sample catalog exercises the offline lifecycle through the CLI", async (t) => {
@@ -197,14 +222,23 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
     ...targetArgs,
     "--dry-run"
   ];
-  const dryPack = runCli<{ ok: boolean; dryRun: boolean; summary: { skills: number } }>(dryPackArgs);
-  const repeatedDryPack = runCli<typeof dryPack>(dryPackArgs);
-  assert.deepEqual(repeatedDryPack, dryPack);
+  const dryPackResult = runCliWithStdout<{
+    ok: boolean;
+    dryRun: boolean;
+    summary: { skills: number };
+  }>(dryPackArgs);
+  const repeatedDryPackResult = runCliWithStdout<typeof dryPackResult.json>(dryPackArgs);
+  const dryPack = dryPackResult.json;
+  assert.equal(repeatedDryPackResult.stdout, dryPackResult.stdout);
+  assert.deepEqual(repeatedDryPackResult.json, dryPack);
   assert.equal(dryPack.ok, true);
   assert.equal(dryPack.dryRun, true);
   assert.equal(dryPack.summary.skills, 1);
   assert.deepEqual(await snapshotTree(source), sourceBeforePack);
   assert.deepEqual(await snapshotTree(targetRoot), targetBeforePack);
+
+  const sandboxBeforeStaging = await snapshotTree(sandbox, [path.relative(sandbox, artifactRoot)]);
+  const repositoryBeforeStaging = snapshotRepositoryStatus();
 
   const packed = runCli<{
     ok: boolean;
@@ -215,6 +249,11 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   assert.equal(typeof packed.bundle.manifestPath, "string");
   assert.deepEqual(await snapshotTree(source), sourceBeforePack);
   assert.deepEqual(await snapshotTree(targetRoot), targetBeforePack);
+  assert.deepEqual(
+    await snapshotTree(sandbox, [path.relative(sandbox, artifactRoot)]),
+    sandboxBeforeStaging
+  );
+  assert.equal(snapshotRepositoryStatus(), repositoryBeforeStaging);
 
   const applied = runCli<{ ok: boolean; applied: { skills: string[] } }>([
     "apply",

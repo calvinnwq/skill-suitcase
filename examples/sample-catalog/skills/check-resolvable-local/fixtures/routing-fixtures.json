@@ -22,5 +22,21 @@
       "hello-suitcase"
     ],
     "intent": "Do not route unrelated requests to the sample greeting skill."
+  },
+  {
+    "utterance": "Do not show me the sample greeting.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route an explicitly negated greeting request."
+  },
+  {
+    "utterance": "The sample is missing its greeting file.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route an incidental mention of sample greeting terms."
   }
 ]

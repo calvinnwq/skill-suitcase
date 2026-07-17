@@ -1,11 +1,21 @@
 {
   "skill": "hello-suitcase",
+  "rejectPhrases": [
+    "do not",
+    "don't",
+    "not show"
+  ],
   "routes": [
     {
       "utterance": "Show me the portable Skill Suitcase sample greeting.",
       "allTerms": [
         "sample",
         "greeting"
+      ],
+      "requestPhrases": [
+        "show me",
+        "show the",
+        "see the"
       ]
     },
     {
@@ -14,10 +24,16 @@
         "disposable",
         "skill suitcase",
         "installation"
+      ],
+      "requestPhrases": [
+        "verify",
+        "check"
       ]
     }
   ],
   "nonMatches": [
-    "Tell me tomorrow's weather."
+    "Tell me tomorrow's weather.",
+    "Do not show me the sample greeting.",
+    "The sample is missing its greeting file."
   ]
 }
