@@ -4,11 +4,24 @@
     "do not",
     "don't",
     "never",
-    "not show"
+    "not show",
+    "except"
   ],
   "routes": [
     {
       "utterance": "Show me the portable Skill Suitcase sample greeting.",
+      "allTerms": [
+        "sample",
+        "greeting"
+      ],
+      "requestPhrases": [
+        "show me",
+        "show the",
+        "see the"
+      ]
+    },
+    {
+      "utterance": "Show me the sample greeting whenever convenient.",
       "allTerms": [
         "sample",
         "greeting"
@@ -30,6 +43,18 @@
         "verify",
         "check"
       ]
+    },
+    {
+      "utterance": "Verify the disposable Skill Suitcase install.",
+      "allTerms": [
+        "disposable",
+        "skill suitcase",
+        "install"
+      ],
+      "requestPhrases": [
+        "verify",
+        "check"
+      ]
     }
   ],
   "nonMatches": [
@@ -37,6 +62,8 @@
     "Do not show me the sample greeting.",
     "Never show me the sample greeting.",
     "The sample is missing its greeting file.",
-    "Explain why the docs say \"show me the sample greeting\"."
+    "Explain why the docs say \"show me the sample greeting\".",
+    "Show me everything except the sample greeting.",
+    "Show metadata about the sample greeting file."
   ]
 }

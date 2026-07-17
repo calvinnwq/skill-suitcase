@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -10,14 +11,22 @@ GREETING = REFERENCES / "greeting.md"
 ROUTING = REFERENCES / "routing.json"
 
 
+def contains_phrase(text: str, phrase: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
+
+
+def starts_with_phrase(text: str, phrase: str) -> bool:
+    return re.match(rf"{re.escape(phrase)}(?!\w)", text) is not None
+
+
 def route_intent(user_request: str) -> Optional[str]:
     policy = json.loads(ROUTING.read_text(encoding="utf-8"))
     normalized = " ".join(user_request.lower().split())
-    if any(phrase in normalized for phrase in policy["rejectPhrases"]):
+    if any(contains_phrase(normalized, phrase) for phrase in policy["rejectPhrases"]):
         return None
     matches = any(
-        all(term in normalized for term in route["allTerms"])
-        and any(normalized.startswith(phrase) for phrase in route["requestPhrases"])
+        all(contains_phrase(normalized, term) for term in route["allTerms"])
+        and any(starts_with_phrase(normalized, phrase) for phrase in route["requestPhrases"])
         for route in policy["routes"]
     )
     return policy["skill"] if matches else None

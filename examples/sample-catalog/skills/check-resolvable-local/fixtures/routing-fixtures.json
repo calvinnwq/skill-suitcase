@@ -8,12 +8,28 @@
     "intent": "Read and return the harmless greeting from the disposable sample catalog."
   },
   {
+    "utterance": "Show me the sample greeting whenever convenient.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Treat never as a token, not a substring inside an affirmative request."
+  },
+  {
     "utterance": "Verify the disposable Skill Suitcase installation.",
     "expected": [
       "hello-suitcase"
     ],
     "forbidden": [],
     "intent": "Verify the deterministic greeting runner in a disposable installation."
+  },
+  {
+    "utterance": "Verify the disposable Skill Suitcase install.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Route the exact public trigger wording documented by the sample skill."
   },
   {
     "utterance": "Tell me tomorrow's weather.",
@@ -54,5 +70,21 @@
       "hello-suitcase"
     ],
     "intent": "Do not route a quoted mention of a greeting request."
+  },
+  {
+    "utterance": "Show me everything except the sample greeting.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route a greeting request that explicitly excludes the greeting."
+  },
+  {
+    "utterance": "Show metadata about the sample greeting file.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not treat a shared character prefix as an affirmative request phrase."
   }
 ]
