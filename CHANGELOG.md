@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.17.1...v0.18.0) (2026-07-17)
+
+
+### Features
+
+* **docs:** add operational agent workflow recipes ([#102](https://github.com/calvinnwq/skill-suitcase/issues/102)) ([993d820](https://github.com/calvinnwq/skill-suitcase/commit/993d8204c64f142cd1113d446ee7a69bc2d54288))
+
+
+### Bug Fixes
+
+* make packaged sample catalog pass strict validation ([#104](https://github.com/calvinnwq/skill-suitcase/issues/104)) ([80a02c6](https://github.com/calvinnwq/skill-suitcase/commit/80a02c60c4164ef66d49780dad3389adf369dd0a))
+
 ## [0.17.1](https://github.com/calvinnwq/skill-suitcase/compare/v0.17.0...v0.17.1) (2026-07-16)
 
 
