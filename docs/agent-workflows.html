@@ -137,8 +137,10 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                 No catalog-mutating or live-target-mutating step runs until a
                 human gives explicit approval naming the source catalog, target,
                 exact skills, action, and mode, with the recipe's dry-run or diff
-                evidence in front of them. Read-only and staging-only steps never
-                need approval. Work one target at a time.
+                evidence in front of them. Read-only steps never need approval.
+                Staging-only steps do not mutate the catalog or target, but the
+                artifact recipes place fresh staging inside the approved sequence
+                so apply follows it immediately. Work one target at a time.
               </p>
             </div>
             <p>
@@ -223,7 +225,8 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
                 repeat the recipe for the next target, one at a time. Stop and
                 escalate if strict validation reports errors or if the supposedly
                 fresh target already reports <code>unknown</code> or
-                <code>dirty</code> entries; those route to recipes 5 through 8
+                <code>dirty</code> entries. Unknown entries route to recipe 5 or
+                6; dirty entries need inspection to choose recipe 4, 7, or 8
                 instead of being overwritten by apply.
               </p>
             </section>
@@ -275,8 +278,9 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                 <code>current</code> is a report, not permission to mutate: route
                 <code>missing</code>/<code>behind</code>/<code>version</code> to
                 recipe 4, exact receiptless matches to recipe 5, receiptless
-                mismatches to recipe 6, and <code>dirty</code> to recipe 7 or 8.
-                Stop on catalog error findings before touching any target.
+                mismatches to recipe 6, ordinary <code>dirty</code> edits to recipe
+                7 or 8, and the guarded dirty-behind case to recipe 4. Stop on
+                catalog error findings before touching any target.
               </p>
             </section>
 
@@ -314,15 +318,17 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                 Compare the new status entries with the previous heartbeat: a
                 skill that moved to <code>behind</code> or
                 <code>version</code> means the catalog advanced; a move to
-                <code>dirty</code> means the live receipt-owned copy drifted; a
-                new <code>unknown</code> means receiptless target state appeared.
+                <code>dirty</code> needs inspection to distinguish live drift from
+                the guarded dirty-behind case; a new <code>unknown</code> means
+                receiptless target state appeared.
               </p>
               <p>
                 <strong>Verify, then stop.</strong> Report each drifted skill with
                 its target, resolved path, and status, then stop. Escalate by
-                naming the matching recipe (4 for behind or missing, 5 or 6 for
-                unknown, 7 or 8 for dirty) and wait for a decision; a heartbeat
-                run must never trigger an implicit repair or import.
+                naming the matching recipe (4 for behind, missing, or guarded
+                dirty-behind; 5 or 6 for unknown; 7 or 8 for ordinary dirty) and
+                wait for a decision; a heartbeat run must never trigger an
+                implicit repair or import.
               </p>
             </section>
 
@@ -379,7 +385,8 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
               </p>
               <p>
                 <strong>Verify, then stop.</strong> Confirm the selected skills
-                now read <code>current</code> and record the receipt path for
+                now read <code>current</code> and derive the receipt path as
+                <code>&lt;installRoot&gt;/.skill-suitcase-receipt.json</code> for
                 rollback. Stop and escalate if apply refuses or if pack reports
                 blocked or denied source paths. An ordinary <code>dirty</code>
                 edit is never fixed by apply: route it to recipe 7 or 8. The one
@@ -471,7 +478,7 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
               <p>
                 <strong>Evidence.</strong> An accepted dry-run returns
                 <code>ok: true</code> with the target and catalog differences plus
-                the backup path the apply will use. A successful
+                the backup path template. A successful
                 <code>ok: true</code> apply preserves the prior target as rollback
                 state, installs catalog source, writes the receipt, and verifies
                 status itself; the result names the backup location. An
@@ -520,9 +527,10 @@ skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex"
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
                 <strong>Evidence.</strong> An accepted dry-run returns
-                <code>ok: true</code> with the receipt hash, catalog hash, and live
-                hash per file plus the backup plan, which is how you tell an
-                accidental edit from an intentional one. A successful
+                <code>ok: true</code> with receipt and catalog tree hashes, source
+                and live hash evidence in its file entries, and the backup plan.
+                Use that evidence to decide whether an edit was accidental or
+                intentional. A successful
                 <code>ok: true</code> apply backs up the live content, installs
                 catalog source, refreshes the receipt, and verifies
                 <code>current</code> status. An ineligible state returns
