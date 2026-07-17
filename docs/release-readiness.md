@@ -83,6 +83,7 @@ decision; it is not inferred from routine Release Please output.
 
 `package.json` uses an explicit `files` whitelist.
 The exact curated payload is owned by that whitelist and independently enforced by `scripts/package-validation.mjs`.
+The documentation payload inventory includes `docs/getting-started.md` as the public onboarding walkthrough.
 Do not replace the exact documentation, operator-skill, or sample-catalog entries with broad directory globs because a newly added file must not become publish-approved without independent review.
 Project test suites, source TypeScript, local review artifacts, agent state, and workspace files are excluded from the npm payload.
 The sample catalog's explicitly curated contract test is part of the public fixture rather than the project test suite.
