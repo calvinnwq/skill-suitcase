@@ -126,7 +126,7 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
             </p>
             <p>Each step carries every write classification that applies:</p>
             <div class="def-rows">
-              <div><span class="k">read-only</span><span class="v">Writes nothing anywhere. Safe to run and repeat without approval.</span></div>
+              <div><span class="k">read-only</span><span class="v">Does not persist changes to the catalog or live targets. A command may use an isolated temporary workspace, and is safe to run and repeat without approval.</span></div>
               <div><span class="k">staging-only</span><span class="v">Writes only a disposable output directory outside the catalog and every resolved target root. The live target and catalog are untouched.</span></div>
               <div><span class="k">catalog-mutating</span><span class="v">Writes the catalog working tree as ordinary uncommitted Git changes. Nothing auto-commits; review the diff.</span></div>
               <div><span class="k">live-target-mutating</span><span class="v">Writes a live agent skill root or its receipt. Runs only after the approval named in the recipe.</span></div>
@@ -234,9 +234,20 @@ skill-suitcase status --source "$SRC" --json
 <span class="c"># per target, with explicit path overrides</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
+              <div class="callout" data-kind="readonly">
+                <p class="callout-label">Approval</p>
+                <p>
+                  No approval or apply step exists in this recipe. Keep every
+                  result as inspection evidence and route any proposed mutation
+                  to its state-specific recipe.
+                </p>
+              </div>
               <p>
-                <strong>Evidence.</strong> Inspect finding levels from
-                <code>import</code> and <code>validate</code>, safety
+                <strong>Evidence.</strong> Successful inspection returns
+                <code>ok: true</code>. A structured <code>ok: false</code> result
+                means the audit is incomplete and blocks mutation. Inspect
+                finding levels from <code>import</code> and
+                <code>validate</code>, safety
                 classification per target from <code>targets</code>, the
                 seven-state status enum (<code>current</code>,
                 <code>missing</code>, <code>version</code>, <code>behind</code>,
@@ -276,9 +287,19 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                   not. Drift detection is never permission to mutate either side.
                 </p>
               </div>
+              <div class="callout" data-kind="readonly">
+                <p class="callout-label">Approval</p>
+                <p>
+                  No approval or apply step exists in a heartbeat. Report the
+                  evidence and wait for a separately approved recovery recipe.
+                </p>
+              </div>
               <p>
-                <strong>Evidence.</strong> Compare the new status entries with the
-                previous heartbeat: a skill that moved to <code>behind</code> or
+                <strong>Evidence.</strong> A complete heartbeat returns
+                <code>ok: true</code>; retain any structured
+                <code>ok: false</code> refusal as the report evidence and stop.
+                Compare the new status entries with the previous heartbeat: a
+                skill that moved to <code>behind</code> or
                 <code>version</code> means the catalog advanced; a move to
                 <code>dirty</code> means the live receipt-owned copy drifted; a
                 new <code>unknown</code> means receiptless target state appeared.
@@ -378,10 +399,13 @@ skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" 
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
                 <strong>Evidence.</strong> Before track, the diff for the selected
-                skill must contain no <code>create</code>, <code>update</code>,
+                skill must return <code>ok: true</code> and contain no
+                <code>create</code>, <code>update</code>,
                 <code>extra</code>, or <code>missing</code> file action. After
-                track, the skill reads <code>current</code> and the receipt
-                records the adopted install.
+                a successful <code>ok: true</code> track, the skill reads
+                <code>current</code> and the receipt records the adopted install.
+                A failed exact-match contract returns structured
+                <code>ok: false</code> JSON without adopting the files.
               </p>
               <p>
                 <strong>Verify, then stop.</strong> Confirm <code>current</code>
@@ -421,11 +445,14 @@ skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.cod
 skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
-                <strong>Evidence.</strong> The dry-run reports the target and
-                catalog differences plus the backup path the apply will use. A
-                successful apply preserves the prior target as rollback state,
-                installs catalog source, writes the receipt, and verifies status
-                itself; the result names the backup location.
+                <strong>Evidence.</strong> An accepted dry-run returns
+                <code>ok: true</code> with the target and catalog differences plus
+                the backup path the apply will use. A successful
+                <code>ok: true</code> apply preserves the prior target as rollback
+                state, installs catalog source, writes the receipt, and verifies
+                status itself; the result names the backup location. An
+                ineligible state returns structured <code>ok: false</code> JSON
+                without replacing the target.
               </p>
               <p>
                 <strong>Verify, then stop.</strong> Confirm <code>current</code>
@@ -464,12 +491,14 @@ skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex"
 skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
-                <strong>Evidence.</strong> The dry-run reports the receipt hash,
-                catalog hash, and live hash per file plus the backup plan, which
-                is how you tell an accidental edit from an intentional one. A
-                successful apply backs up the live content, installs catalog
-                source, refreshes the receipt, and verifies <code>current</code>
-                status.
+                <strong>Evidence.</strong> An accepted dry-run returns
+                <code>ok: true</code> with the receipt hash, catalog hash, and live
+                hash per file plus the backup plan, which is how you tell an
+                accidental edit from an intentional one. A successful
+                <code>ok: true</code> apply backs up the live content, installs
+                catalog source, refreshes the receipt, and verifies
+                <code>current</code> status. An ineligible state returns
+                structured <code>ok: false</code> JSON without discarding the edit.
               </p>
               <p>
                 <strong>Verify, then stop.</strong> Confirm <code>current</code>
@@ -516,11 +545,14 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
 git -C "$SRC" status --short --branch
 git -C "$SRC" diff</code></pre>
               <p>
-                <strong>Evidence.</strong> The dry-run reports the receipt hash,
-                catalog hash, and target hash plus the planned repository writes.
-                A successful apply copies the target content into the catalog
-                atomically, refreshes the receipt, and leaves normal uncommitted
-                Git changes; nothing auto-commits.
+                <strong>Evidence.</strong> An accepted dry-run returns
+                <code>ok: true</code> with the receipt hash, catalog hash, and
+                target hash plus the planned repository writes. A successful
+                <code>ok: true</code> apply copies the target content into the
+                catalog atomically, refreshes the receipt, and leaves normal
+                uncommitted Git changes; nothing auto-commits. An ineligible or
+                diverged state returns structured <code>ok: false</code> JSON
+                without importing the edit.
               </p>
               <p>
                 <strong>Verify, then stop.</strong> Confirm the skill reads
@@ -571,14 +603,16 @@ skill-suitcase upstream import --source "$SRC" --skill existing-skill --apply --
 git -C "$SRC" status --short --branch
 git -C "$SRC" diff</code></pre>
               <p>
-                <strong>Evidence.</strong> <code>upstream check</code> reports the
-                validated lock declarations and imported lineage;
+                <strong>Evidence.</strong> Successful inspection and import steps
+                return <code>ok: true</code>. <code>upstream check</code> reports
+                the validated lock declarations and imported lineage;
                 <code>upstream fetch --dry-run</code> reports the file-level diff
                 between the pinned upstream and the catalog. A successful import
                 writes only <code>skills/&lt;name&gt;</code> plus
                 <code>.skill-suitcase/upstream-lock.json</code> and does not
                 auto-commit. Dirty selected catalog source is a refusal, not
-                something import overwrites.
+                something import overwrites, and returns structured
+                <code>ok: false</code> JSON without changing the catalog.
               </p>
               <p>
                 <strong>Verify, then stop.</strong> Finish the lane with ordinary
@@ -606,15 +640,25 @@ git -C "$SRC" diff</code></pre>
               <pre><code><span class="c"># read-only: report the safety classification and any fallback inventory</span>
 skill-suitcase targets --source "$SRC" --json
 skill-suitcase status --source "$SRC" --json</code></pre>
+              <div class="callout" data-kind="readonly">
+                <p class="callout-label">Approval</p>
+                <p>
+                  No approval or apply step exists for a provider-owned read-only
+                  target. Report and skip it; approval cannot override the provider
+                  boundary.
+                </p>
+              </div>
               <p>
-                <strong>Evidence.</strong> The targets report carries each
-                target's safety classification. Provider fallback inventory
+                <strong>Evidence.</strong> Successful discovery returns
+                <code>ok: true</code>, and the targets report carries each target's
+                safety classification. Provider fallback inventory
                 without a catalog assignment appears with
                 <code>statusCount: 0</code> and no status entries. A custom
                 provider path tied to a catalog assignment may show ordinary
                 status entries while remaining read-only: target-aware
                 materialization and mutation flows refuse it with
-                <code>read_only_target</code>.
+                <code>read_only_target</code> in structured
+                <code>ok: false</code> JSON.
               </p>
               <p>
                 <strong>Verify, then stop.</strong> Record the provider-owned
@@ -637,11 +681,11 @@ skill-suitcase status --source "$SRC" --json</code></pre>
               and private prompts out of chat, issues, and logs.
             </p>
             <p>
-              The step-by-step runbook version of this page is
-              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md">INSTALL.md</a>;
-              the packaged
+              For installation and first-run setup, see
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md">INSTALL.md</a>.
+              The packaged
               <a href="https://github.com/calvinnwq/skill-suitcase/tree/main/skills/skill-suitcase">operator skill</a>
-              teaches the same loop to the agent itself.
+              owns the agent-facing operating policy behind these recipes.
             </p>
           </section>
         </article>
