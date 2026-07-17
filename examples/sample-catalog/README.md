@@ -25,24 +25,30 @@ SRC="$(npm root --global)/skill-suitcase/examples/sample-catalog"
 After either setup, run the walkthrough:
 
 ```bash
+python3 -B -m unittest discover -s "$SRC/tests" -p 'test_*.py'
+
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-demo.XXXXXX")" || exit 1
 test -n "$SANDBOX" || exit 1
 TARGET="$SANDBOX/agent-skills"
 PACK="$SANDBOX/pack"
 mkdir -p "$TARGET"
 
-"$CLI" validate --source "$SRC" --json
+"$CLI" import --source "$SRC" --json
+"$CLI" validate --source "$SRC" --strict --json
 "$CLI" upstream check --source "$SRC" --json
+"$CLI" targets --source "$SRC" --agents-skills "$TARGET" --json
 "$CLI" plan --source "$SRC" --target agents --json
 "$CLI" status --source "$SRC" --target agents --agents-skills "$TARGET" --json
 "$CLI" diff --source "$SRC" --target agents --agents-skills "$TARGET" --json
+"$CLI" pack --source "$SRC" --target agents --agents-skills "$TARGET" --dry-run --json
 "$CLI" pack --source "$SRC" --target agents --agents-skills "$TARGET" --output "$PACK" --json
 ARTIFACT="$(find "$PACK/.skill-suitcase/artifacts" -mindepth 1 -maxdepth 1 -type d -print -quit)"
 ```
 
-The commands above only read the catalog and target or write the explicit pack
-directory. To test mutation, apply the staged artifact only to the disposable
-target:
+The contract tests exercise deterministic routing and greeting output.
+Strict validation reports one complete Skillify contract and no findings.
+The CLI commands above only read the catalog and target or write the explicit pack directory.
+To test mutation, apply the staged artifact only to the disposable target:
 
 ```bash
 "$CLI" apply --source "$SRC" --target agents --agents-skills "$TARGET" --artifact "$ARTIFACT" --json

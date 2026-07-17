@@ -1,0 +1,122 @@
+[
+  {
+    "utterance": "Show me the portable Skill Suitcase sample greeting.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Read and return the harmless greeting from the disposable sample catalog."
+  },
+  {
+    "utterance": "Show me the sample greeting whenever convenient.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Treat never as a token, not a substring inside an affirmative request."
+  },
+  {
+    "utterance": "Verify the disposable Skill Suitcase installation.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Verify the deterministic greeting runner in a disposable installation."
+  },
+  {
+    "utterance": "Verify the disposable Skill Suitcase install.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Route the exact public trigger wording documented by the sample skill."
+  },
+  {
+    "utterance": "Please show me the sample greeting.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Allow a polite prefix before the affirmative greeting action."
+  },
+  {
+    "utterance": "Don't add commentary; show me the sample greeting.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Scope negation to its clause instead of rejecting a later affirmative greeting action."
+  },
+  {
+    "utterance": "Tell me tomorrow's weather.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route unrelated requests to the sample greeting skill."
+  },
+  {
+    "utterance": "Do not show me the sample greeting.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route an explicitly negated greeting request."
+  },
+  {
+    "utterance": "Never show me the sample greeting.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route a negatively phrased greeting request."
+  },
+  {
+    "utterance": "The sample is missing its greeting file.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route an incidental mention of sample greeting terms."
+  },
+  {
+    "utterance": "Explain why the docs say \"show me the sample greeting\".",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route a quoted mention of a greeting request."
+  },
+  {
+    "utterance": "Show me everything except the sample greeting.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route a greeting request that explicitly excludes the greeting."
+  },
+  {
+    "utterance": "Show metadata about the sample greeting file.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not treat a shared character prefix as an affirmative request phrase."
+  },
+  {
+    "utterance": "Show me why the sample greeting is missing.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not treat a request for an explanation as a request for the greeting."
+  },
+  {
+    "utterance": "Show me metadata about the sample greeting file.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Bind the greeting action directly to its object instead of matching loose terms."
+  }
+]

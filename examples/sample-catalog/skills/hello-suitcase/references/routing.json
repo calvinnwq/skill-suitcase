@@ -1,0 +1,49 @@
+{
+  "skill": "hello-suitcase",
+  "allowedPrefixes": [
+    "please ",
+    "don't add commentary; "
+  ],
+  "routes": [
+    {
+      "allTerms": [
+        "sample",
+        "greeting"
+      ],
+      "intentPatterns": [
+        "show me (?:the )?(?:portable skill suitcase )?sample greeting(?: whenever convenient)?[.!?]?",
+        "show the (?:portable skill suitcase )?sample greeting[.!?]?",
+        "see the (?:portable skill suitcase )?sample greeting[.!?]?"
+      ]
+    },
+    {
+      "allTerms": [
+        "disposable",
+        "skill suitcase",
+        "installation"
+      ],
+      "intentPatterns": [
+        "(?:verify|check) (?:the )?disposable skill suitcase (?:install|installation)[.!?]?"
+      ]
+    }
+  ],
+  "positiveMatches": [
+    "Show me the portable Skill Suitcase sample greeting.",
+    "Show me the sample greeting whenever convenient.",
+    "Verify the disposable Skill Suitcase installation.",
+    "Verify the disposable Skill Suitcase install.",
+    "Please show me the sample greeting.",
+    "Don't add commentary; show me the sample greeting."
+  ],
+  "nonMatches": [
+    "Tell me tomorrow's weather.",
+    "Do not show me the sample greeting.",
+    "Never show me the sample greeting.",
+    "The sample is missing its greeting file.",
+    "Explain why the docs say \"show me the sample greeting\".",
+    "Show me everything except the sample greeting.",
+    "Show metadata about the sample greeting file.",
+    "Show me why the sample greeting is missing.",
+    "Show me metadata about the sample greeting file."
+  ]
+}

@@ -82,14 +82,16 @@ decision; it is not inferred from routine Release Please output.
 - Homepage: `https://calvinnwq.github.io/skill-suitcase/`
 
 `package.json` uses an explicit `files` whitelist.
-The public payload is approved through exact curated paths: npm's required `package.json`; `dist/src/**/*.js`; `skills/skill-suitcase/SKILL.md`; `skills/skill-suitcase/agents/openai.yaml`; `LICENSE`, `VISION.md`, `SPEC.md`, `README.md`, `INSTALL.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `DEVELOPING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, and `CLAUDE.md`; `docs/command-reference.md`, `docs/getting-started.md`, `docs/install-smoke.md`, `docs/portability-matrix.md`, `docs/release-readiness.md`, and `docs/skills-sh-delegation.md`; and the five files under `examples/sample-catalog` listed explicitly in `package.json`.
+The exact curated payload is owned by that whitelist and independently enforced by `scripts/package-validation.mjs`.
+The documentation payload inventory includes `docs/getting-started.md` as the public onboarding walkthrough.
 Do not replace the exact documentation, operator-skill, or sample-catalog entries with broad directory globs because a newly added file must not become publish-approved without independent review.
-Tests, source TypeScript, local review artifacts, agent state, and workspace files are excluded from the npm payload.
+Project test suites, source TypeScript, local review artifacts, agent state, and workspace files are excluded from the npm payload.
+The sample catalog's explicitly curated contract test is part of the public fixture rather than the project test suite.
 
 `scripts/package-validation.mjs` pins the MIT license, `Calvin Ng` author, repository/homepage/issues URLs, search keywords, Node `>=20` engine, pnpm `10.34.4` package-manager metadata, package name, and binary name.
 `prepack` remains routed through `package:prepare` so every supported npm pack or publish removes stale `dist` output, rebuilds the CLI, verifies its shebang and executable mode, and records hashes for `package.json`, `pnpm-lock.yaml`, `tsconfig.json`, source files, and compiled output in the ignored `dist/.package-build.json` manifest.
 `package:validate` is the non-rebuilding recheck of that manifest, so changed compiler configuration or dependency inputs and missing, additional, stale, changed, or non-executable compiled CLI output fail validation.
-`pnpm run package:smoke` parses `npm pack --json`, rejects missing or unintended payload entries, requires the installed CLI binary to remain executable, installs the generated tarball into an empty temporary project, and runs the read-only `targets` command.
+`pnpm run package:smoke` parses `npm pack --json`, rejects missing or unintended payload entries, requires the installed CLI binary to remain executable, installs the generated tarball into an empty temporary project, runs the read-only `targets` command, and strictly validates the packaged sample catalog and its contract tests.
 The package validation tests also compare the dry-run payload's `docs/` entries
 to the six curated Markdown paths exactly, which keeps the GitHub Pages-only
 HTML, CSS, and JavaScript outside the tarball.
@@ -186,10 +188,8 @@ and reusable text documentation under `docs/`, `skills/`, and `examples/` for
 contributor-specific home paths and validates every literal CLI launch form as
 an accepted, deterministic `--json` invocation.
 
-Review the npm dry-run output for the expected executable, compiled runtime,
-operator skill, license, and public docs. Refuse the release if it contains
-tests, local absolute paths as required inputs, private agent state, temporary
-artifacts, or workspace-only files.
+Review the npm dry-run output for the expected executable, compiled runtime, operator skill, license, public docs, and curated sample catalog.
+Refuse the release if it contains project test suites, uncurated sample tests, local absolute paths as required inputs, private agent state, temporary artifacts, or workspace-only files.
 
 ## Portable Smoke Test
 

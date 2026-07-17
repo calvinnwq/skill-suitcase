@@ -8,7 +8,7 @@ and pull request expectations live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - Node.js 20 or newer
 - npm
 - Git
-- Python 3 for local static-site preview
+- Python 3 for sample contract tests and local static-site preview
 
 ## Set up the repository
 
@@ -37,7 +37,7 @@ commands. Do not point `apply`, `rollback`, `track`, `reconcile --apply`,
 `repair --apply`, `promote --apply`, `import-target --apply`, `prune --apply`, or
 `upstream import --apply` at a real agent home or catalog unless that mutation
 is intentional and approved.
-The [`examples/sample-catalog`](examples/sample-catalog/README.md) walkthrough provides a public-safe disposable lifecycle for `plan`, `diff`, `status`, `pack`, `apply`, `repair`, `rollback`, and upstream-policy checks.
+The [`examples/sample-catalog`](examples/sample-catalog/README.md) walkthrough is the authoritative public-safe disposable lifecycle and sample contract check.
 
 ## Architecture
 
@@ -86,9 +86,8 @@ each CLI invocation independently, including installed-binary, `$CLI`, compiled
 CLI, wrapper, package-runner, and structured command examples.
 Each example must be accepted by the shipped CLI and produce deterministic
 output with `--json`.
-`package:smoke` clean-builds through npm's `prepack` hook, validates the public
-metadata and exact tarball payload, installs that tarball in an empty temporary
-project, and runs its read-only `targets` command.
+`package:smoke` verifies the packed and installed CLI, including the packaged sample catalog.
+The exact package gate is owned by the [release-readiness policy](docs/release-readiness.md#npm-package-and-binary-policy).
 The package validation tests pin the exact curated Markdown files under `docs/`
 and keep the GitHub Pages-only HTML, CSS, and JavaScript outside the tarball.
 `package:prepare` is the lower-level clean-build and hash-recording step used by
