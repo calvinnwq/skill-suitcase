@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -40,6 +41,53 @@ async function listFixtureFiles(root: string): Promise<string[]> {
     return entry.isDirectory() ? listFixtureFiles(entryPath) : [entryPath];
   }));
   return paths.flat().sort();
+}
+
+type TreeSnapshotEntry = {
+  path: string;
+  kind: "directory" | "file" | "symlink";
+  mode: number;
+  mtimeMs: number;
+  value: string | null;
+};
+
+async function snapshotTree(root: string): Promise<TreeSnapshotEntry[]> {
+  const snapshot: TreeSnapshotEntry[] = [];
+
+  async function visit(relativePath: string): Promise<void> {
+    const entryPath = path.join(root, relativePath);
+    const entryStat = await lstat(entryPath);
+    const shared = {
+      path: relativePath || ".",
+      mode: entryStat.mode & 0o777,
+      mtimeMs: entryStat.mtimeMs
+    };
+
+    if (entryStat.isDirectory()) {
+      snapshot.push({ ...shared, kind: "directory", value: null });
+      const entries = await readdir(entryPath);
+      for (const entry of entries.sort()) {
+        await visit(path.join(relativePath, entry));
+      }
+      return;
+    }
+
+    if (entryStat.isFile()) {
+      const digest = createHash("sha256").update(await readFile(entryPath)).digest("hex");
+      snapshot.push({ ...shared, kind: "file", value: digest });
+      return;
+    }
+
+    if (entryStat.isSymbolicLink()) {
+      snapshot.push({ ...shared, kind: "symlink", value: await readlink(entryPath) });
+      return;
+    }
+
+    throw new Error(`unsupported filesystem entry in snapshot: ${entryPath}`);
+  }
+
+  await visit("");
+  return snapshot;
 }
 
 test("portable sample catalog exercises the offline lifecycle through the CLI", async (t) => {
@@ -142,14 +190,21 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   assert.equal(initialDiff.ok, true);
   assert.ok(initialDiff.summary.create > 0);
 
-  const dryPack = runCli<{ ok: boolean; dryRun: boolean; summary: { skills: number } }>([
+  const sourceBeforePack = await snapshotTree(source);
+  const targetBeforePack = await snapshotTree(targetRoot);
+  const dryPackArgs = [
     "pack",
     ...targetArgs,
     "--dry-run"
-  ]);
+  ];
+  const dryPack = runCli<{ ok: boolean; dryRun: boolean; summary: { skills: number } }>(dryPackArgs);
+  const repeatedDryPack = runCli<typeof dryPack>(dryPackArgs);
+  assert.deepEqual(repeatedDryPack, dryPack);
   assert.equal(dryPack.ok, true);
   assert.equal(dryPack.dryRun, true);
   assert.equal(dryPack.summary.skills, 1);
+  assert.deepEqual(await snapshotTree(source), sourceBeforePack);
+  assert.deepEqual(await snapshotTree(targetRoot), targetBeforePack);
 
   const packed = runCli<{
     ok: boolean;
@@ -158,6 +213,8 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   assert.equal(packed.ok, true);
   assert.ok(packed.bundle.artifactPath?.startsWith(`${artifactRoot}${path.sep}`));
   assert.equal(typeof packed.bundle.manifestPath, "string");
+  assert.deepEqual(await snapshotTree(source), sourceBeforePack);
+  assert.deepEqual(await snapshotTree(targetRoot), targetBeforePack);
 
   const applied = runCli<{ ok: boolean; applied: { skills: string[] } }>([
     "apply",
