@@ -594,6 +594,292 @@ test("agent workflows page contrasts the recovery decision tree", () => {
   assert.ok(normalized.includes("New-machine setup installs from the skills repo through Suitcase"));
 });
 
+test("agent workflows page carries the ten operational recipes", () => {
+  const workflows = read("docs/agent-workflows.html");
+  const normalized = workflows.replace(/\s+/g, " ");
+
+  const RECIPES: ReadonlyArray<readonly [string, readonly string[]]> = [
+    ["recipe-new-machine-setup", ["read-only", "staging-only", "live-target-mutating"]],
+    ["recipe-read-only-audit", ["read-only"]],
+    ["recipe-drift-heartbeat", ["read-only"]],
+    ["recipe-missing-behind-pack-apply", ["read-only", "staging-only", "live-target-mutating"]],
+    ["recipe-exact-match-track", ["read-only", "live-target-mutating"]],
+    ["recipe-receiptless-mismatch-reconcile", ["read-only", "live-target-mutating"]],
+    ["recipe-accidental-dirty-repair", ["read-only", "live-target-mutating"]],
+    ["recipe-intentional-dirty-import-target", ["read-only", "catalog-mutating", "live-target-mutating"]],
+    ["recipe-upstream-source-refresh", ["read-only", "catalog-mutating"]],
+    ["recipe-provider-read-only", ["read-only"]]
+  ];
+  for (const [id] of RECIPES) {
+    assert.match(workflows, new RegExp(`<h3 id="${id}">`), `agent workflows should keep the recipe section ${id}`);
+  }
+
+  function recipeSection(id: string): string {
+    const start = workflows.indexOf(`<h3 id="${id}">`);
+    assert.ok(start >= 0, `missing recipe section ${id}`);
+    const boundaries = [workflows.indexOf("<h3 id=", start + 1), workflows.indexOf("<h2>", start + 1)]
+      .filter((boundary) => boundary >= 0);
+    return workflows.slice(start, boundaries.length > 0 ? Math.min(...boundaries) : workflows.length);
+  }
+
+  function literalCommandLines(section: string): string[] {
+    return [...section.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
+      .flatMap((match) => match[1]?.split("\n") ?? [])
+      .map((line) => line.replace(/<[^>]+>/g, "").trim())
+      .filter((line) => line.startsWith("skill-suitcase ") || line.startsWith("git "));
+  }
+
+  // Every recipe labels its steps with its exact shared write classifications
+  // and carries a recipe-local approval boundary callout, including the
+  // explicit no-apply boundaries in the read-only recipes.
+  for (const [id, expectedClassifications] of RECIPES) {
+    const actualClassifications = [...recipeSection(id).matchAll(/<span class="k">([^<]+)<\/span>/g)].map(
+      (match) => match[1]
+    );
+    assert.deepEqual(actualClassifications, expectedClassifications, `${id} must classify every recipe step`);
+    assert.ok(
+      recipeSection(id).includes('<p class="callout-label">Approval</p>'),
+      `${id} must carry a recipe-local approval boundary callout`
+    );
+  }
+
+  // Every literal command in a recipe block sits under a class-labeled comment
+  // that matches the command's actual write behavior, so no step is grouped
+  // under the wrong write class or left unclassified.
+  function expectedCommandClass(command: string): string {
+    if (command.startsWith("git ")) {
+      const gitCommand = command.match(/^git(?:\s+-C\s+(?:"[^"]*"|'[^']*'|\S+))?\s+([^\s]+)/)?.[1];
+      if (gitCommand === "diff" || gitCommand === "status") return "read-only";
+      return assert.fail(`unrecognized literal Git workflow command: ${command}`);
+    }
+    if (command.includes("--dry-run")) return "read-only";
+    if (command.startsWith("skill-suitcase upstream import ")) return "catalog-mutating";
+    if (command.startsWith("skill-suitcase import-target ")) return "catalog-mutating + live-target-mutating";
+    if (command.startsWith("skill-suitcase pack ") && command.includes("--output")) return "staging-only";
+    if (/^skill-suitcase (?:apply|track|reconcile|repair|prune|promote|rollback)\b/.test(command)) {
+      return "live-target-mutating";
+    }
+    if (/^skill-suitcase (?:import|validate|targets|plan|status|diff|upstream check|upstream fetch)\b/.test(command)) {
+      return "read-only";
+    }
+    return assert.fail(`unrecognized literal workflow command: ${command}`);
+  }
+  const CLASS_COMMENT =
+    /^# (read-only|staging-only|catalog-mutating \+ live-target-mutating|catalog-mutating|live-target-mutating)[:,]/;
+  for (const block of workflows.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)) {
+    let currentClass: string | null = null;
+    for (const rawLine of (block[1] ?? "").split("\n")) {
+      const line = rawLine.replace(/<[^>]+>/g, "").trim();
+      const classComment = line.match(CLASS_COMMENT);
+      if (classComment) currentClass = classComment[1] ?? null;
+      if (!line.startsWith("skill-suitcase ") && !line.startsWith("git ")) continue;
+      assert.equal(
+        currentClass,
+        expectedCommandClass(line),
+        `every literal workflow step on the page must carry its write classification: ${line}`
+      );
+    }
+  }
+  assert.equal(expectedCommandClass("git status --short"), "read-only");
+  assert.throws(() => expectedCommandClass('git -C "$SRC" add docs/agent-workflows.html'));
+
+  // Git review enumerates names before contents and never prints ignored-file
+  // contents into tool output.
+  assert.doesNotMatch(workflows, /--no-index/, "Git review must not render file contents indiscriminately");
+  assert.doesNotMatch(workflows, /ls-files --others/, "Git review must enumerate names with status --short --ignored");
+  assert.ok(
+    workflows.includes('git -C "$SRC" status --short --ignored --untracked-files=all -- skills/existing-skill'),
+    "post-import Git review must enumerate every untracked and ignored name without contents"
+  );
+  assert.ok(normalized.includes("Never render ignored-file contents into tool output"));
+
+  // The state-to-command routing distinctions must stay explicit.
+  assert.ok(normalized.includes("Missing and behind route to <code>pack</code> plus <code>apply</code>"));
+  assert.ok(normalized.includes("Exact unknown matches route to <code>track</code>"));
+  assert.ok(normalized.includes("receiptless mismatched-directory case routes to <code>reconcile</code>"));
+  assert.ok(normalized.includes("accidental dirty routes to <code>repair</code>"));
+  assert.ok(normalized.includes("Intentional dirty routes to <code>import-target</code>"));
+
+  // track has no dry-run mode; diff is its preview, and no example invents one.
+  assert.ok(normalized.includes("track has no dry-run flag"));
+  const literalCommands = literalCommandLines(workflows);
+  assert.ok(literalCommands.length > 0, "agent workflows should keep literal commands");
+  for (const command of literalCommands) {
+    if (command.startsWith("skill-suitcase track ")) {
+      assert.doesNotMatch(command, /--dry-run/, "track must not be documented with a --dry-run flag");
+    }
+  }
+
+  // Every mutation-capable recipe separates its read-only or staging evidence
+  // from the approval-gated mutation step.
+  const APPROVAL_GATED: ReadonlyArray<readonly [string, string, string]> = [
+    ["recipe-new-machine-setup", "--dry-run", "skill-suitcase apply"],
+    ["recipe-missing-behind-pack-apply", "--dry-run", "skill-suitcase apply"],
+    ["recipe-exact-match-track", "skill-suitcase diff", "skill-suitcase track"],
+    ["recipe-receiptless-mismatch-reconcile", "--dry-run", "--apply"],
+    ["recipe-accidental-dirty-repair", "--dry-run", "--apply"],
+    ["recipe-intentional-dirty-import-target", "--dry-run", "--apply"],
+    ["recipe-upstream-source-refresh", "--dry-run", "--apply"]
+  ];
+  for (const [id, preview, mutation] of APPROVAL_GATED) {
+    const section = recipeSection(id);
+    const approval = section.indexOf('<p class="callout-label">Approval</p>');
+    assert.ok(approval >= 0, `${id} must carry an approval callout`);
+    assert.ok(
+      literalCommandLines(section.slice(0, approval)).some((command) => command.includes(preview)),
+      `${id} must show its literal ${preview} command before the approval callout`
+    );
+    assert.ok(
+      literalCommandLines(section.slice(approval)).some((command) => command.includes(mutation)),
+      `${id} must gate its literal ${mutation} command behind the approval callout`
+    );
+  }
+  assert.ok(
+    normalized.includes("explicit approval naming the source catalog, target, exact skills, action, and mode"),
+    "agent workflows should state the shared approval contract"
+  );
+
+  // The post-approval anti-TOCTOU re-check is part of the executable
+  // contract: each approved mutation is immediately preceded by a re-run of
+  // its preview evidence inside the approved sequence.
+  const POST_APPROVAL_RECHECKS: ReadonlyArray<readonly [string, string, string]> = [
+    ["recipe-exact-match-track", "skill-suitcase diff ", "skill-suitcase track "],
+    ["recipe-receiptless-mismatch-reconcile", "--dry-run", "--apply"],
+    ["recipe-accidental-dirty-repair", "--dry-run", "--apply"],
+    ["recipe-intentional-dirty-import-target", "--dry-run", "--apply"],
+    ["recipe-upstream-source-refresh", "--dry-run", "--apply"]
+  ];
+  for (const [id, recheck, mutation] of POST_APPROVAL_RECHECKS) {
+    const section = recipeSection(id);
+    const approval = section.indexOf('<p class="callout-label">Approval</p>');
+    assert.ok(approval >= 0, `${id} must carry an approval callout`);
+    const approved = literalCommandLines(section.slice(approval));
+    const recheckIndex = approved.findIndex((command) => command.includes(recheck));
+    const mutationIndex = approved.findIndex((command) => command.includes(mutation));
+    assert.ok(
+      recheckIndex >= 0 && mutationIndex > recheckIndex,
+      `${id} must re-run its ${recheck} preview after approval and before ${mutation}`
+    );
+  }
+
+  // Artifact recipes must not treat a pre-approval bundle as authorization:
+  // the approved sequence itself re-runs diff, stages a fresh bundle, and
+  // applies that just-staged artifact with an explicit install mode.
+  for (const id of ["recipe-new-machine-setup", "recipe-missing-behind-pack-apply"]) {
+    const section = recipeSection(id);
+    const approval = section.indexOf('<p class="callout-label">Approval</p>');
+    assert.ok(
+      literalCommandLines(section.slice(0, approval)).every((command) => !command.includes("--output")),
+      `${id} must not stage an applied bundle before the approval callout`
+    );
+    const approved = literalCommandLines(section.slice(approval));
+    const freshDiff = approved.findIndex((command) => command.startsWith("skill-suitcase diff "));
+    const freshPack = approved.findIndex((command) => command.includes('--output "$OUT"'));
+    const freshApply = approved.findIndex((command) => command.startsWith("skill-suitcase apply "));
+    assert.ok(
+      freshDiff >= 0 && freshPack > freshDiff && freshApply > freshPack,
+      `${id} must re-run diff and pack immediately before the approved apply`
+    );
+  }
+  for (const command of literalCommands) {
+    if (command.startsWith("skill-suitcase apply ")) {
+      assert.ok(command.includes("--mode copy"), `apply must encode the approved install mode: ${command}`);
+    }
+  }
+
+  // The guarded dirty-behind exception stays distinguished from ordinary
+  // dirty edits, which still route to repair or import-target.
+  assert.ok(normalized.includes("guarded dirty-behind case"));
+  assert.ok(normalized.includes("An ordinary <code>dirty</code> edit is never fixed by apply"));
+
+  // Read-only recipes must stay mutation-free.
+  for (const id of ["recipe-read-only-audit", "recipe-drift-heartbeat", "recipe-provider-read-only"]) {
+    assert.doesNotMatch(
+      recipeSection(id),
+      /skill-suitcase (?:apply|pack|track|reconcile|repair|prune|promote|import-target|rollback|upstream import)\b/,
+      `${id} must not run a staging or mutation command`
+    );
+  }
+  assert.ok(normalized.includes("a heartbeat run must never trigger an implicit repair or import"));
+
+  // Upstream refresh ends with ordinary Git review before any target sync.
+  const upstream = recipeSection("recipe-upstream-source-refresh");
+  const upstreamCommands = literalCommandLines(upstream);
+  const upstreamImport = upstreamCommands.findIndex((command) => command.startsWith("skill-suitcase upstream import "));
+  const upstreamUntrackedReview = upstreamCommands.findIndex((command) =>
+    command ===
+      'git -C "$SRC" status --short --ignored --untracked-files=all -- skills/existing-skill .skill-suitcase/upstream-lock.json'
+  );
+  const upstreamSkillDiff = upstreamCommands.findIndex(
+    (command) => command === 'git -C "$SRC" diff -- skills/existing-skill/SKILL.md'
+  );
+  const upstreamLockDiff = upstreamCommands.findIndex(
+    (command) => command === 'git -C "$SRC" diff -- .skill-suitcase/upstream-lock.json'
+  );
+  assert.ok(upstreamImport >= 0, "upstream refresh must carry a literal import command");
+  assert.ok(
+    upstreamUntrackedReview > upstreamImport,
+    "upstream import must be followed by names-first Git review"
+  );
+  assert.ok(
+    upstreamSkillDiff > upstreamUntrackedReview && upstreamLockDiff > upstreamSkillDiff,
+    "upstream Git review must inspect reviewed tracked paths individually after enumerating names"
+  );
+  assert.ok(normalized.includes("Only after that review does normal catalog-to-target synchronization start"));
+
+  // Provider-owned targets are reported as boundaries, never bypassed.
+  const provider = recipeSection("recipe-provider-read-only");
+  assert.ok(provider.includes("read_only_target"));
+  assert.ok(provider.includes("skipped"));
+  assert.ok(provider.includes("never retry"));
+
+  // New-machine setup stays on an approved catalog at portable roots.
+  const newMachine = recipeSection("recipe-new-machine-setup");
+  const newMachineNormalized = newMachine.replace(/\s+/g, " ");
+  assert.ok(newMachine.includes("$HOME/.skill-suitcase/skills"));
+  assert.ok(newMachine.includes("INSTALL.md"));
+  assert.ok(newMachineNormalized.includes("The apply result's <code>installRoot</code> identifies the receipt location"));
+  assert.ok(newMachine.includes("<code>&lt;installRoot&gt;/.skill-suitcase-receipt.json</code>"));
+  assert.ok(newMachineNormalized.includes("<code>ApplyResult</code> does not expose a separate receipt-path field"));
+  assert.ok(!newMachineNormalized.includes("receipt path appears in the apply result"));
+
+  const intentionalImport = recipeSection("recipe-intentional-dirty-import-target").replace(/\s+/g, " ");
+  const intentionalImportCommands = literalCommandLines(recipeSection("recipe-intentional-dirty-import-target"));
+  const importTargetApply = intentionalImportCommands.findIndex((command) =>
+    command.startsWith("skill-suitcase import-target ") && command.includes("--apply")
+  );
+  const importTargetUntrackedReview = intentionalImportCommands.findIndex((command) =>
+    command === 'git -C "$SRC" status --short --ignored --untracked-files=all -- skills/existing-skill'
+  );
+  const importTargetGitDiff = intentionalImportCommands.findIndex(
+    (command) => command === 'git -C "$SRC" diff -- skills/existing-skill/SKILL.md'
+  );
+  assert.ok(
+    importTargetUntrackedReview > importTargetApply,
+    "import-target must be followed by names-first Git review"
+  );
+  assert.ok(
+    importTargetGitDiff > importTargetUntrackedReview,
+    "import-target Git review must inspect a reviewed tracked path only after enumerating names"
+  );
+  assert.ok(intentionalImport.includes("every <code>repoWrites</code> <code>create</code> action"));
+  assert.ok(intentionalImport.includes("Revert only the imported skill paths"));
+  assert.ok(intentionalImport.includes("<code>behind</code> or <code>version</code>"));
+  assert.ok(intentionalImport.includes("repair will refuse it"));
+  assert.ok(intentionalImport.includes("recipe 4's fresh"));
+
+  // Every literal workflow command keeps the portable deterministic contract.
+  const commandLines = literalCommands.filter((line) => line.startsWith("skill-suitcase "));
+  assert.ok(commandLines.length >= 20, "agent workflows should keep its literal recipe commands");
+  for (const line of commandLines) {
+    assert.ok(line.includes("--json"), `workflow command must use --json: ${line}`);
+    assert.ok(
+      line.includes('--source "$SRC"') || line.startsWith("skill-suitcase rollback --receipt "),
+      `workflow command must reference the catalog through SRC: ${line}`
+    );
+  }
+});
+
 test("troubleshooting page collects the common refusal codes", () => {
   const troubleshooting = read("docs/troubleshooting.html");
 
