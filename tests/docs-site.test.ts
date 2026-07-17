@@ -617,8 +617,9 @@ test("agent workflows page carries the ten operational recipes", () => {
   function recipeSection(id: string): string {
     const start = workflows.indexOf(`<h3 id="${id}">`);
     assert.ok(start >= 0, `missing recipe section ${id}`);
-    const end = workflows.indexOf("<h3 id=", start + 1);
-    return workflows.slice(start, end < 0 ? workflows.length : end);
+    const boundaries = [workflows.indexOf("<h3 id=", start + 1), workflows.indexOf("<h2>", start + 1)]
+      .filter((boundary) => boundary >= 0);
+    return workflows.slice(start, boundaries.length > 0 ? Math.min(...boundaries) : workflows.length);
   }
 
   function literalCommandLines(section: string): string[] {
@@ -641,6 +642,52 @@ test("agent workflows page carries the ten operational recipes", () => {
       `${id} must carry a recipe-local approval boundary callout`
     );
   }
+
+  // Every literal command in a recipe block sits under a class-labeled comment
+  // that matches the command's actual write behavior, so no step is grouped
+  // under the wrong write class or left unclassified.
+  function expectedCommandClass(command: string): string {
+    if (command.startsWith('git -C "$SRC" ')) return "read-only";
+    if (command.includes("--dry-run")) return "read-only";
+    if (command.startsWith("skill-suitcase upstream import ")) return "catalog-mutating";
+    if (command.startsWith("skill-suitcase import-target ")) return "catalog-mutating + live-target-mutating";
+    if (command.startsWith("skill-suitcase pack ") && command.includes("--output")) return "staging-only";
+    if (/^skill-suitcase (?:apply|track|reconcile|repair|prune|promote|rollback)\b/.test(command)) {
+      return "live-target-mutating";
+    }
+    if (/^skill-suitcase (?:import|validate|targets|plan|status|diff|upstream check|upstream fetch)\b/.test(command)) {
+      return "read-only";
+    }
+    return assert.fail(`unrecognized literal workflow command: ${command}`);
+  }
+  const CLASS_COMMENT =
+    /^# (read-only|staging-only|catalog-mutating \+ live-target-mutating|catalog-mutating|live-target-mutating)[:,]/;
+  for (const [id] of RECIPES) {
+    for (const block of recipeSection(id).matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)) {
+      let currentClass: string | null = null;
+      for (const rawLine of (block[1] ?? "").split("\n")) {
+        const line = rawLine.replace(/<[^>]+>/g, "").trim();
+        const classComment = line.match(CLASS_COMMENT);
+        if (classComment) currentClass = classComment[1] ?? null;
+        if (!line.startsWith("skill-suitcase ") && !line.startsWith('git -C "$SRC" ')) continue;
+        assert.equal(
+          currentClass,
+          expectedCommandClass(line),
+          `${id} must label this literal step with its write classification: ${line}`
+        );
+      }
+    }
+  }
+
+  // Git review enumerates names before contents and never prints ignored-file
+  // contents into tool output.
+  assert.doesNotMatch(workflows, /--no-index/, "Git review must not render file contents indiscriminately");
+  assert.doesNotMatch(workflows, /ls-files --others/, "Git review must enumerate names with status --short --ignored");
+  assert.ok(
+    workflows.includes('git -C "$SRC" status --short --ignored -- skills/existing-skill'),
+    "post-import Git review must enumerate untracked and ignored names without contents"
+  );
+  assert.ok(normalized.includes("Never render ignored-file contents into tool output"));
 
   // The state-to-command routing distinctions must stay explicit.
   assert.ok(normalized.includes("Missing and behind route to <code>pack</code> plus <code>apply</code>"));
@@ -734,7 +781,7 @@ test("agent workflows page carries the ten operational recipes", () => {
   const upstreamImport = upstreamCommands.findIndex((command) => command.startsWith("skill-suitcase upstream import "));
   const upstreamGitReview = upstreamCommands.findIndex((command) => command === 'git -C "$SRC" diff');
   const upstreamUntrackedReview = upstreamCommands.findIndex((command) =>
-    command.startsWith('git -C "$SRC" ls-files --others -z -- skills/existing-skill .skill-suitcase/upstream-lock.json')
+    command === 'git -C "$SRC" status --short --ignored -- skills/existing-skill .skill-suitcase/upstream-lock.json'
   );
   assert.ok(upstreamImport >= 0, "upstream refresh must carry a literal import command");
   assert.ok(
@@ -743,9 +790,8 @@ test("agent workflows page carries the ten operational recipes", () => {
   );
   assert.ok(
     upstreamUntrackedReview > upstreamGitReview,
-    "upstream Git review must include created file contents"
+    "upstream Git review must enumerate untracked and ignored names without contents"
   );
-  assert.ok(upstream.includes('git -C "$SRC" diff --no-index -- /dev/null "$path"'));
   assert.ok(normalized.includes("Only after that review does normal catalog-to-target synchronization start"));
 
   // Provider-owned targets are reported as boundaries, never bypassed.
@@ -771,14 +817,13 @@ test("agent workflows page carries the ten operational recipes", () => {
   );
   const importTargetGitDiff = intentionalImportCommands.findIndex((command) => command === 'git -C "$SRC" diff');
   const importTargetUntrackedReview = intentionalImportCommands.findIndex((command) =>
-    command.startsWith('git -C "$SRC" ls-files --others -z -- skills/existing-skill')
+    command === 'git -C "$SRC" status --short --ignored -- skills/existing-skill'
   );
   assert.ok(importTargetGitDiff > importTargetApply, "import-target must be followed by tracked Git review");
   assert.ok(
     importTargetUntrackedReview > importTargetGitDiff,
-    "import-target Git review must include created file contents"
+    "import-target Git review must enumerate untracked and ignored names without contents"
   );
-  assert.ok(intentionalImport.includes('git -C "$SRC" diff --no-index -- /dev/null "$path"'));
   assert.ok(intentionalImport.includes("every <code>repoWrites</code> <code>create</code> action"));
   assert.ok(intentionalImport.includes("Revert only the imported skill paths"));
   assert.ok(intentionalImport.includes("<code>behind</code> or <code>version</code>"));

@@ -193,14 +193,18 @@ skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                   authorization: stage fresh and apply immediately.
                 </p>
               </div>
-              <pre><code><span class="c"># staging-only, after approval: re-check drift, then stage a fresh bundle</span>
+              <pre><code><span class="c"># read-only: after approval, re-check drift immediately before staging</span>
 skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+
+<span class="c"># staging-only: stage a fresh bundle outside catalog and target roots</span>
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
 skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json
 ARTIFACT="$(find "$OUT" -name skill-suitcase-bundle.json -print -quit)"
 
 <span class="c"># live-target-mutating: apply the just-staged artifact immediately</span>
 skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --mode copy --json
+
+<span class="c"># read-only: verify the target state</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
                 <strong>Evidence.</strong> <code>import</code> and
@@ -242,12 +246,13 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
               <div class="def-rows">
                 <div><span class="k">read-only</span><span class="v">every step in this recipe</span></div>
               </div>
-              <pre><code>skill-suitcase import --source "$SRC" --json
+              <pre><code><span class="c"># read-only: the catalog gates</span>
+skill-suitcase import --source "$SRC" --json
 skill-suitcase validate --source "$SRC" --strict --json
 skill-suitcase targets --source "$SRC" --json
 skill-suitcase status --source "$SRC" --json
 
-<span class="c"># per target, with explicit path overrides</span>
+<span class="c"># read-only: per target, with explicit path overrides</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <div class="callout" data-kind="readonly">
@@ -294,7 +299,7 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
               <div class="def-rows">
                 <div><span class="k">read-only</span><span class="v">every step in this recipe</span></div>
               </div>
-              <pre><code><span class="c"># re-run per writable target and compare against the previous report</span>
+              <pre><code><span class="c"># read-only: re-run per writable target and compare with the previous report</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <div class="callout" data-kind="readonly">
@@ -364,14 +369,18 @@ skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                   immediately.
                 </p>
               </div>
-              <pre><code><span class="c"># staging-only, after approval: re-check drift, then stage a fresh bundle</span>
+              <pre><code><span class="c"># read-only: after approval, re-check drift immediately before staging</span>
 skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+
+<span class="c"># staging-only: stage a fresh bundle outside catalog and target roots</span>
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
 skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json
 ARTIFACT="$(find "$OUT" -name skill-suitcase-bundle.json -print -quit)"
 
 <span class="c"># live-target-mutating: apply the just-staged artifact immediately</span>
 skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --mode copy --json
+
+<span class="c"># read-only: verify the target state</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
                 <strong>Evidence.</strong> The pack manifest lists source
@@ -425,8 +434,10 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                   planned file for those skills as <code>unchanged</code>.
                 </p>
               </div>
-              <pre><code><span class="c"># live-target-mutating: after approval</span>
+              <pre><code><span class="c"># live-target-mutating: after approval, track writes only the receipt</span>
 skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --json
+
+<span class="c"># read-only: verify the adopted install</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
                 <strong>Evidence.</strong> Before track, the diff for the selected
@@ -474,6 +485,8 @@ skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.cod
               </div>
               <pre><code><span class="c"># live-target-mutating: after approval</span>
 skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
+
+<span class="c"># read-only: verify the reconciled install</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
                 <strong>Evidence.</strong> An accepted dry-run returns
@@ -524,6 +537,8 @@ skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex"
               </div>
               <pre><code><span class="c"># live-target-mutating: after approval</span>
 skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
+
+<span class="c"># read-only: verify the repaired install</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
               <p>
                 <strong>Evidence.</strong> An accepted dry-run returns
@@ -575,16 +590,12 @@ skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/
               </div>
               <pre><code><span class="c"># catalog-mutating + live-target-mutating: after approval</span>
 skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
-skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 
-<span class="c"># then ordinary Git review of the catalog working tree</span>
+<span class="c"># read-only: verify the target, then ordinary Git review, names before contents</span>
+skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 git -C "$SRC" status --short --branch
 git -C "$SRC" diff
-git -C "$SRC" ls-files --others -z -- skills/existing-skill |
-  while IFS= read -r -d '' path; do
-    git -C "$SRC" diff --no-index -- /dev/null "$path" ||
-      { diff_status=$?; [ "$diff_status" -eq 1 ] || exit "$diff_status"; }
-  done</code></pre>
+git -C "$SRC" status --short --ignored -- skills/existing-skill</code></pre>
               <p>
                 <strong>Evidence.</strong> An accepted dry-run returns
                 <code>ok: true</code> with the receipt hash, catalog hash, and
@@ -599,11 +610,15 @@ git -C "$SRC" ls-files --others -z -- skills/existing-skill |
                 <strong>Verify, then stop.</strong> Confirm the skill reads
                 <code>current</code> and review the catalog diff through the
                 ordinary Git review flow before committing. The scoped
-                <code>ls-files</code> loop includes ignored and non-ignored
-                untracked files under the selected skill and renders each with
-                <code>diff --no-index</code>. Repeat that review for every
-                selected skill path and verify that every <code>repoWrites</code>
-                <code>create</code> action appears in it. Stop if review rejects
+                <code>status --short --ignored</code> listing enumerates
+                untracked (<code>??</code>) and ignored (<code>!!</code>) names
+                under the selected skill without printing any contents. Check
+                that every <code>repoWrites</code> <code>create</code> action
+                appears as an untracked name, then open only those reviewed,
+                non-secret paths individually. Never render ignored-file
+                contents into tool output: an ignored name under the imported
+                skill means deliberately excluded state reached the catalog, and
+                that is a stop condition. Stop if review rejects
                 the change. Revert only the imported skill paths listed in
                 <code>repoWrites</code>, including added untracked files, and
                 preserve every unrelated working-tree path. The receipt still
@@ -645,14 +660,10 @@ skill-suitcase upstream fetch --source "$SRC" --skill existing-skill --dry-run -
               <pre><code><span class="c"># catalog-mutating: after approval</span>
 skill-suitcase upstream import --source "$SRC" --skill existing-skill --apply --json
 
-<span class="c"># then ordinary Git review before any target synchronization</span>
+<span class="c"># read-only: ordinary Git review, names before contents, before any target sync</span>
 git -C "$SRC" status --short --branch
 git -C "$SRC" diff
-git -C "$SRC" ls-files --others -z -- skills/existing-skill .skill-suitcase/upstream-lock.json |
-  while IFS= read -r -d '' path; do
-    git -C "$SRC" diff --no-index -- /dev/null "$path" ||
-      { diff_status=$?; [ "$diff_status" -eq 1 ] || exit "$diff_status"; }
-  done</code></pre>
+git -C "$SRC" status --short --ignored -- skills/existing-skill .skill-suitcase/upstream-lock.json</code></pre>
               <p>
                 <strong>Evidence.</strong> Successful inspection and import steps
                 return <code>ok: true</code>. <code>upstream check</code> reports
@@ -668,9 +679,12 @@ git -C "$SRC" ls-files --others -z -- skills/existing-skill .skill-suitcase/upst
               <p>
                 <strong>Verify, then stop.</strong> Finish the lane with ordinary
                 Git review and an explicit commit decision. The scoped
-                <code>ls-files</code> loop includes ignored and non-ignored
-                untracked files created under the selected skill or at the lock
-                path and renders each with <code>diff --no-index</code>. Only
+                <code>status --short --ignored</code> listing enumerates
+                untracked and ignored names under the selected skill and the
+                lock path without printing any contents; confirm the import
+                wrote only the expected paths, then open only reviewed,
+                non-secret files individually and never render ignored-file
+                contents into tool output. Only
                 after that review does normal catalog-to-target synchronization
                 start, as a separate flow through recipes 2 and 4. Stop if the
                 fetched diff looks unexpected for the pinned version, and stop
