@@ -626,7 +626,7 @@ test("agent workflows page carries the ten operational recipes", () => {
     return [...section.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
       .flatMap((match) => match[1]?.split("\n") ?? [])
       .map((line) => line.replace(/<[^>]+>/g, "").trim())
-      .filter((line) => line.startsWith("skill-suitcase ") || line.startsWith('git -C "$SRC" '));
+      .filter((line) => line.startsWith("skill-suitcase ") || line.startsWith("git "));
   }
 
   // Every recipe labels its steps with its exact shared write classifications
@@ -647,7 +647,11 @@ test("agent workflows page carries the ten operational recipes", () => {
   // that matches the command's actual write behavior, so no step is grouped
   // under the wrong write class or left unclassified.
   function expectedCommandClass(command: string): string {
-    if (command.startsWith('git -C "$SRC" ')) return "read-only";
+    if (command.startsWith("git ")) {
+      const gitCommand = command.match(/^git(?:\s+-C\s+(?:"[^"]*"|'[^']*'|\S+))?\s+([^\s]+)/)?.[1];
+      if (gitCommand === "diff" || gitCommand === "status") return "read-only";
+      return assert.fail(`unrecognized literal Git workflow command: ${command}`);
+    }
     if (command.includes("--dry-run")) return "read-only";
     if (command.startsWith("skill-suitcase upstream import ")) return "catalog-mutating";
     if (command.startsWith("skill-suitcase import-target ")) return "catalog-mutating + live-target-mutating";
@@ -668,7 +672,7 @@ test("agent workflows page carries the ten operational recipes", () => {
       const line = rawLine.replace(/<[^>]+>/g, "").trim();
       const classComment = line.match(CLASS_COMMENT);
       if (classComment) currentClass = classComment[1] ?? null;
-      if (!line.startsWith("skill-suitcase ") && !line.startsWith('git -C "$SRC" ')) continue;
+      if (!line.startsWith("skill-suitcase ") && !line.startsWith("git ")) continue;
       assert.equal(
         currentClass,
         expectedCommandClass(line),
@@ -676,6 +680,8 @@ test("agent workflows page carries the ten operational recipes", () => {
       );
     }
   }
+  assert.equal(expectedCommandClass("git status --short"), "read-only");
+  assert.throws(() => expectedCommandClass('git -C "$SRC" add docs/agent-workflows.html'));
 
   // Git review enumerates names before contents and never prints ignored-file
   // contents into tool output.
