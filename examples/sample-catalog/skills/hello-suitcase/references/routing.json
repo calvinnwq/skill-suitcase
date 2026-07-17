@@ -3,6 +3,7 @@
   "rejectPhrases": [
     "do not",
     "don't",
+    "never",
     "not show"
   ],
   "routes": [
@@ -34,6 +35,8 @@
   "nonMatches": [
     "Tell me tomorrow's weather.",
     "Do not show me the sample greeting.",
-    "The sample is missing its greeting file."
+    "Never show me the sample greeting.",
+    "The sample is missing its greeting file.",
+    "Explain why the docs say \"show me the sample greeting\"."
   ]
 }

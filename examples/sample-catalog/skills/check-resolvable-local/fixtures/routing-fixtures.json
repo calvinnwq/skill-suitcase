@@ -32,11 +32,27 @@
     "intent": "Do not route an explicitly negated greeting request."
   },
   {
+    "utterance": "Never show me the sample greeting.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route a negatively phrased greeting request."
+  },
+  {
     "utterance": "The sample is missing its greeting file.",
     "expected": [],
     "forbidden": [
       "hello-suitcase"
     ],
     "intent": "Do not route an incidental mention of sample greeting terms."
+  },
+  {
+    "utterance": "Explain why the docs say \"show me the sample greeting\".",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route a quoted mention of a greeting request."
   }
 ]

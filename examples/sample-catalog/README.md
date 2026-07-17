@@ -25,7 +25,7 @@ SRC="$(npm root --global)/skill-suitcase/examples/sample-catalog"
 After either setup, run the walkthrough:
 
 ```bash
-python3 -m unittest discover -s "$SRC/tests" -p 'test_*.py'
+python3 -B -m unittest discover -s "$SRC/tests" -p 'test_*.py'
 
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-demo.XXXXXX")" || exit 1
 test -n "$SANDBOX" || exit 1

@@ -49,7 +49,12 @@ def audit_workspace(fixtures, policy):
     if utterances != declared:
         raise AssertionError("routing fixtures must mirror the skill routing policy")
 
-    frontmatter = SKILL_FILE.read_text(encoding="utf-8").split("\n---\n", 1)[0].lower()
+    frontmatter = " ".join(
+        SKILL_FILE.read_text(encoding="utf-8")
+        .split("\n---\n", 1)[0]
+        .lower()
+        .split()
+    )
     for route in policy["routes"]:
         for term in route["allTerms"]:
             if term not in frontmatter:

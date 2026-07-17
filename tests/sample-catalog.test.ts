@@ -9,12 +9,20 @@ import { test } from "node:test";
 const sampleCatalog = path.join(process.cwd(), "examples", "sample-catalog");
 const cliPath = path.join(process.cwd(), "dist", "src", "cli.js");
 
-function runCli<T>(args: string[]): T {
-  return runCliWithStdout<T>(args).json;
+type CliRunOptions = {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+};
+
+function runCli<T>(args: string[], options: CliRunOptions = {}): T {
+  return runCliWithStdout<T>(args, options).json;
 }
 
-function runCliWithStdout<T>(args: string[]): { json: T; stdout: string } {
-  const result = spawnSync("node", [cliPath, ...args], { encoding: "utf8" });
+function runCliWithStdout<T>(
+  args: string[],
+  options: CliRunOptions = {}
+): { json: T; stdout: string } {
+  const result = spawnSync("node", [cliPath, ...args], { ...options, encoding: "utf8" });
   assert.equal(result.status, 0, cliFailure(result));
   assert.equal(result.stderr, "");
   assert.notEqual(result.stdout.trim(), "");
@@ -215,8 +223,41 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   assert.equal(initialDiff.ok, true);
   assert.ok(initialDiff.summary.create > 0);
 
+  const packEnvironmentRoot = path.join(sandbox, "pack-environment");
+  const packWorkingDirectory = path.join(packEnvironmentRoot, "working-directory");
+  const packHome = path.join(packEnvironmentRoot, "home");
+  const packTemporaryDirectory = path.join(packEnvironmentRoot, "temporary-directory");
+  const packXdgCache = path.join(packEnvironmentRoot, "xdg-cache");
+  const packXdgConfig = path.join(packEnvironmentRoot, "xdg-config");
+  const packXdgData = path.join(packEnvironmentRoot, "xdg-data");
+  const packXdgState = path.join(packEnvironmentRoot, "xdg-state");
+  await Promise.all([
+    packWorkingDirectory,
+    packHome,
+    packTemporaryDirectory,
+    packXdgCache,
+    packXdgConfig,
+    packXdgData,
+    packXdgState
+  ].map((directory) => mkdir(directory, { recursive: true })));
+  const packRunOptions: CliRunOptions = {
+    cwd: packWorkingDirectory,
+    env: {
+      ...process.env,
+      HOME: packHome,
+      USERPROFILE: packHome,
+      TMPDIR: packTemporaryDirectory,
+      TMP: packTemporaryDirectory,
+      TEMP: packTemporaryDirectory,
+      XDG_CACHE_HOME: packXdgCache,
+      XDG_CONFIG_HOME: packXdgConfig,
+      XDG_DATA_HOME: packXdgData,
+      XDG_STATE_HOME: packXdgState
+    }
+  };
   const sourceBeforePack = await snapshotTree(source);
   const targetBeforePack = await snapshotTree(targetRoot);
+  const sandboxBeforeDryPack = await snapshotTree(sandbox);
   const dryPackArgs = [
     "pack",
     ...targetArgs,
@@ -226,8 +267,11 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
     ok: boolean;
     dryRun: boolean;
     summary: { skills: number };
-  }>(dryPackArgs);
-  const repeatedDryPackResult = runCliWithStdout<typeof dryPackResult.json>(dryPackArgs);
+  }>(dryPackArgs, packRunOptions);
+  const repeatedDryPackResult = runCliWithStdout<typeof dryPackResult.json>(
+    dryPackArgs,
+    packRunOptions
+  );
   const dryPack = dryPackResult.json;
   assert.equal(repeatedDryPackResult.stdout, dryPackResult.stdout);
   assert.deepEqual(repeatedDryPackResult.json, dryPack);
@@ -236,6 +280,7 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   assert.equal(dryPack.summary.skills, 1);
   assert.deepEqual(await snapshotTree(source), sourceBeforePack);
   assert.deepEqual(await snapshotTree(targetRoot), targetBeforePack);
+  assert.deepEqual(await snapshotTree(sandbox), sandboxBeforeDryPack);
 
   const sandboxBeforeStaging = await snapshotTree(sandbox, [path.relative(sandbox, artifactRoot)]);
   const repositoryBeforeStaging = snapshotRepositoryStatus();
@@ -243,7 +288,7 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   const packed = runCli<{
     ok: boolean;
     bundle: { artifactPath: string | null; manifestPath: string | null };
-  }>(["pack", ...targetArgs, "--output", artifactRoot]);
+  }>(["pack", ...targetArgs, "--output", artifactRoot], packRunOptions);
   assert.equal(packed.ok, true);
   assert.ok(packed.bundle.artifactPath?.startsWith(`${artifactRoot}${path.sep}`));
   assert.equal(typeof packed.bundle.manifestPath, "string");
@@ -324,6 +369,7 @@ test("portable sample catalog contains placeholders instead of local homes or se
   assert.match(manifest, /path: \/path\/to\/disposable\/agent-skills/);
   assert.match(walkthrough, /SANDBOX=.*mktemp.*\|\| exit 1/);
   assert.match(walkthrough, /test -n "\$SANDBOX" \|\| exit 1/);
+  assert.match(walkthrough, /python3 -B -m unittest discover/);
   assert.doesNotMatch(fixtureText, /\/Users\/|\/home\/[^/\s]+|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
   assert.doesNotMatch(fixtureText, /(?:api[_-]?key|access[_-]?token|password)\s*[:=]\s*\S+/i);
 });

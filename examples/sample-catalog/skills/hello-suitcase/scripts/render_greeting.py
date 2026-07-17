@@ -17,7 +17,7 @@ def route_intent(user_request: str) -> Optional[str]:
         return None
     matches = any(
         all(term in normalized for term in route["allTerms"])
-        and any(phrase in normalized for phrase in route["requestPhrases"])
+        and any(normalized.startswith(phrase) for phrase in route["requestPhrases"])
         for route in policy["routes"]
     )
     return policy["skill"] if matches else None
