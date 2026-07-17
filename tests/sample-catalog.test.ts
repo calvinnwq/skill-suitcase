@@ -7,9 +7,10 @@ import path from "node:path";
 import { test } from "node:test";
 
 const sampleCatalog = path.join(process.cwd(), "examples", "sample-catalog");
-const cliPath = path.join(process.cwd(), "dist", "src", "cli.js");
+const builtCliPath = path.join(process.cwd(), "dist", "src", "cli.js");
 
 type CliRunOptions = {
+  cliPath?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
 };
@@ -22,7 +23,8 @@ function runCliWithStdout<T>(
   args: string[],
   options: CliRunOptions = {}
 ): { json: T; stdout: string } {
-  const result = spawnSync("node", [cliPath, ...args], { ...options, encoding: "utf8" });
+  const { cliPath = builtCliPath, ...spawnOptions } = options;
+  const result = spawnSync("node", [cliPath, ...args], { ...spawnOptions, encoding: "utf8" });
   assert.equal(result.status, 0, cliFailure(result));
   assert.equal(result.stderr, "");
   assert.notEqual(result.stdout.trim(), "");
@@ -130,6 +132,18 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   const source = path.join(sandbox, "catalog");
   const targetRoot = path.join(sandbox, "agent-skills");
   const artifactRoot = path.join(sandbox, "pack");
+  const runtimeRoot = path.join(sandbox, "runtime");
+  const runtimeNodeModules = path.join(runtimeRoot, "node_modules");
+  const isolatedCliPath = path.join(runtimeRoot, "dist", "src", "cli.js");
+  await mkdir(runtimeNodeModules, { recursive: true });
+  await Promise.all([
+    cp(path.join(process.cwd(), "dist"), path.join(runtimeRoot, "dist"), { recursive: true }),
+    cp(path.join(process.cwd(), "package.json"), path.join(runtimeRoot, "package.json")),
+    cp(path.join(process.cwd(), "node_modules", "yaml"), path.join(runtimeNodeModules, "yaml"), {
+      recursive: true,
+      dereference: true
+    })
+  ]);
   await cp(sampleCatalog, source, { recursive: true });
   await mkdir(targetRoot, { recursive: true });
   runSampleContractTests(source);
@@ -241,6 +255,7 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
     packXdgState
   ].map((directory) => mkdir(directory, { recursive: true })));
   const packRunOptions: CliRunOptions = {
+    cliPath: isolatedCliPath,
     cwd: packWorkingDirectory,
     env: {
       ...process.env,

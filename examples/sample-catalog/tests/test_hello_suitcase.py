@@ -41,13 +41,28 @@ def audit_workspace(fixtures, policy):
     if discovered != {self_owned}:
         raise AssertionError(f"unexpected discovered skills: {sorted(discovered)}")
 
+    positive_fixtures = []
+    negative_fixtures = []
+    for fixture in fixtures:
+        if fixture["expected"] == [self_owned] and fixture["forbidden"] == []:
+            positive_fixtures.append(fixture["utterance"])
+        elif fixture["expected"] == [] and fixture["forbidden"] == [self_owned]:
+            negative_fixtures.append(fixture["utterance"])
+        else:
+            raise AssertionError(
+                f"invalid routing classification: {fixture['utterance']}"
+            )
+
     utterances = [fixture["utterance"] for fixture in fixtures]
     if len(utterances) != len(set(utterances)):
         raise AssertionError("routing fixtures must not contain duplicate utterances")
 
-    declared = policy["positiveMatches"] + policy["nonMatches"]
-    if utterances != declared:
-        raise AssertionError("routing fixtures must mirror the skill routing policy")
+    if positive_fixtures != policy["positiveMatches"]:
+        raise AssertionError("positive fixtures must mirror positiveMatches")
+    if negative_fixtures != policy["nonMatches"]:
+        raise AssertionError("negative fixtures must mirror nonMatches")
+    if utterances != positive_fixtures + negative_fixtures:
+        raise AssertionError("routing fixtures must keep policy classification order")
 
     frontmatter = " ".join(
         SKILL_FILE.read_text(encoding="utf-8")
