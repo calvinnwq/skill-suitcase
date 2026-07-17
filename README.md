@@ -1,58 +1,53 @@
-# Skill Suitcase
+<div align="center">
 
-[**Docs**](https://calvinnwq.github.io/skill-suitcase/) ·
-[Install](INSTALL.md) ·
-[Spec](SPEC.md) ·
-[Command reference](docs/command-reference.md)
+# 🧳 Skill Suitcase
+
+**One reviewed skill catalog. Every agent runtime. A receipt for every install.**
+
+[![npm version](https://img.shields.io/npm/v/skill-suitcase.svg)](https://www.npmjs.com/package/skill-suitcase) [![npm downloads](https://img.shields.io/npm/dm/skill-suitcase.svg)](https://www.npmjs.com/package/skill-suitcase) [![CI](https://github.com/calvinnwq/skill-suitcase/actions/workflows/ci.yml/badge.svg)](https://github.com/calvinnwq/skill-suitcase/actions/workflows/ci.yml) [![docs](https://img.shields.io/badge/docs-site-blue.svg)](https://calvinnwq.github.io/skill-suitcase/) [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![X @calvinnwq](https://img.shields.io/badge/X-%40calvinnwq-black?logo=x)](https://x.com/calvinnwq)
+
+[**Docs**](https://calvinnwq.github.io/skill-suitcase/) · [Install](#install) · [Spec](SPEC.md) · [Agent setup](INSTALL.md) · [Command reference](docs/command-reference.md)
+
+</div>
+
+Every agent runtime wants its own copy of your skills.
+Claude, Codex, OpenClaw, Hermes, and friends each keep a private skills folder, so the same skill gets hand-copied again and again, drifts in every direction, and nobody can say what is installed where or why.
 
 Skill Suitcase is an agent-first skill package manager backed by a Git catalog.
-It gives agents one JSON-first CLI for inspecting, installing, updating, and
-recovering skills across runtimes without treating live agent homes as the
-source of truth.
+One reviewed repository holds skill source, variants, assignments, target policy, and upstream metadata, and the `skill-suitcase` CLI is the product backbone that turns that catalog into deterministic plans, diffs, artifacts, installs, receipts, and rollback state.
+Live agent homes are never treated as the source of truth - the catalog is.
 
-The `skill-suitcase` CLI is the product backbone. A portable skills repository
-holds reviewed source, variants, assignments, target policy, and upstream
-metadata; Skill Suitcase turns that catalog into deterministic plans, diffs,
-artifacts, installs, receipts, and rollback state.
-
-## Community
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) to contribute and
-[`DEVELOPING.md`](DEVELOPING.md) for the local development workflow. Usage
-support, private vulnerability reporting, and community expectations are
-documented in [`SUPPORT.md`](SUPPORT.md), [`SECURITY.md`](SECURITY.md), and
-[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
-
-Read-only command modes (`plan`, `diff`, `pack --dry-run`, `import`, `validate`, `targets`, `status`, `reconcile --dry-run`, `repair --dry-run`, `prune --dry-run`, `promote --dry-run`, `import-target --dry-run`, `upstream check`, and `upstream fetch --dry-run`) inspect catalog, target, or upstream state and emit JSON plans, diffs, findings, discovery metadata, status reports, or source-refresh reports without changing catalog source, target installs, receipts, or live runtime homes.
-
-- Git-backed catalog source stays reviewable before it reaches a runtime.
-- Read-only commands explain current state before any mutation.
+- **Git-backed catalog source** stays reviewable before it reaches a runtime.
+- **Read-only commands** explain current state before any mutation.
 - Mutating commands require an explicit artifact, lock, `--apply`, or other
   approval boundary.
 - JSON result objects, including structured `ok: false` results, go to stdout;
   usage and fatal diagnostics go to stderr.
 - Copy and symlink installs are tracked with receipts and recoverable workflows.
 
-The [docs site](https://calvinnwq.github.io/skill-suitcase/) carries the guide-level documentation:
-overview, install, safety model, catalog model, upstream refresh, agent workflows, troubleshooting, and the full CLI reference.
-Read [`VISION.md`](VISION.md) for the product north star and
-[`SPEC.md`](SPEC.md) for the normative current-state contract. See
-[`ARCHITECTURE.md`](https://github.com/calvinnwq/skill-suitcase/blob/main/ARCHITECTURE.md)
-for the CLI boundaries.
-
 ## Install
 
-Skill Suitcase requires Node.js 20 or newer.
+Skill Suitcase requires Node.js 20 or newer:
 
 ```bash
 npm install --global skill-suitcase
 ```
 
 For a hands-on first run covering installation, catalog setup, local target overrides, read-only audit, staged apply, and rollback, follow [`docs/getting-started.md`](docs/getting-started.md).
-For agent/runtime setup, including the packaged operator skill, follow
-[`INSTALL.md`](INSTALL.md).
 
-## Start With A Read-Only Audit
+### Recommended agent setup
+
+Skill Suitcase is agent-operated, so let your coding agent finish the job.
+Paste this one line into your agent:
+
+```text
+Follow the instructions in https://github.com/calvinnwq/skill-suitcase/blob/main/INSTALL.md to set up Skill Suitcase in this workspace.
+```
+
+It installs the CLI, sets up the packaged operator skill, and starts from the read-only audit instead of writing into live agent homes.
+See [`INSTALL.md`](INSTALL.md) for the full agent/runtime setup.
+
+## Start with a read-only audit
 
 Point `SRC` at any catalog containing `skill-suitcase.yaml` and
 `skills/<name>/SKILL.md`:
@@ -68,8 +63,10 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
 skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 ```
 
-These commands do not create install roots, runtime homes, receipts, symlinks,
-or catalog files. Inspect their JSON before moving to staging or mutation.
+These commands do not create install roots, runtime homes, receipts, symlinks, or catalog files.
+Inspect their JSON before moving to staging or mutation.
+
+Read-only command modes (`plan`, `diff`, `pack --dry-run`, `import`, `validate`, `targets`, `status`, `reconcile --dry-run`, `repair --dry-run`, `prune --dry-run`, `promote --dry-run`, `import-target --dry-run`, `upstream check`, and `upstream fetch --dry-run`) inspect catalog, target, or upstream state and emit JSON plans, diffs, findings, discovery metadata, status reports, or source-refresh reports without changing catalog source, target installs, receipts, or live runtime homes.
 
 For a ready-made catalog that never assumes a real agent home, use the
 [`examples/sample-catalog`](examples/sample-catalog/README.md) fixture shipped
@@ -88,11 +85,11 @@ skill-suitcase pack \
   --json
 ```
 
-`pack --dry-run` is also read-only. A real `pack --output` writes only beneath
-the explicit staging directory. For Git-backed catalogs, materialization
-refuses selected skills containing untracked, non-ignored files.
+`pack --dry-run` is also read-only.
+A real `pack --output` writes only beneath the explicit staging directory.
+For Git-backed catalogs, materialization refuses selected skills containing untracked, non-ignored files.
 
-## What Ships Today
+## How it works
 
 The CLI currently supports:
 
@@ -113,6 +110,9 @@ The modeled targets are `openclaw`, `codex`, `openclaw-codex`, `agents`,
 `--agents-skills`, `--codex-home`, `--codex-skills`, `--claude-skills`,
 `--hermes-skills`, and `--grok-skills`.
 
+<details>
+<summary>Hermes external skills root</summary>
+
 Hermes supports both its existing flat skills root and a categorized,
 Skill Suitcase-owned external root.
 The `hermes-external-skills-root` adapter installs each assigned skill at
@@ -123,6 +123,11 @@ Create the root and register it in `<home>/config.yaml` under
 `skills.external_dirs` before inspecting or mutating live target state;
 Skill Suitcase does not create the root or edit Hermes configuration.
 
+</details>
+
+<details>
+<summary>Provider-backed read-only targets (OpenCode, Pi)</summary>
+
 OpenCode and Pi are provider-backed compatibility targets.
 They are read-only even when the catalog declares a custom `assignmentPaths` entry.
 Target-aware materialization and mutation commands (`pack`, `apply`, `track`,
@@ -132,10 +137,12 @@ Suitcase-owned installs.
 Path-driven `promote` and receipt-driven `rollback` do not resolve target
 adapters and instead enforce their own explicit scope and ownership checks.
 
+</details>
+
 See [`docs/command-reference.md`](docs/command-reference.md) for command
 guidance, approval requirements, state meanings, and common refusal codes.
 
-## Safety Model
+## Safety model
 
 Skill Suitcase separates three phases:
 
@@ -151,17 +158,16 @@ Artifact mode validates the artifact manifest, but ordinary create/behind writes
 Pack again immediately before artifact apply and inspect the current `diff` rather than treating an older artifact as byte-for-byte approval.
 `--mode symlink` links selected current catalog source into the target.
 
-Receipts record ownership, source provenance, relative destination, install
-mode, file hashes, and rollback metadata. `status` classifies modeled installs as `current`, `behind`,
-`version`, `dirty`, `missing`, `unknown`, or `blocked`. Provider-modeled
-fallback inventory without a catalog assignment appears with no status entries.
+Receipts record ownership, source provenance, relative destination, install mode, file hashes, and rollback metadata.
+`status` classifies modeled installs as `current`, `behind`, `version`, `dirty`, `missing`, `unknown`, or `blocked`.
+Provider-modeled fallback inventory without a catalog assignment appears with no status entries.
 
 Never run live `apply`, `track`, `reconcile --apply`, `repair --apply`, `prune --apply`,
 `rollback`, `promote --apply`, `import-target --apply`, or
 `upstream import --apply` against a real catalog or runtime home without
 explicit approval for the source, target, and mode.
 
-## Choosing A Recovery Workflow
+## Choosing a recovery workflow
 
 Use the target state and ownership model to choose the command:
 
@@ -174,12 +180,33 @@ Use the target state and ownership model to choose the command:
 | New target-created skill should become catalog source | `promote` |
 | Intentional edit to a receipt-owned catalog skill should return to Git | `import-target` |
 
-Preview `track` candidates with `diff`; `track` has no dry-run flag. Run the
-matching dry-run before `reconcile`, `repair`, `prune`, `promote`, or `import-target`.
-Drift detection is a heartbeat, not permission to overwrite either side; every
-mutation still requires explicit approval.
+Preview `track` candidates with `diff`; `track` has no dry-run flag.
+Run the matching dry-run before `reconcile`, `repair`, `prune`, `promote`, or `import-target`.
+Drift detection is a heartbeat, not permission to overwrite either side; every mutation still requires explicit approval.
 
-## `repair` Output
+### Decision tree: `track` vs `reconcile` vs `repair` vs `prune` vs `promote` vs `import-target`
+
+- Use `track` for an exact unreceipted match.
+- Use `reconcile` when an unknown target should be replaced by catalog source.
+- Use `repair` when an accidental dirty edit should be discarded after review.
+- Use `prune` when an explicit receipt-owned install is no longer assigned to its target.
+- Use `promote` for a new target-created skill.
+- Use `import-target` when an intentional dirty edit should become catalog
+  source.
+
+### Drift audit / heartbeat
+
+Use `status --json` as the drift-audit heartbeat.
+Report drift and inspect the changed files; do not import target changes merely because drift exists.
+`import-target --dry-run` previews planned repo writes, and
+`import-target --apply` requires explicit approval.
+
+## Reference
+
+<details>
+<summary>Recovery command output: <code>repair</code>, <code>prune</code>, and <code>import-target</code></summary>
+
+### `repair` Output
 
 A `dirty` receipt-owned copy install means stop and inspect. Use
 `repair --dry-run` to report the target path, receipt hash, catalog hash,
@@ -190,7 +217,7 @@ that status becomes `current`. A later `rollback` restores the pre-repair state.
 `repair` refuses unknown, missing, behind, symlink-mode, read-only, and
 unselected states rather than guessing operator intent.
 
-## `prune` Output
+### `prune` Output
 
 `prune --dry-run` accepts only explicit repeated `--skill` values. It refuses
 skills still assigned to the target, paths without one matching receipt record,
@@ -213,7 +240,7 @@ backup; do not manually delete them or use broad rollback.
 An apply refusal preserves apply-mode JSON (`dryRun: false`) while reporting
 `readOnly: true`, and a missing install root is refused rather than recreated.
 
-## `import-target` Output
+### `import-target` Output
 
 `import-target` is the inverse choice for an intentional local edit to a
 receipt-owned, catalog-owned skill. `import-target --dry-run` reports the
@@ -222,24 +249,10 @@ without mutation. After approval, `import-target --apply` copies the target
 content into the catalog, verifies it, refreshes the receipt, and leaves
 ordinary Git changes for review; it does not auto-commit.
 
-### Decision tree: `track` vs `reconcile` vs `repair` vs `prune` vs `promote` vs `import-target`
+</details>
 
-- Use `track` for an exact unreceipted match.
-- Use `reconcile` when an unknown target should be replaced by catalog source.
-- Use `repair` when an accidental dirty edit should be discarded after review.
-- Use `prune` when an explicit receipt-owned install is no longer assigned to its target.
-- Use `promote` for a new target-created skill.
-- Use `import-target` when an intentional dirty edit should become catalog
-  source.
-
-### Drift audit / heartbeat
-
-Use `status --json` as the drift-audit heartbeat. Report drift and inspect the
-changed files; do not import target changes merely because drift exists.
-`import-target --dry-run` previews planned repo writes, and
-`import-target --apply` requires explicit approval.
-
-## Fresh Agent Runtime Machine
+<details>
+<summary>Fresh agent runtime machine</summary>
 
 New-machine setup installs from the skills repo through Suitcase:
 
@@ -252,7 +265,10 @@ New-machine setup installs from the skills repo through Suitcase:
 The catalog-only upstream lane may refresh selected reviewed source before this
 flow, but it is not a shortcut for writing into live agent homes.
 
-## Upstream Source Refresh
+</details>
+
+<details>
+<summary>Upstream source refresh</summary>
 
 Pinned upstream providers are a source refresh lane:
 
@@ -292,13 +308,16 @@ hash, target status, receipt hash, and receipt commit alongside its upstream
 package/version, upstream repo/skill, and imported hash. Target-scoped status
 loads lineage only for reported skills.
 
-## Catalog Contract
+</details>
+
+<details>
+<summary>Catalog contract</summary>
 
 A catalog is a directory with `skill-suitcase.yaml` and skill directories under `skills/`.
 Git backing is the preferred operating model and is required by workflows such as upstream import, but ordinary planning and target materialization also accept a non-Git catalog directory.
 The manifest owns skills, variants, assignments, compatibility, target paths, logical groups, source policy, and validation policy.
 
-### Manifest Logical Groups
+### Manifest logical groups
 
 Manifest-owned groups can organize skills, suitcases, and assignments for
 operator reporting. Groups are catalog metadata only: they validate references
@@ -316,7 +335,7 @@ write.
 Refusals identify the skill and relative path with `source_denied_path` or
 `diff_source_denied_path`.
 
-### Strict Validation Policy
+### Strict validation policy
 
 `validate --strict --json` applies the Skillify authoring contract. Reviewed
 `validationPolicy.skillify.skip` entries can exempt referenced external,
@@ -324,7 +343,10 @@ legacy, or upstream-managed skills from strict scoring when their provenance is
 valid. A validation skip does not change planning, installation, receipt,
 ownership, or target-drift semantics.
 
-## JSON Contract
+</details>
+
+<details>
+<summary>JSON contract</summary>
 
 Command results are serialized deterministically to stdout, including
 structured `ok: false` results with machine-readable errors. Parser/usage
@@ -339,7 +361,10 @@ the authoritative machine contract. For portability and smoke-test guidance, see
 [`docs/portability-matrix.md`](docs/portability-matrix.md) and
 [`docs/install-smoke.md`](docs/install-smoke.md).
 
-## Development
+</details>
+
+<details>
+<summary>Development</summary>
 
 Complete the shell-local, `packageManager`-pinned pnpm setup in
 [`DEVELOPING.md`](DEVELOPING.md) before running the development checks.
@@ -393,6 +418,28 @@ Release automation, npm Trusted Publishing, public-repository controls, and the
 current shipped version are documented in
 [`docs/release-readiness.md`](docs/release-readiness.md).
 
+</details>
+
+## Learn more
+
+- **[Docs site](https://calvinnwq.github.io/skill-suitcase/)** - overview, install, safety model, catalog model, upstream refresh, agent workflows, troubleshooting, and the full CLI reference.
+- **[`VISION.md`](VISION.md)** - the product north star.
+- **[`SPEC.md`](SPEC.md)** - the normative current-state contract.
+- **[`ARCHITECTURE.md`](ARCHITECTURE.md)** - the CLI boundaries.
+- **[`docs/command-reference.md`](docs/command-reference.md)** - operational command guidance.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) to contribute and
+[`DEVELOPING.md`](DEVELOPING.md) for the local development workflow.
+
+## Support and security
+
+Use [GitHub issues](https://github.com/calvinnwq/skill-suitcase/issues) for bugs
+and feature ideas. Usage support, private vulnerability reporting, and community
+expectations are documented in [`SUPPORT.md`](SUPPORT.md),
+[`SECURITY.md`](SECURITY.md), and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+
 ## License
 
-[MIT](LICENSE)
+MIT. See [LICENSE](LICENSE).
