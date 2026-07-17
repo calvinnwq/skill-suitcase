@@ -84,7 +84,7 @@ class HelloSuitcaseTest(unittest.TestCase):
         )
 
     def test_integration_temporary_directory_routing_e2e(self):
-        """Exercise evaluate_routing plus an end-to-end local outcome."""
+        """Exercise route_intent plus an end-to-end local outcome."""
         runner = load_runner()
         fixtures = json.loads(ROUTING_FIXTURES.read_text(encoding="utf-8"))
         policy = json.loads(ROUTING_POLICY.read_text(encoding="utf-8"))
