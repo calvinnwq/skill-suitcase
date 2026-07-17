@@ -1,61 +1,39 @@
 {
   "skill": "hello-suitcase",
-  "rejectPhrases": [
-    "do not",
-    "don't",
-    "never",
-    "not show",
-    "except"
+  "allowedPrefixes": [
+    "please ",
+    "don't add commentary; "
   ],
   "routes": [
     {
-      "utterance": "Show me the portable Skill Suitcase sample greeting.",
       "allTerms": [
         "sample",
         "greeting"
       ],
-      "requestPhrases": [
-        "show me",
-        "show the",
-        "see the"
+      "intentPatterns": [
+        "show me (?:the )?(?:portable skill suitcase )?sample greeting(?: whenever convenient)?[.!?]?",
+        "show the (?:portable skill suitcase )?sample greeting[.!?]?",
+        "see the (?:portable skill suitcase )?sample greeting[.!?]?"
       ]
     },
     {
-      "utterance": "Show me the sample greeting whenever convenient.",
-      "allTerms": [
-        "sample",
-        "greeting"
-      ],
-      "requestPhrases": [
-        "show me",
-        "show the",
-        "see the"
-      ]
-    },
-    {
-      "utterance": "Verify the disposable Skill Suitcase installation.",
       "allTerms": [
         "disposable",
         "skill suitcase",
         "installation"
       ],
-      "requestPhrases": [
-        "verify",
-        "check"
-      ]
-    },
-    {
-      "utterance": "Verify the disposable Skill Suitcase install.",
-      "allTerms": [
-        "disposable",
-        "skill suitcase",
-        "install"
-      ],
-      "requestPhrases": [
-        "verify",
-        "check"
+      "intentPatterns": [
+        "(?:verify|check) (?:the )?disposable skill suitcase (?:install|installation)[.!?]?"
       ]
     }
+  ],
+  "positiveMatches": [
+    "Show me the portable Skill Suitcase sample greeting.",
+    "Show me the sample greeting whenever convenient.",
+    "Verify the disposable Skill Suitcase installation.",
+    "Verify the disposable Skill Suitcase install.",
+    "Please show me the sample greeting.",
+    "Don't add commentary; show me the sample greeting."
   ],
   "nonMatches": [
     "Tell me tomorrow's weather.",
@@ -64,6 +42,8 @@
     "The sample is missing its greeting file.",
     "Explain why the docs say \"show me the sample greeting\".",
     "Show me everything except the sample greeting.",
-    "Show metadata about the sample greeting file."
+    "Show metadata about the sample greeting file.",
+    "Show me why the sample greeting is missing.",
+    "Show me metadata about the sample greeting file."
   ]
 }

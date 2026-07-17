@@ -32,6 +32,22 @@
     "intent": "Route the exact public trigger wording documented by the sample skill."
   },
   {
+    "utterance": "Please show me the sample greeting.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Allow a polite prefix before the affirmative greeting action."
+  },
+  {
+    "utterance": "Don't add commentary; show me the sample greeting.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Scope negation to its clause instead of rejecting a later affirmative greeting action."
+  },
+  {
     "utterance": "Tell me tomorrow's weather.",
     "expected": [],
     "forbidden": [
@@ -86,5 +102,21 @@
       "hello-suitcase"
     ],
     "intent": "Do not treat a shared character prefix as an affirmative request phrase."
+  },
+  {
+    "utterance": "Show me why the sample greeting is missing.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not treat a request for an explanation as a request for the greeting."
+  },
+  {
+    "utterance": "Show me metadata about the sample greeting file.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Bind the greeting action directly to its object instead of matching loose terms."
   }
 ]

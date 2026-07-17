@@ -45,7 +45,7 @@ def audit_workspace(fixtures, policy):
     if len(utterances) != len(set(utterances)):
         raise AssertionError("routing fixtures must not contain duplicate utterances")
 
-    declared = [route["utterance"] for route in policy["routes"]] + policy["nonMatches"]
+    declared = policy["positiveMatches"] + policy["nonMatches"]
     if utterances != declared:
         raise AssertionError("routing fixtures must mirror the skill routing policy")
 

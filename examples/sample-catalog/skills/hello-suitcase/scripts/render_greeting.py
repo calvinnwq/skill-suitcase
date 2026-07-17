@@ -11,22 +11,24 @@ GREETING = REFERENCES / "greeting.md"
 ROUTING = REFERENCES / "routing.json"
 
 
-def contains_phrase(text: str, phrase: str) -> bool:
-    return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
-
-
-def starts_with_phrase(text: str, phrase: str) -> bool:
-    return re.match(rf"{re.escape(phrase)}(?!\w)", text) is not None
+def strip_allowed_prefixes(text: str, prefixes) -> str:
+    stripped = text
+    while True:
+        matching_prefix = next(
+            (prefix for prefix in prefixes if stripped.startswith(prefix)),
+            None,
+        )
+        if matching_prefix is None:
+            return stripped
+        stripped = stripped[len(matching_prefix) :].lstrip()
 
 
 def route_intent(user_request: str) -> Optional[str]:
     policy = json.loads(ROUTING.read_text(encoding="utf-8"))
     normalized = " ".join(user_request.lower().split())
-    if any(contains_phrase(normalized, phrase) for phrase in policy["rejectPhrases"]):
-        return None
+    candidate = strip_allowed_prefixes(normalized, policy["allowedPrefixes"])
     matches = any(
-        all(contains_phrase(normalized, term) for term in route["allTerms"])
-        and any(starts_with_phrase(normalized, phrase) for phrase in route["requestPhrases"])
+        any(re.fullmatch(pattern, candidate) for pattern in route["intentPatterns"])
         for route in policy["routes"]
     )
     return policy["skill"] if matches else None
