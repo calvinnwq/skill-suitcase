@@ -662,20 +662,18 @@ test("agent workflows page carries the ten operational recipes", () => {
   }
   const CLASS_COMMENT =
     /^# (read-only|staging-only|catalog-mutating \+ live-target-mutating|catalog-mutating|live-target-mutating)[:,]/;
-  for (const [id] of RECIPES) {
-    for (const block of recipeSection(id).matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)) {
-      let currentClass: string | null = null;
-      for (const rawLine of (block[1] ?? "").split("\n")) {
-        const line = rawLine.replace(/<[^>]+>/g, "").trim();
-        const classComment = line.match(CLASS_COMMENT);
-        if (classComment) currentClass = classComment[1] ?? null;
-        if (!line.startsWith("skill-suitcase ") && !line.startsWith('git -C "$SRC" ')) continue;
-        assert.equal(
-          currentClass,
-          expectedCommandClass(line),
-          `${id} must label this literal step with its write classification: ${line}`
-        );
-      }
+  for (const block of workflows.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)) {
+    let currentClass: string | null = null;
+    for (const rawLine of (block[1] ?? "").split("\n")) {
+      const line = rawLine.replace(/<[^>]+>/g, "").trim();
+      const classComment = line.match(CLASS_COMMENT);
+      if (classComment) currentClass = classComment[1] ?? null;
+      if (!line.startsWith("skill-suitcase ") && !line.startsWith('git -C "$SRC" ')) continue;
+      assert.equal(
+        currentClass,
+        expectedCommandClass(line),
+        `every literal workflow step on the page must carry its write classification: ${line}`
+      );
     }
   }
 
@@ -734,6 +732,29 @@ test("agent workflows page carries the ten operational recipes", () => {
     normalized.includes("explicit approval naming the source catalog, target, exact skills, action, and mode"),
     "agent workflows should state the shared approval contract"
   );
+
+  // The post-approval anti-TOCTOU re-check is part of the executable
+  // contract: each approved mutation is immediately preceded by a re-run of
+  // its preview evidence inside the approved sequence.
+  const POST_APPROVAL_RECHECKS: ReadonlyArray<readonly [string, string, string]> = [
+    ["recipe-exact-match-track", "skill-suitcase diff ", "skill-suitcase track "],
+    ["recipe-receiptless-mismatch-reconcile", "--dry-run", "--apply"],
+    ["recipe-accidental-dirty-repair", "--dry-run", "--apply"],
+    ["recipe-intentional-dirty-import-target", "--dry-run", "--apply"],
+    ["recipe-upstream-source-refresh", "--dry-run", "--apply"]
+  ];
+  for (const [id, recheck, mutation] of POST_APPROVAL_RECHECKS) {
+    const section = recipeSection(id);
+    const approval = section.indexOf('<p class="callout-label">Approval</p>');
+    assert.ok(approval >= 0, `${id} must carry an approval callout`);
+    const approved = literalCommandLines(section.slice(approval));
+    const recheckIndex = approved.findIndex((command) => command.includes(recheck));
+    const mutationIndex = approved.findIndex((command) => command.includes(mutation));
+    assert.ok(
+      recheckIndex >= 0 && mutationIndex > recheckIndex,
+      `${id} must re-run its ${recheck} preview after approval and before ${mutation}`
+    );
+  }
 
   // Artifact recipes must not treat a pre-approval bundle as authorization:
   // the approved sequence itself re-runs diff, stages a fresh bundle, and

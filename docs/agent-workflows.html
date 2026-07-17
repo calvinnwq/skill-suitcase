@@ -46,12 +46,13 @@
 
           <section>
             <h2>The audit loop</h2>
-            <pre><code>skill-suitcase import --source "$SRC" --json
+            <pre><code><span class="c"># read-only: the catalog gates</span>
+skill-suitcase import --source "$SRC" --json
 skill-suitcase validate --source "$SRC" --strict --json
 skill-suitcase targets --source "$SRC" --json
 skill-suitcase status --source "$SRC" --json
 
-<span class="c"># then per target, with explicit path overrides</span>
+<span class="c"># read-only: then per target, with explicit path overrides</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
 skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json</code></pre>
             <p>
@@ -770,7 +771,8 @@ skill-suitcase status --source "$SRC" --json</code></pre>
 
           <section>
             <h2>Verify and report</h2>
-            <pre><code>skill-suitcase status --source "$SRC" --json</code></pre>
+            <pre><code><span class="c"># read-only: the session-closing verification</span>
+skill-suitcase status --source "$SRC" --json</code></pre>
             <p>
               Finish every session by reporting the catalog branch and SHA, the
               target IDs inspected, any live mutations run, final summary counts,
