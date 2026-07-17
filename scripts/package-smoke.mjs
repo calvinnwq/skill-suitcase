@@ -75,6 +75,43 @@ try {
     throw new Error(`installed skill-suitcase returned an unexpected result: ${cliStdout.trim()}`);
   }
 
+  const installedSampleCatalog = path.join(
+    installDirectory,
+    "node_modules",
+    "skill-suitcase",
+    "examples",
+    "sample-catalog"
+  );
+  const { stdout: sampleStdout, stderr: sampleStderr } = await execFileAsync(
+    binPath,
+    ["validate", "--source", installedSampleCatalog, "--strict", "--json"],
+    { cwd: installDirectory, maxBuffer: 10 * 1024 * 1024 }
+  );
+  if (sampleStderr !== "") {
+    throw new Error(`installed sample validation wrote unexpected stderr: ${sampleStderr.trim()}`);
+  }
+  const sampleResult = JSON.parse(sampleStdout);
+  if (
+    sampleResult.ok !== true
+      || sampleResult.summary?.contractsEvaluated !== 1
+      || sampleResult.summary?.contractsComplete !== 1
+      || sampleResult.summary?.findings !== 0
+  ) {
+    throw new Error(`installed sample catalog failed strict validation: ${sampleStdout.trim()}`);
+  }
+  const { stderr: sampleTestStderr } = await execFileAsync(
+    "python3",
+    ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
+    {
+      cwd: installedSampleCatalog,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+      maxBuffer: 10 * 1024 * 1024
+    }
+  );
+  if (!sampleTestStderr.includes("Ran 2 tests") || !sampleTestStderr.includes("OK")) {
+    throw new Error(`installed sample contract tests returned an unexpected result: ${sampleTestStderr.trim()}`);
+  }
+
   const installedPackageJson = JSON.parse(
     await readFile(path.join(installDirectory, "node_modules", "skill-suitcase", "package.json"), "utf8")
   );
@@ -85,7 +122,9 @@ try {
     package: `${installedPackageJson.name}@${installedPackageJson.version}`,
     entries: validated.entryCount,
     bin: validated.bin,
-    command: "targets"
+    command: "targets",
+    sampleValidation: "strict",
+    sampleContractTests: "passed"
   }, null, 2)}\n`);
 } finally {
   await rm(tempRoot, { recursive: true, force: true });

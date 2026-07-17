@@ -31,8 +31,10 @@ TARGET="$SANDBOX/agent-skills"
 PACK="$SANDBOX/pack"
 mkdir -p "$TARGET"
 
-"$CLI" validate --source "$SRC" --json
+"$CLI" import --source "$SRC" --json
+"$CLI" validate --source "$SRC" --strict --json
 "$CLI" upstream check --source "$SRC" --json
+"$CLI" targets --source "$SRC" --agents-skills "$TARGET" --json
 "$CLI" plan --source "$SRC" --target agents --json
 "$CLI" status --source "$SRC" --target agents --agents-skills "$TARGET" --json
 "$CLI" diff --source "$SRC" --target agents --agents-skills "$TARGET" --json

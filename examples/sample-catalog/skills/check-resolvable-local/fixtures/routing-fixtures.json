@@ -1,0 +1,26 @@
+[
+  {
+    "utterance": "Show me the portable Skill Suitcase sample greeting.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Read and return the harmless greeting from the disposable sample catalog."
+  },
+  {
+    "utterance": "Verify the disposable Skill Suitcase installation.",
+    "expected": [
+      "hello-suitcase"
+    ],
+    "forbidden": [],
+    "intent": "Verify the deterministic greeting runner in a disposable installation."
+  },
+  {
+    "utterance": "Tell me tomorrow's weather.",
+    "expected": [],
+    "forbidden": [
+      "hello-suitcase"
+    ],
+    "intent": "Do not route unrelated requests to the sample greeting skill."
+  }
+]

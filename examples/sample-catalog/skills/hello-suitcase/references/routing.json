@@ -1,0 +1,23 @@
+{
+  "skill": "hello-suitcase",
+  "routes": [
+    {
+      "utterance": "Show me the portable Skill Suitcase sample greeting.",
+      "allTerms": [
+        "sample",
+        "greeting"
+      ]
+    },
+    {
+      "utterance": "Verify the disposable Skill Suitcase installation.",
+      "allTerms": [
+        "disposable",
+        "skill suitcase",
+        "installation"
+      ]
+    }
+  ],
+  "nonMatches": [
+    "Tell me tomorrow's weather."
+  ]
+}

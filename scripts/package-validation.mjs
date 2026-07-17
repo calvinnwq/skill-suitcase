@@ -41,8 +41,13 @@ const EXPECTED_FILES_ALLOWLIST = [
   "examples/sample-catalog/README.md",
   "examples/sample-catalog/skill-suitcase.yaml",
   "examples/sample-catalog/.skill-suitcase/upstream-lock.json",
+  "examples/sample-catalog/tests/test_hello_suitcase.py",
+  "examples/sample-catalog/skills/check-resolvable-local/.support-directory",
+  "examples/sample-catalog/skills/check-resolvable-local/fixtures/routing-fixtures.json",
   "examples/sample-catalog/skills/hello-suitcase/SKILL.md",
-  "examples/sample-catalog/skills/hello-suitcase/references/greeting.md"
+  "examples/sample-catalog/skills/hello-suitcase/references/greeting.md",
+  "examples/sample-catalog/skills/hello-suitcase/references/routing.json",
+  "examples/sample-catalog/skills/hello-suitcase/scripts/render_greeting.py"
 ];
 const EXPECTED_KEYWORDS = [
   "agent-skills",

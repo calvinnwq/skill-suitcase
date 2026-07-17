@@ -20,6 +20,19 @@ function cliFailure(result: SpawnSyncReturns<string>): string {
   return `expected CLI exit 0, received ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`;
 }
 
+function runSampleContractTests(source: string): void {
+  const result = spawnSync(
+    "python3",
+    ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
+    {
+      cwd: source,
+      encoding: "utf8",
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+    }
+  );
+  assert.equal(result.status, 0, cliFailure(result));
+}
+
 async function listFixtureFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const paths = await Promise.all(entries.map(async (entry) => {
@@ -38,6 +51,7 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   const artifactRoot = path.join(sandbox, "pack");
   await cp(sampleCatalog, source, { recursive: true });
   await mkdir(targetRoot, { recursive: true });
+  runSampleContractTests(source);
 
   const sourceArgs = ["--source", source, "--json"];
   const targetArgs = [
@@ -50,13 +64,43 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
     "--json"
   ];
 
+  const imported = runCli<{
+    ok: boolean;
+    summary: { discoveredSkills: number; referencedSkills: number; findings: number };
+  }>(["import", ...sourceArgs]);
+  assert.equal(imported.ok, true);
+  assert.equal(imported.summary.discoveredSkills, 1);
+  assert.equal(imported.summary.referencedSkills, 1);
+  assert.equal(imported.summary.findings, 0);
+
   const validated = runCli<{
     ok: boolean;
-    summary: { referencedSkills: number; upstreamDeclarations: number };
-  }>(["validate", ...sourceArgs]);
+    summary: {
+      referencedSkills: number;
+      upstreamDeclarations: number;
+      contractsEvaluated: number;
+      contractsComplete: number;
+      findings: number;
+    };
+  }>(["validate", "--strict", ...sourceArgs]);
   assert.equal(validated.ok, true);
   assert.equal(validated.summary.referencedSkills, 1);
   assert.equal(validated.summary.upstreamDeclarations, 0);
+  assert.equal(validated.summary.contractsEvaluated, 1);
+  assert.equal(validated.summary.contractsComplete, 1);
+  assert.equal(validated.summary.findings, 0);
+
+  const targets = runCli<{
+    ok: boolean;
+    targets: Array<{ id: string; kind: string; path: string }>;
+  }>(["targets", "--source", source, "--agents-skills", targetRoot, "--json"]);
+  assert.equal(targets.ok, true);
+  assert.deepEqual(
+    targets.targets
+      .filter((target) => target.id === "agents")
+      .map((target) => ({ id: target.id, kind: target.kind, path: target.path })),
+    [{ id: "agents", kind: "agents-skills-root", path: targetRoot }]
+  );
 
   const upstream = runCli<{
     ok: boolean;
