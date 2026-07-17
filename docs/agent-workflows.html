@@ -199,7 +199,9 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
 <span class="c"># staging-only: stage a fresh bundle outside catalog and target roots</span>
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
 skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json
-ARTIFACT="$(find "$OUT" -name skill-suitcase-bundle.json -print -quit)"
+for ARTIFACT in "$OUT"/.skill-suitcase/artifacts/*/skill-suitcase-bundle.json; do
+  break
+done
 
 <span class="c"># live-target-mutating: apply the just-staged artifact immediately</span>
 skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --mode copy --json
@@ -330,10 +332,10 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
               <p>
                 <strong>Verify, then stop.</strong> Report each drifted skill with
                 its target, resolved path, and status, then stop. Escalate by
-                naming the matching recipe (4 for behind, missing, or guarded
-                dirty-behind; 5 or 6 for unknown; 7 or 8 for ordinary dirty) and
-                wait for a decision; a heartbeat run must never trigger an
-                implicit repair or import.
+                naming the matching recipe (4 for behind, missing, version, or
+                guarded dirty-behind; 5 or 6 for unknown; 7 or 8 for ordinary
+                dirty) and wait for a decision; a heartbeat run must never
+                trigger an implicit repair or import.
               </p>
             </section>
 
@@ -343,8 +345,8 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                 <strong>Select when</strong> status reports <code>missing</code>,
                 <code>behind</code>, or <code>version</code> for catalog-planned
                 skills on a writable target. Missing and behind route to
-                <code>pack</code> plus <code>apply</code>, never to repair or
-                reconcile.
+                <code>pack</code> plus <code>apply</code>, as does version;
+                none routes to repair or reconcile.
               </p>
               <div class="def-rows">
                 <div><span class="k">read-only</span><span class="v"><code>status</code>, <code>diff</code>, <code>pack --dry-run</code></span></div>
@@ -375,7 +377,9 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
 <span class="c"># staging-only: stage a fresh bundle outside catalog and target roots</span>
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/skill-suitcase-pack.XXXXXX")"
 skill-suitcase pack --source "$SRC" --target codex --codex-home "$HOME/.codex" --output "$OUT" --json
-ARTIFACT="$(find "$OUT" -name skill-suitcase-bundle.json -print -quit)"
+for ARTIFACT in "$OUT"/.skill-suitcase/artifacts/*/skill-suitcase-bundle.json; do
+  break
+done
 
 <span class="c"># live-target-mutating: apply the just-staged artifact immediately</span>
 skill-suitcase apply --source "$SRC" --target codex --codex-home "$HOME/.codex" --artifact "$ARTIFACT" --mode copy --json
@@ -434,7 +438,10 @@ skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" -
                   planned file for those skills as <code>unchanged</code>.
                 </p>
               </div>
-              <pre><code><span class="c"># live-target-mutating: after approval, track writes only the receipt</span>
+              <pre><code><span class="c"># read-only: after approval, re-run the exact-match evidence; stop if it changed</span>
+skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+
+<span class="c"># live-target-mutating: track immediately after the matching re-check</span>
 skill-suitcase track --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --json
 
 <span class="c"># read-only: verify the adopted install</span>
@@ -483,7 +490,10 @@ skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.cod
                   as rollback state.
                 </p>
               </div>
-              <pre><code><span class="c"># live-target-mutating: after approval</span>
+              <pre><code><span class="c"># read-only: after approval, repeat the preview; stop if its evidence changed</span>
+skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
+
+<span class="c"># live-target-mutating: apply immediately after the matching re-check</span>
 skill-suitcase reconcile --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 
 <span class="c"># read-only: verify the reconciled install</span>
@@ -535,7 +545,10 @@ skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex"
                   target after one mixed status report.
                 </p>
               </div>
-              <pre><code><span class="c"># live-target-mutating: after approval</span>
+              <pre><code><span class="c"># read-only: after approval, repeat the preview; stop if its evidence changed</span>
+skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
+
+<span class="c"># live-target-mutating: apply immediately after the matching re-check</span>
 skill-suitcase repair --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 
 <span class="c"># read-only: verify the repaired install</span>
@@ -588,7 +601,10 @@ skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/
                   trigger this import.
                 </p>
               </div>
-              <pre><code><span class="c"># catalog-mutating + live-target-mutating: after approval</span>
+              <pre><code><span class="c"># read-only: after approval, repeat the preview; stop if its evidence changed</span>
+skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --dry-run --json
+
+<span class="c"># catalog-mutating + live-target-mutating: apply immediately after the matching re-check</span>
 skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 
 <span class="c"># read-only: verify the target state</span>
@@ -663,7 +679,10 @@ skill-suitcase upstream fetch --source "$SRC" --skill existing-skill --dry-run -
                   approval to touch any live target.
                 </p>
               </div>
-              <pre><code><span class="c"># catalog-mutating: after approval</span>
+              <pre><code><span class="c"># read-only: after approval, repeat the fetch preview; stop if its evidence changed</span>
+skill-suitcase upstream fetch --source "$SRC" --skill existing-skill --dry-run --json
+
+<span class="c"># catalog-mutating: import immediately after the matching re-check</span>
 skill-suitcase upstream import --source "$SRC" --skill existing-skill --apply --json
 
 <span class="c"># read-only: enumerate the imported scope without contents; stop on unexpected or ignored names</span>
