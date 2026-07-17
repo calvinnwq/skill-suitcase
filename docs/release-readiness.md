@@ -82,7 +82,7 @@ decision; it is not inferred from routine Release Please output.
 - Homepage: `https://calvinnwq.github.io/skill-suitcase/`
 
 `package.json` uses an explicit `files` whitelist.
-The public payload is approved through exact curated paths: npm's required `package.json`; `dist/src/**/*.js`; `skills/skill-suitcase/SKILL.md`; `skills/skill-suitcase/agents/openai.yaml`; `LICENSE`, `VISION.md`, `SPEC.md`, `README.md`, `INSTALL.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `DEVELOPING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, and `CLAUDE.md`; `docs/command-reference.md`, `docs/getting-started.md`, `docs/install-smoke.md`, `docs/portability-matrix.md`, `docs/release-readiness.md`, and `docs/skills-sh-delegation.md`; and the ten files under `examples/sample-catalog` listed explicitly in `package.json`.
+The exact curated payload is owned by that whitelist and independently enforced by `scripts/package-validation.mjs`.
 Do not replace the exact documentation, operator-skill, or sample-catalog entries with broad directory globs because a newly added file must not become publish-approved without independent review.
 Project test suites, source TypeScript, local review artifacts, agent state, and workspace files are excluded from the npm payload.
 The sample catalog's explicitly curated contract test is part of the public fixture rather than the project test suite.
@@ -187,10 +187,8 @@ and reusable text documentation under `docs/`, `skills/`, and `examples/` for
 contributor-specific home paths and validates every literal CLI launch form as
 an accepted, deterministic `--json` invocation.
 
-Review the npm dry-run output for the expected executable, compiled runtime,
-operator skill, license, and public docs. Refuse the release if it contains
-tests, local absolute paths as required inputs, private agent state, temporary
-artifacts, or workspace-only files.
+Review the npm dry-run output for the expected executable, compiled runtime, operator skill, license, public docs, and curated sample catalog.
+Refuse the release if it contains project test suites, uncurated sample tests, local absolute paths as required inputs, private agent state, temporary artifacts, or workspace-only files.
 
 ## Portable Smoke Test
 

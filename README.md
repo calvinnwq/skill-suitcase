@@ -73,9 +73,8 @@ or catalog files. Inspect their JSON before moving to staging or mutation.
 
 For a ready-made catalog that never assumes a real agent home, use the
 [`examples/sample-catalog`](examples/sample-catalog/README.md) fixture shipped
-in both the repository and npm package. Its
-walkthrough covers disposable plan, diff, status, pack, apply, repair, rollback,
-and upstream-policy checks.
+in both the repository and npm package.
+The linked walkthrough is the authoritative disposable lifecycle and sample contract check.
 
 To stage an immutable bundle without touching an agent home:
 
@@ -359,7 +358,8 @@ git diff --check
 `build` removes `dist`, compiles the TypeScript sources, and marks `dist/src/cli.js` executable so stale generated output cannot survive a package build.
 `test` rebuilds first, verifies that the recursively discovered compiled test inventory exactly matches `tests/**/*.test.ts`, then runs every compiled test and every `scripts/**/*.test.mjs` test with Node's built-in test runner.
 The test inventory validates every public and reusable CLI example as an accepted, deterministic `--json` invocation and enforces portable paths without contributor-specific home directories.
-`package:smoke` runs the supported local pack verification: npm invokes `prepack` to create a clean build and record build-input, source, and output hashes in the ignored `dist/.package-build.json`, then the smoke script parses `npm pack --json`, validates the pinned public metadata and exact allowed payload, installs the tarball into an empty temporary project, runs the read-only `targets` command through the installed executable, and strictly validates the packaged sample catalog and its contract tests.
+`package:smoke` verifies the packed and installed CLI, including the packaged sample catalog.
+The exact package gate is owned by the [release-readiness policy](docs/release-readiness.md#npm-package-and-binary-policy).
 Package validation pins the curated Markdown files under `docs/` and excludes the GitHub Pages-only HTML, CSS, and JavaScript from the tarball.
 `architecture:check` runs `scripts/check-architecture.mjs` to enforce the
 recognized source layers, allowed imports, thin CLI and command limits,
