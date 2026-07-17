@@ -684,8 +684,8 @@ test("agent workflows page carries the ten operational recipes", () => {
   assert.doesNotMatch(workflows, /--no-index/, "Git review must not render file contents indiscriminately");
   assert.doesNotMatch(workflows, /ls-files --others/, "Git review must enumerate names with status --short --ignored");
   assert.ok(
-    workflows.includes('git -C "$SRC" status --short --ignored -- skills/existing-skill'),
-    "post-import Git review must enumerate untracked and ignored names without contents"
+    workflows.includes('git -C "$SRC" status --short --ignored --untracked-files=all -- skills/existing-skill'),
+    "post-import Git review must enumerate every untracked and ignored name without contents"
   );
   assert.ok(normalized.includes("Never render ignored-file contents into tool output"));
 
@@ -779,18 +779,24 @@ test("agent workflows page carries the ten operational recipes", () => {
   const upstream = recipeSection("recipe-upstream-source-refresh");
   const upstreamCommands = literalCommandLines(upstream);
   const upstreamImport = upstreamCommands.findIndex((command) => command.startsWith("skill-suitcase upstream import "));
-  const upstreamGitReview = upstreamCommands.findIndex((command) => command === 'git -C "$SRC" diff');
   const upstreamUntrackedReview = upstreamCommands.findIndex((command) =>
-    command === 'git -C "$SRC" status --short --ignored -- skills/existing-skill .skill-suitcase/upstream-lock.json'
+    command ===
+      'git -C "$SRC" status --short --ignored --untracked-files=all -- skills/existing-skill .skill-suitcase/upstream-lock.json'
+  );
+  const upstreamSkillDiff = upstreamCommands.findIndex(
+    (command) => command === 'git -C "$SRC" diff -- skills/existing-skill/SKILL.md'
+  );
+  const upstreamLockDiff = upstreamCommands.findIndex(
+    (command) => command === 'git -C "$SRC" diff -- .skill-suitcase/upstream-lock.json'
   );
   assert.ok(upstreamImport >= 0, "upstream refresh must carry a literal import command");
   assert.ok(
-    upstreamGitReview > upstreamImport,
-    "upstream import must be followed by ordinary Git review"
+    upstreamUntrackedReview > upstreamImport,
+    "upstream import must be followed by names-first Git review"
   );
   assert.ok(
-    upstreamUntrackedReview > upstreamGitReview,
-    "upstream Git review must enumerate untracked and ignored names without contents"
+    upstreamSkillDiff > upstreamUntrackedReview && upstreamLockDiff > upstreamSkillDiff,
+    "upstream Git review must inspect reviewed tracked paths individually after enumerating names"
   );
   assert.ok(normalized.includes("Only after that review does normal catalog-to-target synchronization start"));
 
@@ -815,14 +821,19 @@ test("agent workflows page carries the ten operational recipes", () => {
   const importTargetApply = intentionalImportCommands.findIndex((command) =>
     command.startsWith("skill-suitcase import-target ") && command.includes("--apply")
   );
-  const importTargetGitDiff = intentionalImportCommands.findIndex((command) => command === 'git -C "$SRC" diff');
   const importTargetUntrackedReview = intentionalImportCommands.findIndex((command) =>
-    command === 'git -C "$SRC" status --short --ignored -- skills/existing-skill'
+    command === 'git -C "$SRC" status --short --ignored --untracked-files=all -- skills/existing-skill'
   );
-  assert.ok(importTargetGitDiff > importTargetApply, "import-target must be followed by tracked Git review");
+  const importTargetGitDiff = intentionalImportCommands.findIndex(
+    (command) => command === 'git -C "$SRC" diff -- skills/existing-skill/SKILL.md'
+  );
   assert.ok(
-    importTargetUntrackedReview > importTargetGitDiff,
-    "import-target Git review must enumerate untracked and ignored names without contents"
+    importTargetUntrackedReview > importTargetApply,
+    "import-target must be followed by names-first Git review"
+  );
+  assert.ok(
+    importTargetGitDiff > importTargetUntrackedReview,
+    "import-target Git review must inspect a reviewed tracked path only after enumerating names"
   );
   assert.ok(intentionalImport.includes("every <code>repoWrites</code> <code>create</code> action"));
   assert.ok(intentionalImport.includes("Revert only the imported skill paths"));

@@ -591,11 +591,14 @@ skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/
               <pre><code><span class="c"># catalog-mutating + live-target-mutating: after approval</span>
 skill-suitcase import-target --source "$SRC" --target codex --codex-home "$HOME/.codex" --skill existing-skill --apply --json
 
-<span class="c"># read-only: verify the target, then ordinary Git review, names before contents</span>
+<span class="c"># read-only: verify the target state</span>
 skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
-git -C "$SRC" status --short --branch
-git -C "$SRC" diff
-git -C "$SRC" status --short --ignored -- skills/existing-skill</code></pre>
+
+<span class="c"># read-only: enumerate the imported scope without contents; stop on unexpected or ignored names</span>
+git -C "$SRC" status --short --ignored --untracked-files=all -- skills/existing-skill
+
+<span class="c"># read-only: after names pass review, inspect one reviewed non-secret tracked path at a time</span>
+git -C "$SRC" diff -- skills/existing-skill/SKILL.md</code></pre>
               <p>
                 <strong>Evidence.</strong> An accepted dry-run returns
                 <code>ok: true</code> with the receipt hash, catalog hash, and
@@ -610,12 +613,15 @@ git -C "$SRC" status --short --ignored -- skills/existing-skill</code></pre>
                 <strong>Verify, then stop.</strong> Confirm the skill reads
                 <code>current</code> and review the catalog diff through the
                 ordinary Git review flow before committing. The scoped
-                <code>status --short --ignored</code> listing enumerates
+                <code>status --short --ignored --untracked-files=all</code>
+                listing enumerates every
                 untracked (<code>??</code>) and ignored (<code>!!</code>) names
                 under the selected skill without printing any contents. Check
                 that every <code>repoWrites</code> <code>create</code> action
                 appears as an untracked name, then open only those reviewed,
-                non-secret paths individually. Never render ignored-file
+                non-secret paths individually. Use the scoped
+                <code>git diff</code> once per reviewed tracked path, substituting
+                that exact path for the example. Never render ignored-file
                 contents into tool output: an ignored name under the imported
                 skill means deliberately excluded state reached the catalog, and
                 that is a stop condition. Stop if review rejects
@@ -660,10 +666,12 @@ skill-suitcase upstream fetch --source "$SRC" --skill existing-skill --dry-run -
               <pre><code><span class="c"># catalog-mutating: after approval</span>
 skill-suitcase upstream import --source "$SRC" --skill existing-skill --apply --json
 
-<span class="c"># read-only: ordinary Git review, names before contents, before any target sync</span>
-git -C "$SRC" status --short --branch
-git -C "$SRC" diff
-git -C "$SRC" status --short --ignored -- skills/existing-skill .skill-suitcase/upstream-lock.json</code></pre>
+<span class="c"># read-only: enumerate the imported scope without contents; stop on unexpected or ignored names</span>
+git -C "$SRC" status --short --ignored --untracked-files=all -- skills/existing-skill .skill-suitcase/upstream-lock.json
+
+<span class="c"># read-only: after names pass review, inspect one reviewed non-secret tracked path at a time</span>
+git -C "$SRC" diff -- skills/existing-skill/SKILL.md
+git -C "$SRC" diff -- .skill-suitcase/upstream-lock.json</code></pre>
               <p>
                 <strong>Evidence.</strong> Successful inspection and import steps
                 return <code>ok: true</code>. <code>upstream check</code> reports
@@ -679,12 +687,14 @@ git -C "$SRC" status --short --ignored -- skills/existing-skill .skill-suitcase/
               <p>
                 <strong>Verify, then stop.</strong> Finish the lane with ordinary
                 Git review and an explicit commit decision. The scoped
-                <code>status --short --ignored</code> listing enumerates
-                untracked and ignored names under the selected skill and the
-                lock path without printing any contents; confirm the import
-                wrote only the expected paths, then open only reviewed,
-                non-secret files individually and never render ignored-file
-                contents into tool output. Only
+                <code>status --short --ignored --untracked-files=all</code>
+                listing enumerates every untracked and ignored name under the
+                selected skill and the lock path without printing any contents;
+                confirm the import wrote only the expected paths, then use the
+                scoped <code>git diff</code> once per reviewed tracked path,
+                substituting that exact path for the examples. Open created files
+                only after correlating their names to the import result. Never
+                render ignored-file contents into tool output. Only
                 after that review does normal catalog-to-target synchronization
                 start, as a separate flow through recipes 2 and 4. Stop if the
                 fetched diff looks unexpected for the pinned version, and stop
