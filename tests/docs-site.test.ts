@@ -733,11 +733,19 @@ test("agent workflows page carries the ten operational recipes", () => {
   const upstreamCommands = literalCommandLines(upstream);
   const upstreamImport = upstreamCommands.findIndex((command) => command.startsWith("skill-suitcase upstream import "));
   const upstreamGitReview = upstreamCommands.findIndex((command) => command === 'git -C "$SRC" diff');
+  const upstreamUntrackedReview = upstreamCommands.findIndex((command) =>
+    command.startsWith('git -C "$SRC" ls-files --others -z -- skills/existing-skill .skill-suitcase/upstream-lock.json')
+  );
   assert.ok(upstreamImport >= 0, "upstream refresh must carry a literal import command");
   assert.ok(
     upstreamGitReview > upstreamImport,
     "upstream import must be followed by ordinary Git review"
   );
+  assert.ok(
+    upstreamUntrackedReview > upstreamGitReview,
+    "upstream Git review must include created file contents"
+  );
+  assert.ok(upstream.includes('git -C "$SRC" diff --no-index -- /dev/null "$path"'));
   assert.ok(normalized.includes("Only after that review does normal catalog-to-target synchronization start"));
 
   // Provider-owned targets are reported as boundaries, never bypassed.
@@ -748,10 +756,30 @@ test("agent workflows page carries the ten operational recipes", () => {
 
   // New-machine setup stays on an approved catalog at portable roots.
   const newMachine = recipeSection("recipe-new-machine-setup");
+  const newMachineNormalized = newMachine.replace(/\s+/g, " ");
   assert.ok(newMachine.includes("$HOME/.skill-suitcase/skills"));
   assert.ok(newMachine.includes("INSTALL.md"));
+  assert.ok(newMachineNormalized.includes("The apply result's <code>installRoot</code> identifies the receipt location"));
+  assert.ok(newMachine.includes("<code>&lt;installRoot&gt;/.skill-suitcase-receipt.json</code>"));
+  assert.ok(newMachineNormalized.includes("<code>ApplyResult</code> does not expose a separate receipt-path field"));
+  assert.ok(!newMachineNormalized.includes("receipt path appears in the apply result"));
 
   const intentionalImport = recipeSection("recipe-intentional-dirty-import-target").replace(/\s+/g, " ");
+  const intentionalImportCommands = literalCommandLines(recipeSection("recipe-intentional-dirty-import-target"));
+  const importTargetApply = intentionalImportCommands.findIndex((command) =>
+    command.startsWith("skill-suitcase import-target ") && command.includes("--apply")
+  );
+  const importTargetGitDiff = intentionalImportCommands.findIndex((command) => command === 'git -C "$SRC" diff');
+  const importTargetUntrackedReview = intentionalImportCommands.findIndex((command) =>
+    command.startsWith('git -C "$SRC" ls-files --others -z -- skills/existing-skill')
+  );
+  assert.ok(importTargetGitDiff > importTargetApply, "import-target must be followed by tracked Git review");
+  assert.ok(
+    importTargetUntrackedReview > importTargetGitDiff,
+    "import-target Git review must include created file contents"
+  );
+  assert.ok(intentionalImport.includes('git -C "$SRC" diff --no-index -- /dev/null "$path"'));
+  assert.ok(intentionalImport.includes("every <code>repoWrites</code> <code>create</code> action"));
   assert.ok(intentionalImport.includes("Revert only the imported skill paths"));
   assert.ok(intentionalImport.includes("<code>behind</code> or <code>version</code>"));
   assert.ok(intentionalImport.includes("repair will refuse it"));

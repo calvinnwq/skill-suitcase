@@ -205,10 +205,13 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
                 <code>validate --strict</code> must return <code>ok: true</code>
                 with no error-level findings. On a fresh machine the status
                 entries read <code>missing</code>; after apply, every planned
-                skill reads <code>current</code> and the receipt path appears in
-                the apply result. The post-approval <code>diff</code> must still
-                match the approved bundle plan; new drift there voids the
-                approval. Refusals such as
+                skill reads <code>current</code>. The apply result's
+                <code>installRoot</code> identifies the receipt location as
+                <code>&lt;installRoot&gt;/.skill-suitcase-receipt.json</code>;
+                <code>ApplyResult</code> does not expose a separate receipt-path
+                field. The post-approval <code>diff</code> must still match the
+                approved bundle plan; new drift there voids the approval.
+                Refusals such as
                 <code>source_untracked_files</code>,
                 <code>unsafe_target_state</code>, or
                 <code>read_only_target</code> arrive as structured
@@ -568,7 +571,12 @@ skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex"
 
 <span class="c"># then ordinary Git review of the catalog working tree</span>
 git -C "$SRC" status --short --branch
-git -C "$SRC" diff</code></pre>
+git -C "$SRC" diff
+git -C "$SRC" ls-files --others -z -- skills/existing-skill |
+  while IFS= read -r -d '' path; do
+    git -C "$SRC" diff --no-index -- /dev/null "$path" ||
+      { diff_status=$?; [ "$diff_status" -eq 1 ] || exit "$diff_status"; }
+  done</code></pre>
               <p>
                 <strong>Evidence.</strong> An accepted dry-run returns
                 <code>ok: true</code> with the receipt hash, catalog hash, and
@@ -582,9 +590,14 @@ git -C "$SRC" diff</code></pre>
               <p>
                 <strong>Verify, then stop.</strong> Confirm the skill reads
                 <code>current</code> and review the catalog diff through the
-                ordinary Git review flow before committing. Stop if review
-                rejects the change. Revert only the imported skill paths listed
-                in <code>repoWrites</code>, including added untracked files, and
+                ordinary Git review flow before committing. The scoped
+                <code>ls-files</code> loop includes ignored and non-ignored
+                untracked files under the selected skill and renders each with
+                <code>diff --no-index</code>. Repeat that review for every
+                selected skill path and verify that every <code>repoWrites</code>
+                <code>create</code> action appears in it. Stop if review rejects
+                the change. Revert only the imported skill paths listed in
+                <code>repoWrites</code>, including added untracked files, and
                 preserve every unrelated working-tree path. The receipt still
                 records the imported content, so status reads
                 <code>behind</code> or <code>version</code> after that scoped
@@ -626,7 +639,12 @@ skill-suitcase upstream import --source "$SRC" --skill existing-skill --apply --
 
 <span class="c"># then ordinary Git review before any target synchronization</span>
 git -C "$SRC" status --short --branch
-git -C "$SRC" diff</code></pre>
+git -C "$SRC" diff
+git -C "$SRC" ls-files --others -z -- skills/existing-skill .skill-suitcase/upstream-lock.json |
+  while IFS= read -r -d '' path; do
+    git -C "$SRC" diff --no-index -- /dev/null "$path" ||
+      { diff_status=$?; [ "$diff_status" -eq 1 ] || exit "$diff_status"; }
+  done</code></pre>
               <p>
                 <strong>Evidence.</strong> Successful inspection and import steps
                 return <code>ok: true</code>. <code>upstream check</code> reports
@@ -641,11 +659,14 @@ git -C "$SRC" diff</code></pre>
               </p>
               <p>
                 <strong>Verify, then stop.</strong> Finish the lane with ordinary
-                Git review and an explicit commit decision. Only after that
-                review does normal catalog-to-target synchronization start, as a
-                separate flow through recipes 2 and 4. Stop if the fetched diff
-                looks unexpected for the pinned version, and stop rather than
-                point any upstream installer at a live agent home.
+                Git review and an explicit commit decision. The scoped
+                <code>ls-files</code> loop includes ignored and non-ignored
+                untracked files created under the selected skill or at the lock
+                path and renders each with <code>diff --no-index</code>. Only
+                after that review does normal catalog-to-target synchronization
+                start, as a separate flow through recipes 2 and 4. Stop if the
+                fetched diff looks unexpected for the pinned version, and stop
+                rather than point any upstream installer at a live agent home.
               </p>
             </section>
 
