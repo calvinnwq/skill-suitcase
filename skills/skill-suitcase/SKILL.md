@@ -348,11 +348,17 @@ the exact target skill directory and catalog destination first:
 
 Promotion copies the skill into catalog source, replaces the target with a
 symlink, and writes receipt state.
+It stores the pre-promote target backup under
+`<skills-root>/.skill-suitcase/promote-backups/` so discovery scanners never
+index it as a live skill.
 It does not update `skill-suitcase.yaml` or add target assignment state.
 If the promoted skill also needs catalog assignment, inspect and obtain separate
 approval for the exact manifest change before editing it.
 Inspect the ordinary Git diff after every approved catalog mutation.
 Rollback does not restore promotions.
+Once a promotion is trusted, discard the matching backup directory under
+`.skill-suitcase/promote-backups/` and clear any receipt `rollback.backupPath`
+that still points at it.
 
 For missing, behind, or receipt-owned dirty+behind skills, stage an immutable
 bundle and apply the artifact. The dirty+behind case is allowed only when the
