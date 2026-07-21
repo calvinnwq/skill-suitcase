@@ -438,7 +438,11 @@ export async function executePromote({ source, targetSkill, __test }: ExecutePro
 
   // Phase 3: preserve the original (move aside, never delete before verify), then
   // replace it with a symlink back to the verified catalog source.
-  const backupPath = path.join(installRoot, `.${skillName}.suitcase-pre-promote-${uniqueSuffix()}`);
+  // Keep promote backups under the manager archive dir so agent skill discovery
+  // roots (including hidden top-level SKILL.md folders) never index them.
+  const backupRoot = path.join(installRoot, ".skill-suitcase", "promote-backups");
+  await mkdir(backupRoot, { recursive: true });
+  const backupPath = path.join(backupRoot, `${skillName}.suitcase-pre-promote-${uniqueSuffix()}`);
   let backedUp = false;
   let linked = false;
   try {

@@ -500,7 +500,11 @@ an agent home, the promote workflow:
 5. write a receipt that records source provenance, install mode, and rollback
    state
 
-Promotion must preserve the original target in a backup path.
+Promotion must preserve the original target in a backup path under
+`<install-root>/.skill-suitcase/promote-backups/`.
+Never leave that backup as a top-level entry in a skill discovery root; agent
+runtimes that scan those roots (including hidden directories with `SKILL.md`)
+will otherwise index the backup as a skill.
 The current rollback command does not restore that backup, so promotion recovery remains a separate manual decision.
 Do not remove the original target directory before the repo copy has been verified.
 If a conflict exists, such as an existing repo skill name or unsafe path, report it as a machine-readable planning error before mutation.

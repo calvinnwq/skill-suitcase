@@ -311,9 +311,17 @@ test("promote --apply copies the target into the catalog, symlinks the target ba
   assert.equal(record.targetPath, skillPath);
   assert.ok(typeof record.sourceHash === "string" && record.sourceHash.length > 0);
 
-  // The original target state is preserved (trashable) for rollback.
+  // The original target state is preserved outside the skill discovery root.
   assert.ok(typeof result.backupPath === "string");
-  assert.equal(await readFile(path.join(result.backupPath as string, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
+  const backupPath = result.backupPath as string;
+  assert.equal(
+    path.dirname(backupPath),
+    path.join(home, "skills", ".skill-suitcase", "promote-backups")
+  );
+  assert.equal(path.basename(path.dirname(path.dirname(backupPath))), ".skill-suitcase");
+  assert.equal(await readFile(path.join(backupPath, "SKILL.md"), "utf8"), "---\nname: new-skill\n---\n# new-skill\n");
+  // Backup must not sit as a top-level discovery entry beside live skills.
+  assert.equal(path.dirname(backupPath) === path.join(home, "skills"), false);
 });
 
 test("promote --apply leaves the original target untouched when it fails before the swap", async (t) => {
