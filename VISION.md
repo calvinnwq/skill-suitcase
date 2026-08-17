@@ -17,8 +17,8 @@ release work, but the normal product experience should be mediated by agents.
   OpenClaw, Hermes, and future runtimes.
 - Runtime integrations should adapt to the CLI contract instead of becoming
   separate products.
-- OpenClaw is a first-class integration and dogfood surface, not the whole
-  product boundary.
+- Hermes is the primary active runtime integration and dogfood surface.
+- OpenClaw is a first-class integration for compatibility and migration, not the whole product boundary or the active product runtime.
 - Upstream-managed skills, including skills fetched through `npx skills`, may
   keep their upstream as the versioning authority while Skill Suitcase manages
   reviewed catalog source, local receipts, target status, and safe installs.
@@ -52,8 +52,8 @@ checks.
 
 ## Product Shape
 
-The intended shape is not "OpenClaw-only." The standalone CLI is the backbone,
-OpenClaw is the premium integrated experience and dogfood runtime, and broader
+The intended shape is not "Hermes-only." The standalone CLI is the backbone,
+Hermes is the primary integrated experience and dogfood runtime, and broader
 runtime compatibility is the expansion path. A runtime-agnostic skill standard is
 useful positioning over time, but the practical wedge is an agent-first CLI that
 can manage real skill catalogs safely today.
