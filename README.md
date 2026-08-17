@@ -50,7 +50,8 @@ See [`INSTALL.md`](INSTALL.md) for the full agent/runtime setup.
 ## Start with a read-only audit
 
 Point `SRC` at any catalog containing `skill-suitcase.yaml` and
-`skills/<name>/SKILL.md`:
+`skills/<name>/SKILL.md`.
+The default active example targets Hermes:
 
 ```bash
 SRC="/path/to/skills-catalog"
@@ -58,9 +59,9 @@ SRC="/path/to/skills-catalog"
 skill-suitcase import --source "$SRC" --json
 skill-suitcase validate --source "$SRC" --strict --json
 skill-suitcase targets --source "$SRC" --json
-skill-suitcase plan --source "$SRC" --target codex --json
-skill-suitcase status --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
-skill-suitcase diff --source "$SRC" --target codex --codex-home "$HOME/.codex" --json
+skill-suitcase plan --source "$SRC" --target hermes --json
+skill-suitcase status --source "$SRC" --target hermes --hermes-skills "$HOME/.hermes/skill-suitcase/skills" --json
+skill-suitcase diff --source "$SRC" --target hermes --hermes-skills "$HOME/.hermes/skill-suitcase/skills" --json
 ```
 
 These commands do not create install roots, runtime homes, receipts, symlinks, or catalog files.
