@@ -81,7 +81,7 @@
     "@types/node": "25.9.2",
     "mdast-util-from-markdown": "^2.0.3",
     "parse5": "^7.3.0",
-    "postcss": "^8.5.19",
+    "postcss": "^8.5.26",
     "typescript": "^5.9.3",
     "unbash": "^4.0.2"
   },
