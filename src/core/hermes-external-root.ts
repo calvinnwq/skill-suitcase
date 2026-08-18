@@ -12,6 +12,10 @@ import {
   normalizeFilesystemComparisonPath
 } from "./filesystem-comparison.js";
 import { classifySymlinkInstall } from "./install-modes.js";
+import {
+  inspectExternalProjections,
+  type ExternalProjection
+} from "./external-projections.js";
 
 export type HermesExternalRootFinding = {
   code: string;
@@ -22,14 +26,19 @@ export type HermesExternalRootFinding = {
 export async function validateHermesExternalRoot({
   home,
   installRoot,
-  planned
+  planned,
+  externalProjections = [],
+  homeDirectory
 }: {
   home: string;
   installRoot: string;
   planned: Array<{ skill: string; destination: string; sourcePath?: string }>;
+  externalProjections?: ExternalProjection[];
+  homeDirectory?: string;
 }): Promise<HermesExternalRootFinding[]> {
   const findings: HermesExternalRootFinding[] = [];
   const normalizedHome = path.resolve(home);
+  const normalizedProjectionHome = path.resolve(homeDirectory ?? os.homedir());
   const normalizedRoot = path.resolve(installRoot);
   const localSkillsRoot = path.join(normalizedHome, "skills");
   const [canonicalRoot, canonicalLocalRoot] = await Promise.all([
@@ -92,7 +101,11 @@ export async function validateHermesExternalRoot({
     path.resolve(value),
     managedRootCaseInsensitive
   );
-  const plannedDestinations = new Map<string, { identity: string; sourcePath: string | null }>();
+  const plannedDestinations = new Map<string, {
+    identity: string;
+    sourcePath: string | null;
+    traverse: boolean;
+  }>();
   const plannedByDestination = new Map<string, typeof plannedIdentities>();
   for (const item of plannedIdentities) {
     const key = managedDestinationKey(path.resolve(normalizedRoot, item.destination));
@@ -101,7 +114,8 @@ export async function validateHermesExternalRoot({
     plannedByDestination.set(key, entries);
     plannedDestinations.set(key, {
       identity: item.identity,
-      sourcePath: item.sourcePath ?? null
+      sourcePath: item.sourcePath ?? null,
+      traverse: true
     });
   }
   const destinationConflicts = [...plannedByDestination.values()]
@@ -113,6 +127,71 @@ export async function validateHermesExternalRoot({
       skill: items[0]!.skill
     }));
   if (destinationConflicts.length > 0) return destinationConflicts;
+
+  const externalInspections = await inspectExternalProjections({
+    installRoot: normalizedRoot,
+    projections: externalProjections,
+    homeDirectory: normalizedProjectionHome
+  });
+  const externalIdentities = new Map<string, string>();
+  for (const inspection of externalInspections) {
+    if (
+      inspection.state !== "external-current"
+      || inspection.targetPath === null
+      || inspection.sourcePath === null
+    ) {
+      findings.push({
+        code: inspection.state,
+        message: inspection.reason,
+        skill: inspection.skill
+      });
+      continue;
+    }
+
+    const identity = await readLocalSkillIdentity(inspection.targetPath, inspection.skill);
+    if (identity !== inspection.skill) {
+      findings.push({
+        code: "external_projection_identity_mismatch",
+        message: `External projection ${inspection.id} declares ${inspection.skill} but its SKILL.md identity is ${identity ?? "missing"}.`,
+        skill: inspection.skill
+      });
+      continue;
+    }
+    if (plannedSkills.has(identity)) {
+      findings.push({
+        code: "external_projection_identity_conflict",
+        message: `External projection ${inspection.id} duplicates catalog-planned Hermes skill identity ${identity}.`,
+        skill: identity
+      });
+      continue;
+    }
+    const previousProjection = externalIdentities.get(identity);
+    if (previousProjection !== undefined) {
+      findings.push({
+        code: "external_projection_identity_conflict",
+        message: `External projections ${previousProjection} and ${inspection.id} share Hermes skill identity ${identity}.`,
+        skill: identity
+      });
+      continue;
+    }
+
+    const destinationKey = managedDestinationKey(inspection.targetPath);
+    if (plannedDestinations.has(destinationKey)) {
+      findings.push({
+        code: "external_projection_destination_conflict",
+        message: `External projection ${inspection.id} collides with another planned destination ${inspection.destination}.`,
+        skill: identity
+      });
+      continue;
+    }
+    externalIdentities.set(identity, inspection.id);
+    plannedDestinations.set(destinationKey, {
+      identity,
+      sourcePath: inspection.sourcePath,
+      traverse: false
+    });
+  }
+
   const managedShadows = await findSkillShadows(
     normalizedRoot,
     plannedSkills,
@@ -309,7 +388,11 @@ async function canonicalizePath(value: string): Promise<string> {
 async function findSkillShadows(
   root: string,
   skills: Set<string>,
-  plannedDestinations: ReadonlyMap<string, { identity: string; sourcePath: string | null }> = new Map(),
+  plannedDestinations: ReadonlyMap<string, {
+    identity: string;
+    sourcePath: string | null;
+    traverse?: boolean;
+  }> = new Map(),
   plannedDestinationKey: (value: string) => string = path.resolve
 ): Promise<{ skills: string[]; directorySymlinks: string[] }> {
   const found = new Set<string>();
@@ -339,7 +422,7 @@ async function findSkillShadows(
       if (entry.isSymbolicLink()) {
         const plannedChild = plannedDestinations.get(plannedDestinationKey(child));
         if (plannedChild !== undefined && await isExpectedPlannedSkillSymlink(child, plannedChild)) {
-          pending.push(child);
+          if (plannedChild.traverse !== false) pending.push(child);
           continue;
         }
         if (await isDirectory(await canonicalizePath(child))) directorySymlinks.add(child);
@@ -358,7 +441,7 @@ async function findSkillShadows(
 
 async function isExpectedPlannedSkillSymlink(
   targetPath: string,
-  planned: { identity: string; sourcePath: string | null }
+  planned: { identity: string; sourcePath: string | null; traverse?: boolean }
 ): Promise<boolean> {
   if (planned.sourcePath === null) return false;
   const classification = await classifySymlinkInstall({

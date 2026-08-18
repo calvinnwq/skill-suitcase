@@ -33,6 +33,9 @@ A catalog root contains `skill-suitcase.yaml`, canonical skill directories at
 - `assignments`: target-facing selections of suitcases and optional per-skill
   `categories` for categorized target adapters;
 - `assignmentPaths`: target adapter kinds, assignment names, and install paths;
+- `externalProjections`: externally owned skill symlinks identified by target,
+  skill identity, safe relative destination, expected absolute or `~/` source,
+  `symlink` mode, and owner;
 - `groups`: reporting metadata that references existing skills, suitcases, or
   assignments without changing install semantics;
 - `compatibility`: supported or blocked agents, evidence, variants, and reasons;
@@ -91,6 +94,15 @@ assignmentPaths:
     assignment: hermes
     home: ~/.hermes
     path: ~/.hermes/skill-suitcase/skills
+
+externalProjections:
+  reference-tool-hermes:
+    target: hermes
+    skill: reference-tool
+    destination: productivity/reference-tool
+    source: ~/.skill-suitcase/external/reference-suite/<commit>/skills/reference-tool
+    mode: symlink
+    owner: example/reference-suite
 ```
 
 Before live target inspection or mutation, the operator creates the external
@@ -112,6 +124,21 @@ symlinks encountered while checking shadows, category symlinks, path traversal,
 unmanaged destination collisions, and receipt destination drift.
 The one receipt remains at the external root. Existing flat Hermes targets are
 unchanged.
+
+`externalProjections` is target-agnostic ownership metadata for exact external
+skill symlinks.
+Each declaration must select an existing assignment-path target, use one plain
+skill identity, stay at a safe relative POSIX destination, resolve its source
+from an absolute or `~/` path, use `symlink` mode, and name its owner.
+Declarations may not duplicate a catalog-assigned identity, another external
+identity, or another external destination on the same target.
+`status` and `diff` expose projection reports separately from the seven-state
+catalog status enum.
+Only `external-current` projections are accepted; missing, broken, drifted,
+invalid, identity-mismatched, conflicting, and undeclared directory symlinks
+fail closed before target mutation.
+Skill Suitcase verifies and preserves current projections but never creates,
+adopts, receipts, prunes, or repairs them.
 
 Category values must start with an ASCII letter or digit and may then contain
 only ASCII letters, digits, `.`, `_`, or `-`.

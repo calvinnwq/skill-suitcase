@@ -552,6 +552,8 @@ codes include:
   Hermes resolve a different skill
 - `hermes_shadow_directory_symlink` / `external_category_symlink` /
   `external_destination_escape`: safe categorized containment cannot be proven
+- `external_projection_owned`: a receipt record targets a declared externally
+  owned projection and prune will not mutate it
 - `artifact_destination_mismatch`: an artifact's approved categorized
   destination differs from the current plan
 - state-specific repair/reconcile/prune/import refusals when the selected skill does

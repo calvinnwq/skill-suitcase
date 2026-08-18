@@ -16,6 +16,11 @@ import {
   sourcePolicyPrunesDirectory
 } from "../source-policy.js";
 import { validateHermesExternalRoot } from "../hermes-external-root.js";
+import {
+  externalProjectionsForTarget,
+  inspectExternalProjections,
+  type ExternalProjectionInspection
+} from "../external-projections.js";
 
 type DiffSourceFileRead =
   | {
@@ -77,6 +82,7 @@ type DiffResult = {
   planned: PlanItem[];
   blocked: PlanItem[];
   entries: DiffEntry[];
+  externalProjections: ExternalProjectionInspection[];
   summary: DiffSummary;
   errors: DiffResultError[];
 };
@@ -131,6 +137,7 @@ export async function diff(
       planned: [],
       blocked: [],
       entries: [],
+      externalProjections: [],
       summary: {
         create: 0,
         update: 0,
@@ -161,6 +168,7 @@ export async function diff(
     planned: planResult.planned ?? [],
     blocked: planResult.blocked ?? [],
     entries: [],
+    externalProjections: [],
     summary: {
       create: 0,
       update: 0,
@@ -191,6 +199,16 @@ export async function diff(
   const selectedRegistryEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides)
     ?? findTargetRegistryEntriesByAssignment(manifest, planTarget, targetOverrides)[0]
     ?? null;
+  const projectionTarget = selectedRegistryEntry?.id ?? target;
+  const declaredExternalProjections = externalProjectionsForTarget(
+    manifest.externalProjections,
+    projectionTarget
+  );
+  result.externalProjections = await inspectExternalProjections({
+    installRoot,
+    projections: declaredExternalProjections,
+    ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
+  });
   if (selectedRegistryEntry?.kind === "hermes-external-skills-root") {
     const home = selectedRegistryEntry.home;
     if (home === null) {
@@ -202,13 +220,28 @@ export async function diff(
       result.errors.push(...await validateHermesExternalRoot({
         home,
         installRoot,
-        planned: result.planned
+        planned: result.planned,
+        externalProjections: declaredExternalProjections,
+        ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
       }));
     }
     if (result.errors.length > 0) {
       for (const blockedEntry of result.blocked) {
         result.entries.push(blockedEntryFromPlan(blockedEntry));
       }
+      result.summary = summarizeActions(result.entries);
+      return result;
+    }
+  } else {
+    result.errors.push(...result.externalProjections
+      .filter((inspection) => inspection.state !== "external-current")
+      .map((inspection) => ({
+        code: inspection.state,
+        message: inspection.reason,
+        skill: inspection.skill
+      })));
+    if (result.errors.length > 0) {
+      for (const blockedEntry of result.blocked) result.entries.push(blockedEntryFromPlan(blockedEntry));
       result.summary = summarizeActions(result.entries);
       return result;
     }

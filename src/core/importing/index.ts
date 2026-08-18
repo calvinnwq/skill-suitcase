@@ -4,6 +4,11 @@ import { readTextFile } from "../../adapters/filesystem.js";
 import { DEFAULT_SKILLS_DIRECTORY, DEFAULT_SUITCASE_MANIFEST_FILE } from "../../config/defaults.js";
 import { type Catalog } from "../catalog/index.js";
 import { parseSuitcaseManifest } from "../catalog/suitcase-manifest.js";
+import {
+  EXTERNAL_PROJECTION_MODE,
+  isSafeExternalProjectionDestination,
+  isSafeExternalProjectionSource
+} from "../external-projections.js";
 import { isHermesCategorySegment } from "../hermes-categories.js";
 import { resolvePlatformAdapter } from "../platform-adapters.js";
 
@@ -61,6 +66,7 @@ type ImportSummary = {
   assignments: number;
   assignmentPaths: number;
   groups: number;
+  externalProjections: number;
   compatibilityEntries: number;
   variantEntries: number;
   warnings: number;
@@ -144,6 +150,7 @@ export async function inspectImportSource({ source }: ImportArgs): Promise<Impor
       assignments: Object.keys(manifest.assignments).length,
       assignmentPaths: Object.keys(manifest.assignmentPaths).length,
       groups: Object.keys(manifest.groups).length,
+      externalProjections: Object.keys(manifest.externalProjections).length,
       compatibilityEntries: Object.keys(manifest.compatibility).length,
       variantEntries: countVariantEntries(manifest),
       warnings,
@@ -358,6 +365,7 @@ function validateManifestShape(
   }
 
   validateSourcePolicyMetadata(manifest.sourcePolicy, findings);
+  validateExternalProjectionMetadata(manifest, findings);
 
   for (const [pathName, assignmentPath] of Object.entries(manifest.assignmentPaths)) {
     const assignment = normalizedString(assignmentPath.assignment);
@@ -432,6 +440,120 @@ function validateManifestShape(
       );
     }
   }
+}
+
+function validateExternalProjectionMetadata(manifest: Catalog, findings: ImportFinding[]): void {
+  const destinations = new Map<string, string>();
+  const identities = new Map<string, string>();
+
+  for (const [projectionId, projection] of Object.entries(manifest.externalProjections).sort(([left], [right]) => left.localeCompare(right))) {
+    const target = normalizedString(projection.target);
+    const skill = normalizedString(projection.skill);
+    const destination = normalizedString(projection.destination);
+    const source = normalizedString(projection.source);
+    const mode = normalizedString(projection.mode);
+    const owner = normalizedString(projection.owner);
+    const basePath = `externalProjections.${projectionId}`;
+
+    if (!isPlainPathSegment(projectionId)) {
+      findings.push(error(
+        "invalid_external_projection",
+        `External projection ${projectionId} must use a plain manifest key.`,
+        basePath
+      ));
+    }
+
+    for (const [field, value] of Object.entries({ target, skill, destination, source, mode, owner })) {
+      if (value === null) {
+        findings.push(error(
+          "invalid_external_projection",
+          `External projection ${projectionId} is missing required field ${field}.`,
+          `${basePath}.${field}`
+        ));
+      }
+    }
+
+    if (target !== null && manifest.assignmentPaths[target] === undefined) {
+      findings.push(error(
+        "unknown_external_projection_target",
+        `External projection ${projectionId} targets unknown assignment path ${target}.`,
+        `${basePath}.target`
+      ));
+    }
+    if (skill !== null && !isPlainPathSegment(skill)) {
+      findings.push(error(
+        "invalid_external_projection",
+        `External projection ${projectionId} skill ${skill} must be one plain identity segment.`,
+        `${basePath}.skill`
+      ));
+    }
+    if (mode !== null && mode !== EXTERNAL_PROJECTION_MODE) {
+      findings.push(error(
+        "invalid_external_projection_mode",
+        `External projection ${projectionId} uses unsupported mode ${mode}; only ${EXTERNAL_PROJECTION_MODE} is supported.`,
+        `${basePath}.mode`
+      ));
+    }
+    if (destination !== null && !isSafeExternalProjectionDestination(destination)) {
+      findings.push(error(
+        "unsafe_external_projection_destination",
+        `External projection ${projectionId} destination must be a safe relative POSIX path inside its target root.`,
+        `${basePath}.destination`
+      ));
+    }
+    if (source !== null && !isSafeExternalProjectionSource(source)) {
+      findings.push(error(
+        "unsafe_external_projection_source",
+        `External projection ${projectionId} source must be an absolute path or start with ~/.`,
+        `${basePath}.source`
+      ));
+    }
+
+    if (target === null || skill === null || destination === null) continue;
+    const assignmentName = normalizedString(manifest.assignmentPaths[target]?.assignment);
+    const assignedSkills = assignmentName === null
+      ? new Set<string>()
+      : assignedSkillsForAssignment(manifest, assignmentName);
+    if (assignedSkills.has(skill)) {
+      findings.push(error(
+        "external_projection_identity_conflict",
+        `External projection ${projectionId} duplicates catalog-assigned skill identity ${skill} for target ${target}.`,
+        `${basePath}.skill`
+      ));
+    }
+
+    const identityKey = `${target}\0${skill}`;
+    const previousIdentity = identities.get(identityKey);
+    if (previousIdentity !== undefined) {
+      findings.push(error(
+        "external_projection_identity_conflict",
+        `External projections ${previousIdentity} and ${projectionId} share skill identity ${skill} for target ${target}.`,
+        `${basePath}.skill`
+      ));
+    } else {
+      identities.set(identityKey, projectionId);
+    }
+
+    const destinationKey = `${target}\0${destination}`;
+    const previousDestination = destinations.get(destinationKey);
+    if (previousDestination !== undefined) {
+      findings.push(error(
+        "external_projection_destination_conflict",
+        `External projections ${previousDestination} and ${projectionId} share destination ${destination} for target ${target}.`,
+        `${basePath}.destination`
+      ));
+    } else {
+      destinations.set(destinationKey, projectionId);
+    }
+  }
+}
+
+function assignedSkillsForAssignment(manifest: Catalog, assignmentName: string): Set<string> {
+  const assignedSkills = new Set<string>();
+  for (const suitcaseName of manifest.assignments[assignmentName]?.suitcases ?? []) {
+    for (const skill of manifest.suitcases[suitcaseName]?.skills ?? []) assignedSkills.add(skill);
+  }
+  return assignedSkills;
 }
 
 function validateImportedCategorizedAssignment(
@@ -858,7 +980,8 @@ function emptyManifest(): Catalog {
     sourcePolicy: {},
     validationPolicy: { skillify: { skip: {} } },
     compatibility: {},
-    variants: {}
+    variants: {},
+    externalProjections: {}
   };
 }
 

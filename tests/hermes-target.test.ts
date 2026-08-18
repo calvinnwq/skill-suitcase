@@ -15,6 +15,7 @@ import { repair } from "../src/repair.js";
 import { prune } from "../src/prune.js";
 import { rollback } from "../src/rollback.js";
 import { track } from "../src/track.js";
+import { RECEIPT_FILE, RECEIPT_SCHEMA } from "../src/receipt.js";
 
 const cliPath = path.join(process.cwd(), "dist", "src", "cli.js");
 
@@ -537,6 +538,69 @@ ${skills.map((skill) => `  ${skill.name}:\n    agents:\n      - hermes\n    vari
   await assert.rejects(readFile(path.join(externalRoot, "autonomous-ai-agents", "agent-swarm", "SKILL.md"), "utf8"));
   assert.equal(await readFile(localSentinel, "utf8"), "keep\n");
   assert.match(await readFile(path.join(hermesHome, "config.yaml"), "utf8"), /external_dirs/);
+});
+
+test("prune refuses stale receipt records for declared external projections", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-prune-external-ownership-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const source = path.join(sandbox, "catalog");
+  const hermesHome = path.join(sandbox, "hermes");
+  const externalRoot = path.join(sandbox, "external-root");
+  const externalSource = path.join(sandbox, "external-source", "reference-alpha");
+  const targetPath = path.join(externalRoot, "research", "reference-alpha");
+  await mkdir(path.join(hermesHome, "skills"), { recursive: true });
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  await mkdir(externalSource, { recursive: true });
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(hermesHome, "config.yaml"), `skills:\n  external_dirs:\n    - ${externalRoot}\n`);
+  await writeFile(path.join(externalSource, "SKILL.md"), "---\nname: reference-alpha\n---\n# Reference\n");
+  await symlink(externalSource, targetPath, "dir");
+  await writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills: []
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories: {}
+assignmentPaths:
+  hermes:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: ${hermesHome}
+    path: ${externalRoot}
+externalProjections:
+  reference-alpha:
+    target: hermes
+    skill: reference-alpha
+    destination: research/reference-alpha
+    source: ${externalSource}
+    mode: symlink
+    owner: fixture-provider
+`);
+  await mkdir(externalRoot, { recursive: true });
+  await writeFile(path.join(externalRoot, RECEIPT_FILE), `${JSON.stringify({
+    schema: RECEIPT_SCHEMA,
+    source,
+    installs: {
+      "reference-alpha": {
+        skill: "reference-alpha",
+        target: "hermes",
+        agent: "hermes",
+        mode: "symlink",
+        sourcePath: externalSource,
+        targetPath,
+        destination: path.join("research", "reference-alpha")
+      }
+    }
+  }, null, 2)}\n`);
+
+  const result = await prune({ source, target: "hermes", skills: ["reference-alpha"], dryRun: true });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.candidates.length, 0);
+  assert.equal(result.errors.some((error) => error.code === "external_projection_owned"), true);
+  assert.equal(await readlink(targetPath), externalSource);
 });
 
 test("categorized Hermes import-target refuses a category swapped before target reads", async (t) => {

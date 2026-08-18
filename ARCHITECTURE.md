@@ -163,6 +163,9 @@ The durable state model belongs to Skill Suitcase:
   non-empty exclude policy, while denied or secret-like paths refuse with
   path-level evidence before any target write
 - manifest `validationPolicy.skillify.skip` records reviewed exceptions for referenced skills that strict validation must not score against the local Skillify-10 authoring contract
+- manifest `externalProjections` records exact externally owned symlink
+  destinations and provenance; status and diff verify them but receipts and
+  mutation workflows never adopt them
 - receipts record ownership, source provenance, relative destination, install
   mode, file hashes, and rollback state; receipt writers use atomic replacement and a receipt-local
   transaction lock so concurrent workflows cannot discard one another's state
@@ -188,6 +191,20 @@ overlap the owned root, and the plan itself must not contain duplicate
 Category and skill parents are revalidated around filesystem operations so a
 symlink swap cannot redirect categorized writes, adoption, recovery, pruning,
 or rollback outside the owned root.
+
+External projections form a parallel, non-receipt ownership plane.
+The manifest declares exact target, skill identity, relative destination,
+source, symlink mode, and external owner metadata without adding the skill to a
+suitcase or assignment.
+A target-scoped inspector classifies each declaration before mutation, rejects
+symlinked parents and unsafe paths, and exposes projection state separately from
+catalog-planned status.
+Platform adapters may consume the same generic projection evidence; the Hermes
+shadow scanner additionally treats only exact `external-current` declarations
+as traversal exclusions while every undeclared directory symlink remains a
+hard refusal.
+Mutation code never creates, adopts, receipts, prunes, or repairs an external
+projection.
 
 Manifest-owned logical groups are reporting metadata. They may name product
 families, upstream suites, provider boundaries, or other operator-facing buckets

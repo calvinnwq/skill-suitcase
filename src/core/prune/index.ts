@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import os from "node:os";
 import {
   chmod,
   lstat,
@@ -15,7 +16,11 @@ import {
 import path from "node:path";
 import { plan } from "../planning/index.js";
 import { targets } from "../catalog/targets.js";
-import type { TargetOverrides } from "../catalog/index.js";
+import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
+import {
+  externalProjectionsForTarget,
+  inspectExternalProjections
+} from "../external-projections.js";
 import {
   RECEIPT_FILE,
   RECEIPT_SCHEMA,
@@ -171,12 +176,27 @@ export async function prune(input: PruneInput): Promise<PruneResult> {
 async function planPrune(input: PruneInput, selected: string[]): Promise<PlannedPrune> {
   const source = path.resolve(input.source);
   const errors: PruneError[] = [];
+  const { manifest } = await loadCatalog(source, { targetOverrides: input.targetOverrides });
+  const externalProjections = externalProjectionsForTarget(manifest.externalProjections, input.target);
   const targetReport = await targets({ source, targetOverrides: input.targetOverrides });
   const target = targetReport.targets.find((item) => item.id === input.target);
   const installRoot = target?.platform?.installRoot ?? null;
   const assignment = target?.assignment ?? null;
   const targetIdentity = assignment ?? input.target;
   const categorizedExternalRoot = target?.platform?.metadata["categorizedExternalRoot"] === true;
+  const externalProjectionTargetPaths = new Map<string, string>();
+  if (installRoot !== null && externalProjections.length > 0) {
+    const inspections = await inspectExternalProjections({
+      installRoot,
+      projections: externalProjections,
+      homeDirectory: input.targetOverrides?.home ?? os.homedir()
+    });
+    for (const inspection of inspections) {
+      if (inspection.targetPath !== null) {
+        externalProjectionTargetPaths.set(path.resolve(inspection.targetPath), inspection.id);
+      }
+    }
+  }
   if (target === undefined) errors.push({ code: "unknown_target", message: `Unknown target ${input.target}.` });
   if (target?.platform?.metadata["readOnly"] === true) errors.push({ code: "read_only_target", message: `Target ${input.target} is read-only.` });
   if (target !== undefined && target.safety.classification !== "live-install-root") {
@@ -193,7 +213,9 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
       errors.push(...await validateHermesExternalRoot({
         home: target.home,
         installRoot,
-        planned: []
+        planned: [],
+        externalProjections,
+        ...(input.targetOverrides?.home !== undefined ? { homeDirectory: input.targetOverrides.home } : {})
       }));
     }
   }
@@ -272,6 +294,16 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
       const targetPath = recordTargetPath === null ? installRoot : path.resolve(installRoot, recordTargetPath);
       if (!isInside(targetPath, installRoot)) {
         errors.push({ code: "unsafe_target_path", message: `Target path ${targetPath} escapes ${installRoot}.`, skill, path: targetPath });
+        continue;
+      }
+      const externalProjectionId = externalProjectionTargetPaths.get(path.resolve(targetPath));
+      if (externalProjectionId !== undefined) {
+        errors.push({
+          code: "external_projection_owned",
+          message: `Skill ${skill} receipt record targets declared external projection ${externalProjectionId} at ${targetPath}.`,
+          skill,
+          path: targetPath
+        });
         continue;
       }
       const candidate = await inspectCandidate(skill, targetPath, installRoot, record);

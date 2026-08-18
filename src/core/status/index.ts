@@ -25,6 +25,11 @@ import {
   type SourcePolicy
 } from "../source-policy.js";
 import { validateHermesExternalRoot } from "../hermes-external-root.js";
+import {
+  externalProjectionsForTarget,
+  inspectExternalProjections,
+  type ExternalProjectionInspection
+} from "../external-projections.js";
 import { isCaseInsensitiveFilesystem } from "../filesystem-comparison.js";
 import {
   errorMessage,
@@ -80,6 +85,7 @@ type StatusAssignment = {
   installRoot: string;
   statusCount: number;
   statuses: StatusItem[];
+  externalProjections: ExternalProjectionInspection[];
   errors: StatusFinding[];
 };
 type StatusResult = {
@@ -88,6 +94,7 @@ type StatusResult = {
   manifestPath: string;
   assignments: StatusAssignment[];
   statuses: StatusItem[];
+  externalProjections: ExternalProjectionInspection[];
   summary: StatusSummary;
   errors: StatusFinding[];
 };
@@ -142,6 +149,7 @@ export async function status({
   };
   const assignments: StatusAssignment[] = [];
   const statuses: StatusItem[] = [];
+  const externalProjections: ExternalProjectionInspection[] = [];
   const errors: StatusFinding[] = [];
 
   const assignmentPaths = manifest.assignmentPaths ?? {};
@@ -156,6 +164,7 @@ export async function status({
       manifestPath,
       assignments,
       statuses,
+      externalProjections,
       summary,
       errors
     };
@@ -179,6 +188,7 @@ export async function status({
       installRoot: "",
       statusCount: 0,
       statuses: [],
+      externalProjections: [],
       errors: []
     };
 
@@ -252,6 +262,18 @@ export async function status({
       continue;
     }
 
+    const declaredExternalProjections = externalProjectionsForTarget(
+      manifest.externalProjections,
+      assignmentPathId
+    );
+    const projectionInspections = await inspectExternalProjections({
+      installRoot,
+      projections: declaredExternalProjections,
+      ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
+    });
+    assignmentResult.externalProjections.push(...projectionInspections);
+    externalProjections.push(...projectionInspections);
+
     if (kind === "hermes-external-skills-root") {
       const home = registryEntry.home;
       if (home === null) {
@@ -267,11 +289,27 @@ export async function status({
       const boundaryErrors = await validateHermesExternalRoot({
         home,
         installRoot,
-        planned: assignmentPlan.planned
+        planned: assignmentPlan.planned,
+        externalProjections: declaredExternalProjections,
+        ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
       });
       if (boundaryErrors.length > 0) {
         assignmentResult.errors.push(...boundaryErrors);
         errors.push(...boundaryErrors);
+        assignments.push(assignmentResult);
+        continue;
+      }
+    } else {
+      const projectionErrors = projectionInspections
+        .filter((inspection) => inspection.state !== "external-current")
+        .map((inspection) => ({
+          code: inspection.state,
+          message: inspection.reason,
+          skill: inspection.skill
+        }));
+      assignmentResult.errors.push(...projectionErrors);
+      errors.push(...projectionErrors);
+      if (projectionErrors.length > 0) {
         assignments.push(assignmentResult);
         continue;
       }
@@ -419,6 +457,7 @@ export async function status({
     manifestPath,
     assignments,
     statuses,
+    externalProjections,
     summary,
     errors
   };
