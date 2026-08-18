@@ -1107,6 +1107,41 @@ test("rollback rejects catalog targets whose root differs from the receipt", asy
   assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
 });
 
+test("receipt-only rollback rejects a changed catalog target root without projections", async (t) => {
+  const { sourceRoot, targetSkill, receiptPath } = await createAppliedUpdate(t);
+  const otherRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-receipt-only-other-target-"));
+  t.after(() => rm(otherRoot, { recursive: true, force: true }));
+  await writeCatalog(sourceRoot, otherRoot);
+
+  const receiptBefore = await readFile(receiptPath, "utf8");
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "external_projection_context_required");
+  assert.equal(result.summary.restored, 0);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+  assert.equal(await readFile(receiptPath, "utf8"), receiptBefore);
+});
+
+test("receipt-only rollback rejects a skill removed from the catalog suitcases", async (t) => {
+  const { sourceRoot, targetRoot, targetSkill, receiptPath } = await createAppliedUpdate(t);
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills: []\n\nassignments:\n  openclaw:\n    suitcases:\n      - core\n\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\n`
+  );
+
+  const receiptBefore = await readFile(receiptPath, "utf8");
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0]?.code, "external_projection_context_required");
+  assert.equal(result.summary.restored, 0);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+  assert.equal(await readFile(receiptPath, "utf8"), receiptBefore);
+});
+
 test("rollback rejects unknown catalog targets", async (t) => {
   const { sourceRoot, targetSkill, receiptPath } = await createAppliedSymlink(t);
 

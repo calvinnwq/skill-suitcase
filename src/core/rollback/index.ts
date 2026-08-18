@@ -753,6 +753,10 @@ async function deriveRollbackProtection({
 
   try {
     const { manifest } = await loadCatalog(sourceRoot, { targetOverrides });
+    const targetEntry = resolveTargetRegistryEntryFromManifest(manifest, targetId, targetOverrides);
+    if (targetEntry === null || targetEntry.source !== "manifest") {
+      return { ok: false, message: `Receipt target ${targetId} is not declared by its catalog.` };
+    }
     for (const { skill, record } of records) {
       const sourcePath = receiptRecordSourcePath(record);
       if (sourcePath === null) continue;
@@ -763,10 +767,16 @@ async function deriveRollbackProtection({
           message: `Rollback cannot derive catalog context for ${skill}: receipt skill identity does not match its install key.`
         };
       }
+      if (!catalogAssignmentContainsSkill(manifest, targetEntry.assignment, skill)) {
+        return {
+          ok: false,
+          message: `Rollback cannot derive catalog context for ${skill}: the skill is not currently assigned to target ${targetEntry.assignment}.`
+        };
+      }
       if (!sourcePathMatchesCatalogSkill(sourcePath, sourceRoot, skill, record.variant, manifest)) {
         return {
           ok: false,
-          message: `Rollback cannot derive catalog context for ${skill}: receipt source ${sourcePath} is not the declared catalog source for that skill.`
+          message: `Rollback cannot derive catalog context for ${skill}: receipt source ${sourcePath} is not the exact declared catalog source for its variant.`
         };
       }
     }
@@ -776,14 +786,6 @@ async function deriveRollbackProtection({
         ok: false,
         message: metadataFindings.map((finding) => `${finding.path}: ${finding.message}`).join("; ")
       };
-    }
-    const targetEntry = resolveTargetRegistryEntryFromManifest(manifest, targetId, targetOverrides);
-    if (targetEntry === null || targetEntry.source !== "manifest") {
-      return { ok: false, message: `Receipt target ${targetId} is not declared by its catalog.` };
-    }
-    const projections = externalProjectionsForTarget(manifest.externalProjections, targetEntry.id);
-    if (projections.length === 0) {
-      return { ok: true, available: true, protectedPaths: [] };
     }
     const rootResolution = resolvePlatformInstallRoot({
       kind: targetEntry.kind,
@@ -799,6 +801,7 @@ async function deriveRollbackProtection({
         message: `Receipt target ${targetEntry.id} resolves to ${catalogInstallRoot}, not receipt root ${installRoot}.`
       };
     }
+    const projections = externalProjectionsForTarget(manifest.externalProjections, targetEntry.id);
 
     const protectedPaths = projections
       .map((projection) => resolveExternalProjectionDestination(installRoot, projection.destination))
@@ -826,27 +829,31 @@ function sourcePathMatchesCatalogSkill(
     return false;
   }
 
-  const expectedPaths = new Set<string>([
-    path.resolve(resolvedSourceRoot, DEFAULT_SKILLS_DIRECTORY, skill)
-  ]);
+  const expectedPaths = new Set<string>();
   const variants = manifest.variants[skill] ?? {};
   const variantName = normalizeString(variantValue);
-  if (variantName !== null && variantName !== "canonical") {
-    const variantSource = variants[variantName]?.source;
-    if (typeof variantSource !== "string" || variantSource.trim().length === 0) {
+  const declaredVariant = variantName === null ? undefined : variants[variantName];
+  if (declaredVariant !== undefined) {
+    if (typeof declaredVariant.source !== "string" || declaredVariant.source.trim().length === 0) {
       return false;
     }
-    expectedPaths.add(path.resolve(resolvedSourceRoot, variantSource));
+    expectedPaths.add(path.resolve(resolvedSourceRoot, declaredVariant.source));
+  } else if (variantName === null || variantName === "canonical") {
+    expectedPaths.add(path.resolve(resolvedSourceRoot, DEFAULT_SKILLS_DIRECTORY, skill));
   } else {
-    for (const variant of Object.values(variants)) {
-      if (typeof variant.source === "string" && variant.source.trim().length > 0) {
-        expectedPaths.add(path.resolve(resolvedSourceRoot, variant.source));
-      }
-    }
+    return false;
   }
 
   return [...expectedPaths].some((expectedPath) =>
     isPathInsideOrSame(resolvedSourceRoot, expectedPath) && expectedPath === resolvedSourcePath
+  );
+}
+
+function catalogAssignmentContainsSkill(manifest: Catalog, assignmentName: string, skill: string): boolean {
+  const assignment = manifest.assignments[assignmentName];
+  if (assignment === undefined) return false;
+  return assignment.suitcases.some((suitcaseName) =>
+    manifest.suitcases[suitcaseName]?.skills.includes(skill) ?? false
   );
 }
 
