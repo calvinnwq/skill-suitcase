@@ -3,8 +3,9 @@ import { constants } from "node:fs";
 import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, unlink } from "node:fs/promises";
 import { platform } from "node:os";
 import path from "node:path";
+import { DEFAULT_SKILLS_DIRECTORY } from "../../config/defaults.js";
 import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
-import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
+import { loadCatalog, type Catalog, type TargetOverrides } from "../catalog/index.js";
 import { resolveTargetRegistryEntryFromManifest } from "../catalog/target-registry.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
 import {
@@ -101,6 +102,20 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
     errors: []
   };
 
+  try {
+    await access(receiptPath, constants.R_OK);
+  } catch {
+    result.ok = false;
+    result.errors.push({
+      code: "invalid_receipt",
+      message: `Invalid receipt ${receiptPath}: receipt file does not exist.`,
+      path: receiptPath
+    });
+    return result;
+  }
+
+  try {
+    return await withReceiptLock({ installRoot, createInstallRoot: false }, async (receiptLock) => {
   const protectedExternalPaths = new Set<string>();
   let rollbackContextAvailable = false;
   if ((source === undefined) !== (target === undefined)) {
@@ -111,6 +126,20 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
     });
     return result;
   }
+
+  let receiptPayload: Receipt;
+  try {
+    receiptPayload = await readReceipt(receiptPath);
+  } catch (error) {
+    result.ok = false;
+    result.errors.push({
+      code: "invalid_receipt",
+      message: `Invalid receipt ${receiptPath}: ${errorMessage(error)}`,
+      path: receiptPath
+    });
+    return result;
+  }
+
   if (source !== undefined && target !== undefined) {
     try {
       const { manifest } = await loadCatalog(source, { targetOverrides });
@@ -148,22 +177,9 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
     }
   }
 
-  let receiptForContext: Receipt;
-  try {
-    receiptForContext = await readReceipt(receiptPath);
-  } catch (error) {
-    result.ok = false;
-    result.errors.push({
-      code: "invalid_receipt",
-      message: `Invalid receipt ${receiptPath}: ${errorMessage(error)}`,
-      path: receiptPath
-    });
-    return result;
-  }
-
   if (!rollbackContextAvailable) {
     const derivedContext = await deriveRollbackProtection({
-      receipt: receiptForContext,
+      receipt: receiptPayload,
       installRoot,
       targetOverrides
     });
@@ -182,20 +198,6 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
     rollbackContextAvailable = derivedContext.available;
   }
 
-  try {
-    return await withReceiptLock({ installRoot, createInstallRoot: false }, async (receiptLock) => {
-  let receiptPayload: Receipt;
-  try {
-    receiptPayload = await readReceipt(receiptPath);
-  } catch (error) {
-    result.ok = false;
-    result.errors.push({
-      code: "invalid_receipt",
-      message: `Invalid receipt ${receiptPath}: ${errorMessage(error)}`,
-      path: receiptPath
-    });
-    return result;
-  }
   const installs = receiptPayload.installs;
   if (!isRecord(installs)) {
     result.ok = false;
@@ -751,6 +753,23 @@ async function deriveRollbackProtection({
 
   try {
     const { manifest } = await loadCatalog(sourceRoot, { targetOverrides });
+    for (const { skill, record } of records) {
+      const sourcePath = receiptRecordSourcePath(record);
+      if (sourcePath === null) continue;
+      const recordedSkill = normalizeString(record.skill);
+      if (recordedSkill !== null && recordedSkill !== skill) {
+        return {
+          ok: false,
+          message: `Rollback cannot derive catalog context for ${skill}: receipt skill identity does not match its install key.`
+        };
+      }
+      if (!sourcePathMatchesCatalogSkill(sourcePath, sourceRoot, skill, record.variant, manifest)) {
+        return {
+          ok: false,
+          message: `Rollback cannot derive catalog context for ${skill}: receipt source ${sourcePath} is not the declared catalog source for that skill.`
+        };
+      }
+    }
     const metadataFindings = validateExternalProjectionMetadata(manifest);
     if (metadataFindings.length > 0) {
       return {
@@ -794,9 +813,48 @@ async function deriveRollbackProtection({
   }
 }
 
+function sourcePathMatchesCatalogSkill(
+  sourcePath: string,
+  sourceRoot: string,
+  skill: string,
+  variantValue: unknown,
+  manifest: Catalog
+): boolean {
+  const resolvedSourceRoot = path.resolve(sourceRoot);
+  const resolvedSourcePath = path.resolve(sourcePath);
+  if (!isPathInsideOrSame(resolvedSourceRoot, resolvedSourcePath)) {
+    return false;
+  }
+
+  const expectedPaths = new Set<string>([
+    path.resolve(resolvedSourceRoot, DEFAULT_SKILLS_DIRECTORY, skill)
+  ]);
+  const variants = manifest.variants[skill] ?? {};
+  const variantName = normalizeString(variantValue);
+  if (variantName !== null && variantName !== "canonical") {
+    const variantSource = variants[variantName]?.source;
+    if (typeof variantSource !== "string" || variantSource.trim().length === 0) {
+      return false;
+    }
+    expectedPaths.add(path.resolve(resolvedSourceRoot, variantSource));
+  } else {
+    for (const variant of Object.values(variants)) {
+      if (typeof variant.source === "string" && variant.source.trim().length > 0) {
+        expectedPaths.add(path.resolve(resolvedSourceRoot, variant.source));
+      }
+    }
+  }
+
+  return [...expectedPaths].some((expectedPath) =>
+    isPathInsideOrSame(resolvedSourceRoot, expectedPath) && expectedPath === resolvedSourcePath
+  );
+}
+
 function rollbackNeedsCatalogContext(record: ReceiptInstallRecord): boolean {
   if (!isRecord(record.rollback)) return false;
-  if (record.rollback.schema === "calvinnwq.skills.rollback.v0") return true;
+  if (record.rollback.schema === "calvinnwq.skills.rollback.v0") {
+    return record.rollback.status === "available";
+  }
   return record.rollback.schema === "calvinnwq.skills.symlink-rollback.v0"
     && record.rollback.status === "available"
     && record.rollback.created === true;
@@ -804,9 +862,9 @@ function rollbackNeedsCatalogContext(record: ReceiptInstallRecord): boolean {
 
 function receiptRecordSourcePath(record: ReceiptInstallRecord): string | null {
   const direct = normalizeString(record.sourcePath);
-  if (direct !== null) return direct;
-  if (isRecord(record.source)) return normalizeString(record.source.path);
-  return null;
+  const nested = isRecord(record.source) ? normalizeString(record.source.path) : null;
+  if (direct !== null && nested !== null && path.resolve(direct) !== path.resolve(nested)) return null;
+  return direct ?? nested;
 }
 
 async function findCatalogRoot(sourcePath: string): Promise<string | null> {

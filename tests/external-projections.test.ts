@@ -313,6 +313,24 @@ externalProjections:
   );
 });
 
+test("manifest parser rejects a prototype-polluting external projection ID", () => {
+  assert.throws(
+    () => parseSuitcaseManifest(`suitcases: {}
+assignments: {}
+assignmentPaths: {}
+externalProjections:
+  __proto__:
+    target: hermes
+    skill: prototype-pollution
+    destination: references/prototype-pollution
+    source: /opt/references/prototype-pollution
+    mode: symlink
+    owner: fixture
+`),
+    /external projection ID __proto__/i
+  );
+});
+
 test("catalog import counts valid external projection declarations without reading live sources", async (t) => {
   const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-external-projection-catalog-"));
   t.after(() => rm(source, { recursive: true, force: true }));

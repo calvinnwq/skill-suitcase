@@ -178,6 +178,9 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       } else if (section === "compatibility") {
         manifest.compatibility[currentName] = {};
       } else if (section === "externalProjections") {
+        if (currentName === "__proto__") {
+          throw new Error("Invalid external projection ID __proto__.");
+        }
         if (Object.prototype.hasOwnProperty.call(manifest.externalProjections, currentName)) {
           throw new Error(`Duplicate external projection ID ${currentName}.`);
         }

@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { buildPlanLock } from "../src/plan-lock.js";
 import { apply } from "../src/apply.js";
 import { rollback } from "../src/rollback.js";
-import { buildInstalledFiles, RECEIPT_FILE, upsertAndWriteReceipt } from "../src/receipt.js";
+import { buildInstalledFiles, RECEIPT_FILE, upsertAndWriteReceipt, withReceiptLock } from "../src/receipt.js";
 import { status } from "../src/status.js";
 import { track } from "../src/track.js";
 
@@ -471,6 +471,76 @@ test("rollback preserves an external projection nested in a copy install", async
   assert.equal((await stat(targetSkill)).isDirectory(), true);
 });
 
+test("receipt-only rollback refuses source provenance that does not resolve the recorded skill", async (t) => {
+  const { sourceRoot, targetRoot, targetSkill, receiptPath } = await createAppliedUpdate(t);
+  const externalSource = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-provenance-external-"));
+  const alternateRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-provenance-catalog-"));
+  t.after(() => rm(externalSource, { recursive: true, force: true }));
+  t.after(() => rm(alternateRoot, { recursive: true, force: true }));
+
+  const projectionPath = path.join(targetSkill, "references", "external-reference");
+  await writeFile(path.join(externalSource, "SKILL.md"), "---\nname: external-reference\n---\n");
+  await mkdir(path.dirname(projectionPath), { recursive: true });
+  await symlink(externalSource, projectionPath, "dir");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\nassignments:\n  openclaw:\n    suitcases:\n      - core\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\nexternalProjections:\n  external-reference:\n    target: openclaw\n    skill: external-reference\n    destination: office-hours/references/external-reference\n    source: ${externalSource}\n    mode: symlink\n    owner: fixture-provider\n`
+  );
+
+  await writeCatalog(alternateRoot, targetRoot);
+  const alternateSkill = path.join(alternateRoot, "skills", "not-office-hours");
+  await mkdir(alternateSkill, { recursive: true });
+  await writeFile(path.join(alternateSkill, "SKILL.md"), "---\nname: not-office-hours\n---\n");
+
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": Record<string, unknown> & { source?: unknown; sourcePath?: string; priorState?: unknown } };
+  };
+  const record = receipt.installs["office-hours"];
+  record.sourcePath = alternateSkill;
+  record.source = { path: alternateSkill };
+  record.priorState = { status: "missing" };
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "external_projection_context_required"), true);
+  assert.equal((await lstat(projectionPath)).isSymbolicLink(), true);
+  assert.equal((await stat(targetSkill)).isDirectory(), true);
+});
+
+test("receipt-only rollback derives projection protection after acquiring the receipt lock", async (t) => {
+  const { sourceRoot, targetRoot, targetSkill, receiptPath } = await createAppliedUpdate(t);
+  const externalSource = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-lock-external-"));
+  t.after(() => rm(externalSource, { recursive: true, force: true }));
+
+  const projectionPath = path.join(targetSkill, "references", "external-reference");
+  await writeFile(path.join(externalSource, "SKILL.md"), "---\nname: external-reference\n---\n");
+  await mkdir(path.dirname(projectionPath), { recursive: true });
+  await symlink(externalSource, projectionPath, "dir");
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": Record<string, unknown> & { priorState?: unknown } };
+  };
+  receipt.installs["office-hours"].priorState = { status: "missing" };
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  let rollbackPromise: Promise<Awaited<ReturnType<typeof rollback>>> | undefined;
+  await withReceiptLock({ installRoot: targetRoot, createInstallRoot: false }, async () => {
+    rollbackPromise = rollback({ receipt: receiptPath });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await writeFile(
+      path.join(sourceRoot, "skill-suitcase.yaml"),
+      `suitcases:\n  core:\n    skills:\n      - office-hours\nassignments:\n  openclaw:\n    suitcases:\n      - core\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\nexternalProjections:\n  external-reference:\n    target: openclaw\n    skill: external-reference\n    destination: office-hours/references/external-reference\n    source: ${externalSource}\n    mode: symlink\n    owner: fixture-provider\n`
+    );
+  });
+
+  const result = await rollbackPromise!;
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "external_projection_owned"), true);
+  assert.equal((await lstat(projectionPath)).isSymbolicLink(), true);
+  assert.equal((await stat(targetSkill)).isDirectory(), true);
+});
+
 test("rollback retains a reconcile backup that overlaps a declared projection", async (t) => {
   const { sourceRoot, targetRoot, targetSkill, receiptPath } = await createAppliedUpdate(t);
   const backupPath = path.join(targetRoot, ".office-hours.suitcase-pre-reconcile-overlap");
@@ -504,6 +574,19 @@ test("rollback is a deterministic no-op after a successful rollback", async (t) 
   const second = await rollback({ receipt: receiptPath });
 
   assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(second.summary.noop, 1);
+  assert.deepEqual(second.errors, []);
+});
+
+test("receipt-only rollback keeps rolled-back records idempotent when the source catalog is unavailable", async (t) => {
+  const { sourceRoot, receiptPath } = await createAppliedUpdate(t);
+  const first = await rollback({ receipt: receiptPath });
+  assert.equal(first.ok, true);
+
+  await rm(sourceRoot, { recursive: true, force: true });
+  const second = await rollback({ receipt: receiptPath });
+
   assert.equal(second.ok, true);
   assert.equal(second.summary.noop, 1);
   assert.deepEqual(second.errors, []);
