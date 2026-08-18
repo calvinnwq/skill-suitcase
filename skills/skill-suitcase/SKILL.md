@@ -60,6 +60,9 @@ The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either th
   to adopt OpenCode, Pi, or other provider-backed adapter roots, even when the
   catalog declares a custom manifest `assignmentPaths` entry for review.
 - The current `rollback` command reverses apply, reconcile, and repair state, but it does not restore promotions.
+- Pass `--source "$SRC" --target <target-id>` together whenever rollback may
+  encounter declared external projections; rollback also requires this catalog
+  context before removing an apply-created symlink.
 
 ## Phases
 

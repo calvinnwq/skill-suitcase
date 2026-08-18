@@ -136,9 +136,13 @@ identity, or another external destination on the same target.
 catalog status enum.
 Only `external-current` projections are accepted; missing, broken, drifted,
 invalid, identity-mismatched, conflicting, and undeclared directory symlinks
-fail closed before target mutation.
+fail closed before target-aware catalog mutation.
 Skill Suitcase verifies and preserves current projections but never creates,
 adopts, receipts, prunes, or repairs them.
+Rollback loads projection ownership only from paired catalog source and target
+context, verifies that the selected target resolves to the receipt root, and
+refuses receipt operations that overlap a declared projection.
+That context is required before rollback removes an apply-created symlink.
 
 Category values must start with an ASCII letter or digit and may then contain
 only ASCII letters, digits, `.`, `_`, or `-`.

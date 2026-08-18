@@ -156,9 +156,11 @@ test("cli apply surfaces artifact input validation failures", async (t) => {
   assert.equal(malformedErrors[0]?.code, "invalid_artifact_manifest");
 });
 
-test("cli rollback accepts receipt paths and writes JSON to stdout", async (t) => {
+test("cli rollback accepts receipt-only and catalog-context invocations", async (t) => {
   const installRoot = await mkdtemp(join(os.tmpdir(), "skill-suitcase-cli-rollback-"));
+  const sourceRoot = await mkdtemp(join(os.tmpdir(), "skill-suitcase-cli-rollback-source-"));
   t.after(() => rm(installRoot, { recursive: true, force: true }));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
   const receiptPath = join(installRoot, ".skill-suitcase-receipt.json");
   await writeFile(
     receiptPath,
@@ -167,19 +169,40 @@ test("cli rollback accepts receipt paths and writes JSON to stdout", async (t) =
       installs: {}
     }, null, 2)}\n`
   );
+  await writeFile(
+    join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills: []\nassignments:\n  openclaw:\n    suitcases:\n      - core\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${installRoot}\n`
+  );
 
-  const result = runCli([
+  const receiptOnly = runCli([
     "rollback",
     "--receipt",
     receiptPath,
     "--json"
   ]);
 
-  assert.equal(result.status, 0);
-  assert.equal(result.stderr, "");
-  const parsed = parseJsonOutput(result.stdout) as { ok: boolean; receipt: string };
-  assert.equal(parsed.ok, true);
-  assert.equal(parsed.receipt, receiptPath);
+  assert.equal(receiptOnly.status, 0);
+  assert.equal(receiptOnly.stderr, "");
+  const receiptOnlyJson = parseJsonOutput(receiptOnly.stdout) as { ok: boolean; receipt: string };
+  assert.equal(receiptOnlyJson.ok, true);
+  assert.equal(receiptOnlyJson.receipt, receiptPath);
+
+  const withCatalogContext = runCli([
+    "rollback",
+    "--receipt",
+    receiptPath,
+    "--source",
+    sourceRoot,
+    "--target",
+    "openclaw",
+    "--json"
+  ]);
+
+  assert.equal(withCatalogContext.status, 0);
+  assert.equal(withCatalogContext.stderr, "");
+  const contextJson = parseJsonOutput(withCatalogContext.stdout) as { ok: boolean; receipt: string };
+  assert.equal(contextJson.ok, true);
+  assert.equal(contextJson.receipt, receiptPath);
 });
 
 test("cli keeps JSON on stdout and usage errors on stderr", () => {

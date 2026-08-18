@@ -335,8 +335,11 @@ destination, absolute or `~/` source path, `symlink` mode, and owner.
 `external-missing`, `external-broken`, `external-drifted`, or
 `external-invalid`.
 Current projections are preserved and excluded from catalog ownership.
-Any malformed, missing, broken, drifted, identity-conflicting, or undeclared
-symlink remains fail-closed before target mutation.
+Target-aware catalog workflows fail closed on malformed, missing, broken,
+drifted, identity-conflicting, or undeclared symlinks before mutation.
+Pass both catalog source and target to `rollback` so it can protect declared
+projection paths; this context is mandatory when removing an apply-created
+symlink.
 The external owner remains responsible for creating and updating the link.
 
 ### Manifest `sourcePolicy`

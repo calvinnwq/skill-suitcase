@@ -401,6 +401,12 @@ set `readOnly: true`, and perform no mutation.
 skill-suitcase rollback \
   --receipt "/path/to/target/.skill-suitcase-receipt.json" \
   --json
+
+skill-suitcase rollback \
+  --receipt "/path/to/target/.skill-suitcase-receipt.json" \
+  --source "$SRC" \
+  --target hermes \
+  --json
 ```
 
 Reverses recorded apply, reconcile, or repair state. Rollback first verifies
@@ -412,6 +418,12 @@ destination while refusing category-parent symlinks or containment escapes.
 The receipt may be addressed through a valid symlinked install-root or parent
 alias. Rollback resolves that alias for containment checks, still refuses a
 symlinked target leaf, and does not create parents for a missing receipt path.
+`--source` and `--target` must be provided together.
+Use them whenever the catalog declares external projections so rollback can
+verify that the selected manifest target resolves to the receipt root and
+refuse any receipt operation overlapping a declared projection.
+They are required before rollback removes an apply-created symlink, even when
+the catalog declares no external projections.
 
 ### `promote`
 
@@ -552,8 +564,12 @@ codes include:
   Hermes resolve a different skill
 - `hermes_shadow_directory_symlink` / `external_category_symlink` /
   `external_destination_escape`: safe categorized containment cannot be proven
-- `external_projection_owned`: a receipt record targets a declared externally
-  owned projection and prune will not mutate it
+- `external_projection_owned`: a receipt operation targets a declared
+  externally owned projection and prune or rollback will not mutate it
+- `external_projection_context_required`: rollback needs paired catalog source
+  and target context before removing an apply-created symlink
+- `invalid_external_projection_context`: rollback received incomplete or
+  mismatched catalog target context
 - `artifact_destination_mismatch`: an artifact's approved categorized
   destination differs from the current plan
 - state-specific repair/reconcile/prune/import refusals when the selected skill does

@@ -15,6 +15,7 @@ export function usageText(): string {
     "  skill-suitcase apply --source <skills-repo> --target <target> --artifact <path> --json",
     "  skill-suitcase apply --source <skills-repo> --target <target> --lock <path> --mode symlink --json",
     "  skill-suitcase rollback --receipt <path> --json",
+    "  skill-suitcase rollback --receipt <path> --source <skills-repo> --target <target> --json",
     "  skill-suitcase track --source <skills-repo> --target <target> [--skill <name> ...] --json",
     "  skill-suitcase reconcile --source <skills-repo> --target <target> --skill <name> [--skill <name> ...] --dry-run --json",
     "  skill-suitcase reconcile --source <skills-repo> --target <target> --skill <name> [--skill <name> ...] --apply --json",

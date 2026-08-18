@@ -205,6 +205,10 @@ as traversal exclusions while every undeclared directory symlink remains a
 hard refusal.
 Mutation code never creates, adopts, receipts, prunes, or repairs an external
 projection.
+Rollback accepts catalog context only as a paired source and target.
+Callers must provide that context when a catalog declares external projections
+so rollback can refuse any receipt operation that overlaps a declared
+projection; removing an apply-created symlink always requires the same context.
 
 Manifest-owned logical groups are reporting metadata. They may name product
 families, upstream suites, provider boundaries, or other operator-facing buckets
@@ -422,6 +426,9 @@ Symlink mode must treat these states as distinct:
 Rollback for symlink installs should remove a Skill Suitcase-created symlink or
 restore the previous target state recorded in the receipt. It must not delete a
 real directory that was not first captured as rollback state.
+Removing an apply-created symlink requires paired catalog source and target
+context so rollback can verify the receipt root and protect declared external
+projection destinations.
 
 ## Command Semantics
 
@@ -483,7 +490,9 @@ Keep the command verbs separate:
   operate without explicit `--skill` filters, or run implicitly from a drift
   report.
 - `rollback` reverses prior `apply`, `reconcile`, or `repair` mutations using
-  receipt rollback state.
+  receipt rollback state. It accepts `--source` and `--target` only together,
+  requires them before removing an apply-created symlink, and uses them to
+  protect declared external projections from overlapping receipt operations.
   A valid symlink alias in the receipt path may name the install root or an
   earlier path component, but a symlinked target leaf remains unsafe.
   Missing receipt parents must not be created while acquiring the receipt lock.

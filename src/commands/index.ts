@@ -238,11 +238,11 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
       return command === "plan" || command === "diff" || command === "pack" || command === "import"
         || command === "validate" || command === "targets" || command === "status" || command === "apply"
         || command === "track" || command === "reconcile" || command === "repair" || command === "promote"
-        || command === "import-target" || command === "upstream" || command === "prune";
+        || command === "import-target" || command === "upstream" || command === "prune" || command === "rollback";
     case "--target":
       return command === "plan" || command === "diff" || command === "pack" || command === "apply"
         || command === "track" || command === "reconcile" || command === "repair" || command === "status"
-        || command === "import-target" || command === "prune";
+        || command === "import-target" || command === "prune" || command === "rollback";
     case "--target-skill":
       return command === "promote";
     case "--output":

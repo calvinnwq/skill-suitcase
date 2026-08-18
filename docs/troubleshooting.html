@@ -84,6 +84,7 @@
                 <tr><td>hermes_shadow_directory_symlink / external_category_symlink / external_destination_escape</td><td>categorized containment cannot be proven because traversal reached an undeclared symlink or escaped the owned root</td></tr>
                 <tr><td>external-missing / external-broken / external-drifted / external-invalid</td><td>a declared externally owned projection is absent, broken, points somewhere unexpected, crosses a symlinked parent, or has unsafe metadata; repair it through its external owner before catalog mutation</td></tr>
                 <tr><td>external_projection_identity_mismatch / external_projection_identity_conflict / external_projection_destination_conflict</td><td>the declared projection's SKILL.md identity or destination conflicts with catalog or another external projection</td></tr>
+                <tr><td>external_projection_context_required / invalid_external_projection_context / external_projection_owned</td><td>rollback needs paired catalog source and target context, the context does not resolve to the receipt root, or a receipt operation overlaps a declared external projection</td></tr>
                 <tr><td>artifact_destination_mismatch</td><td>the artifact's categorized destination differs from the current assignment; review and repack</td></tr>
               </tbody>
             </table>
