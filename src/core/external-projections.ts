@@ -194,6 +194,7 @@ export async function findUndeclaredDirectorySymlinks({
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       const entryPath = path.join(current, entry.name);
+      if (declared.has(path.resolve(entryPath)) && entry.isSymbolicLink()) continue;
       let info;
       try {
         info = await lstat(entryPath);

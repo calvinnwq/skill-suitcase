@@ -334,7 +334,7 @@ export async function status({
       );
       assignmentResult.errors.push(...projectionErrors);
       errors.push(...projectionErrors);
-      if (projectionErrors.length > 0) {
+      if (projectionErrors.some((error) => error.code !== "external_projection_inspection_failed")) {
         assignments.push(assignmentResult);
         continue;
       }

@@ -546,7 +546,7 @@ test("track refuses symlinked target trees", async (t) => {
   const result = await track({ source: sourceRoot, target: "openclaw" });
 
   assert.equal(result.ok, false);
-  assert.equal(result.errors.some((error) => error.code === "target_symlink"), true);
+  assert.equal(result.errors.some((error) => error.code === "diff_external_projection_undeclared_symlink"), true);
   await assert.rejects(readFile(path.join(targetRoot, RECEIPT_FILE), "utf8"), /ENOENT/);
 });
 
