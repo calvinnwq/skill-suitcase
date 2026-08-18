@@ -461,9 +461,7 @@ test("rollback preserves an external projection nested in a copy install", async
   );
 
   const result = await rollback({
-    receipt: path.join(targetRoot, RECEIPT_FILE),
-    source: sourceRoot,
-    target: "openclaw"
+    receipt: path.join(targetRoot, RECEIPT_FILE)
   });
 
   assert.equal(result.ok, false);
@@ -471,6 +469,33 @@ test("rollback preserves an external projection nested in a copy install", async
   assert.equal(result.errors[0]?.code, "external_projection_owned");
   assert.equal((await lstat(projectionPath)).isSymbolicLink(), true);
   assert.equal((await stat(targetSkill)).isDirectory(), true);
+});
+
+test("rollback retains a reconcile backup that overlaps a declared projection", async (t) => {
+  const { sourceRoot, targetRoot, targetSkill, receiptPath } = await createAppliedUpdate(t);
+  const backupPath = path.join(targetRoot, ".office-hours.suitcase-pre-reconcile-overlap");
+  await mkdir(backupPath, { recursive: true });
+  await writeFile(path.join(backupPath, "sentinel.txt"), "backup\n");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\nassignments:\n  openclaw:\n    suitcases:\n      - core\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\nexternalProjections:\n  reconcile-backup:\n    target: openclaw\n    skill: external-reference\n    destination: .office-hours.suitcase-pre-reconcile-overlap\n    source: /opt/references/external-reference\n    mode: symlink\n    owner: fixture-provider\n`
+  );
+
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: { "office-hours": Record<string, unknown> & { rollback: Record<string, unknown> } };
+  };
+  const record = receipt.installs["office-hours"];
+  record.mode = "reconcile";
+  record.priorState = { status: "unknown" };
+  record.rollback.backupPath = backupPath;
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "external_projection_owned"), true);
+  assert.equal(await readFile(path.join(backupPath, "sentinel.txt"), "utf8"), "backup\n");
+  assert.equal(await stat(targetSkill).then(() => true, () => false), true);
 });
 
 test("rollback is a deterministic no-op after a successful rollback", async (t) => {

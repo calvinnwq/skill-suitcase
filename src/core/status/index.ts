@@ -29,6 +29,7 @@ import {
   externalProjectionsForTarget,
   findUndeclaredDirectorySymlinks,
   inspectExternalProjections,
+  validateExternalProjectionMetadata,
   type ExternalProjectionInspection
 } from "../external-projections.js";
 import { isCaseInsensitiveFilesystem } from "../filesystem-comparison.js";
@@ -168,6 +169,23 @@ export async function status({
       externalProjections,
       summary,
       errors
+    };
+  }
+  const metadataErrors = validateExternalProjectionMetadata(manifest).map((finding) => ({
+    code: finding.code,
+    message: finding.message,
+    path: finding.path
+  }));
+  if (metadataErrors.length > 0) {
+    return {
+      ok: false,
+      source: sourceRoot,
+      manifestPath,
+      assignments,
+      statuses,
+      externalProjections,
+      summary,
+      errors: metadataErrors
     };
   }
   const registryEntries = resolveTargetRegistryEntries(manifest, targetOverrides);

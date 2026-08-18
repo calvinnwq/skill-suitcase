@@ -431,8 +431,6 @@ async function findSkillShadows(
     if (identity !== null && skills.has(identity) && identity !== plannedDestination?.identity) found.add(identity);
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
-      if (HERMES_EXCLUDED_SKILL_DIRECTORIES.has(entry.name)) continue;
-      if (identity !== null && HERMES_SKILL_SUPPORT_DIRECTORIES.has(entry.name)) continue;
       const child = path.join(current, entry.name);
       if (entry.isSymbolicLink()) {
         const plannedChild = plannedDestinations.get(plannedDestinationKey(child));
@@ -450,6 +448,8 @@ async function findSkillShadows(
         }
         continue;
       }
+      if (HERMES_EXCLUDED_SKILL_DIRECTORIES.has(entry.name)) continue;
+      if (identity !== null && HERMES_SKILL_SUPPORT_DIRECTORIES.has(entry.name)) continue;
       if (entry.isDirectory()) {
         pending.push(child);
       }

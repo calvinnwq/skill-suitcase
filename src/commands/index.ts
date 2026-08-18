@@ -263,7 +263,7 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
     case "--grok-skills":
       return command === "diff" || command === "pack" || command === "targets" || command === "status"
         || command === "apply" || command === "track" || command === "reconcile" || command === "repair"
-        || command === "import-target" || command === "prune";
+        || command === "import-target" || command === "prune" || command === "rollback";
     case "--dry-run":
       return command === "pack" || command === "promote" || command === "reconcile" || command === "repair" || command === "prune"
         || command === "import-target" || command === "upstream";

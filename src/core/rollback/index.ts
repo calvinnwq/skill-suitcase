@@ -4,12 +4,13 @@ import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, un
 import { platform } from "node:os";
 import path from "node:path";
 import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
-import { loadCatalog } from "../catalog/index.js";
+import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import { resolveTargetRegistryEntryFromManifest } from "../catalog/target-registry.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
 import {
   externalProjectionsForTarget,
-  resolveExternalProjectionDestination
+  resolveExternalProjectionDestination,
+  validateExternalProjectionMetadata
 } from "../external-projections.js";
 import {
   buildInstalledFiles,
@@ -36,6 +37,7 @@ type RollbackInput = {
   receipt: string;
   source?: string;
   target?: string;
+  targetOverrides?: TargetOverrides | undefined;
   __test?: {
     beforeFileMutation?: (targetPath: string) => Promise<void> | void;
     beforeReconcileBackupRemoval?: (backupPath: string) => Promise<void> | void;
@@ -76,7 +78,7 @@ export type RollbackResult = {
   errors: RollbackError[];
 };
 
-export async function rollback({ receipt, source, target, __test }: RollbackInput): Promise<RollbackResult> {
+export async function rollback({ receipt, source, target, targetOverrides, __test }: RollbackInput): Promise<RollbackResult> {
   if (!receipt) {
     throw new Error("receipt is required");
   }
@@ -100,6 +102,7 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
   };
 
   const protectedExternalPaths = new Set<string>();
+  let rollbackContextAvailable = false;
   if ((source === undefined) !== (target === undefined)) {
     result.ok = false;
     result.errors.push({
@@ -110,8 +113,12 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
   }
   if (source !== undefined && target !== undefined) {
     try {
-      const { manifest } = await loadCatalog(source);
-      const targetEntry = resolveTargetRegistryEntryFromManifest(manifest, target);
+      const { manifest } = await loadCatalog(source, { targetOverrides });
+      const metadataFindings = validateExternalProjectionMetadata(manifest);
+      if (metadataFindings.length > 0) {
+        throw new Error(metadataFindings.map((finding) => `${finding.path}: ${finding.message}`).join("; "));
+      }
+      const targetEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides);
       if (targetEntry === null || targetEntry.source !== "manifest") {
         throw new Error(`Target ${target} is not declared by the rollback catalog.`);
       }
@@ -130,6 +137,7 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
         const targetPath = resolveExternalProjectionDestination(installRoot, projection.destination);
         if (targetPath !== null) protectedExternalPaths.add(path.resolve(targetPath));
       }
+      rollbackContextAvailable = true;
     } catch (error) {
       result.ok = false;
       result.errors.push({
@@ -140,8 +148,9 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
     }
   }
 
+  let receiptForContext: Receipt;
   try {
-    await readReceipt(receiptPath);
+    receiptForContext = await readReceipt(receiptPath);
   } catch (error) {
     result.ok = false;
     result.errors.push({
@@ -150,6 +159,27 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
       path: receiptPath
     });
     return result;
+  }
+
+  if (!rollbackContextAvailable) {
+    const derivedContext = await deriveRollbackProtection({
+      receipt: receiptForContext,
+      installRoot,
+      targetOverrides
+    });
+    if (!derivedContext.ok) {
+      result.ok = false;
+      result.errors.push({
+        code: "external_projection_context_required",
+        message: derivedContext.message,
+        path: receiptPath
+      });
+      return result;
+    }
+    for (const protectedPath of derivedContext.protectedPaths) {
+      protectedExternalPaths.add(protectedPath);
+    }
+    rollbackContextAvailable = derivedContext.available;
   }
 
   try {
@@ -215,12 +245,12 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
       // a safe no-op that leaves the link and its source untouched.
       const appliedSymlink = parseAppliedSymlinkRollback(record, installRoot, receiptDirectory);
       if (appliedSymlink.kind === "apply-created") {
-        if (source === undefined || target === undefined) {
+        if (!rollbackContextAvailable) {
           result.ok = false;
           result.summary.refused += 1;
           result.errors.push({
             code: "external_projection_context_required",
-            message: "Rollback refuses to remove an apply-created symlink without --source and --target catalog context.",
+            message: "Rollback refuses to remove an apply-created symlink without validated catalog context.",
             skill,
             path: appliedSymlink.targetPath
           });
@@ -380,6 +410,29 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
         message: `Rollback refuses to mutate ${targetPath} because it overlaps declared external projection ${protectedPath}.`,
         skill,
         path: protectedPath
+      });
+      result.rollbacks.push({
+        skill,
+        targetPath,
+        status: "refused",
+        restored: 0,
+        removed: 0,
+        failed: 0
+      });
+      continue;
+    }
+
+    const protectedBackupPath = rollbackState.backupPath === null
+      ? null
+      : overlappingExternalProjection(rollbackState.backupPath, protectedExternalPaths);
+    if (protectedBackupPath !== null) {
+      result.ok = false;
+      result.summary.refused += 1;
+      result.errors.push({
+        code: "external_projection_owned",
+        message: `Rollback refuses to remove reconcile backup ${rollbackState.backupPath} because it overlaps declared external projection ${protectedBackupPath}.`,
+        skill,
+        path: protectedBackupPath
       });
       result.rollbacks.push({
         skill,
@@ -614,6 +667,165 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
       path: receiptPath
     });
     return result;
+  }
+}
+
+type DerivedRollbackProtection =
+  | { ok: true; available: boolean; protectedPaths: string[] }
+  | { ok: false; message: string };
+
+async function deriveRollbackProtection({
+  receipt,
+  installRoot,
+  targetOverrides
+}: {
+  receipt: Receipt;
+  installRoot: string;
+  targetOverrides?: TargetOverrides | undefined;
+}): Promise<DerivedRollbackProtection> {
+  if (!isRecord(receipt.installs)) {
+    return { ok: true, available: false, protectedPaths: [] };
+  }
+
+  const records = collectRecords(receipt.installs).records
+    .filter(({ record }) => rollbackNeedsCatalogContext(record));
+  if (records.length === 0) {
+    return { ok: true, available: false, protectedPaths: [] };
+  }
+
+  const sourceRoots = new Set<string>();
+  const targetIds = new Set<string>();
+  const strictContextRequired = records.some(({ record }) => record.mode !== SYMLINK_MODE);
+  for (const { skill, record } of records) {
+    const sourcePath = receiptRecordSourcePath(record);
+    if (sourcePath === null) {
+      if (!strictContextRequired && record.mode === SYMLINK_MODE) continue;
+      return {
+        ok: false,
+        message: `Rollback cannot derive catalog context for ${skill}: receipt has no source path.`
+      };
+    }
+    const sourceRoot = await findCatalogRoot(sourcePath);
+    if (sourceRoot === null) {
+      if (!strictContextRequired && record.mode === SYMLINK_MODE) continue;
+      return {
+        ok: false,
+        message: `Rollback cannot derive catalog context for ${skill}: no skill-suitcase.yaml was found above ${sourcePath}.`
+      };
+    }
+    sourceRoots.add(sourceRoot);
+
+    const targetId = normalizeString(record.target) ?? normalizeString(record.agent);
+    if (targetId === null) {
+      if (!strictContextRequired && record.mode === SYMLINK_MODE) continue;
+      return {
+        ok: false,
+        message: `Rollback cannot derive catalog context for ${skill}: receipt has no target identity.`
+      };
+    }
+    targetIds.add(targetId);
+  }
+
+  if (sourceRoots.size === 0) {
+    return { ok: true, available: false, protectedPaths: [] };
+  }
+
+  if (sourceRoots.size !== 1) {
+    return {
+      ok: false,
+      message: "Rollback cannot derive one catalog context because receipt records reference multiple catalog roots."
+    };
+  }
+  if (targetIds.size !== 1) {
+    return {
+      ok: false,
+      message: "Rollback cannot derive one catalog context because receipt records reference multiple target identities."
+    };
+  }
+
+  const sourceRoot = [...sourceRoots][0];
+  const targetId = [...targetIds][0];
+  if (sourceRoot === undefined || targetId === undefined) {
+    return { ok: false, message: "Rollback could not derive catalog context from the receipt." };
+  }
+
+  try {
+    const { manifest } = await loadCatalog(sourceRoot, { targetOverrides });
+    const metadataFindings = validateExternalProjectionMetadata(manifest);
+    if (metadataFindings.length > 0) {
+      return {
+        ok: false,
+        message: metadataFindings.map((finding) => `${finding.path}: ${finding.message}`).join("; ")
+      };
+    }
+    const targetEntry = resolveTargetRegistryEntryFromManifest(manifest, targetId, targetOverrides);
+    if (targetEntry === null || targetEntry.source !== "manifest") {
+      return { ok: false, message: `Receipt target ${targetId} is not declared by its catalog.` };
+    }
+    const projections = externalProjectionsForTarget(manifest.externalProjections, targetEntry.id);
+    if (projections.length === 0) {
+      return { ok: true, available: true, protectedPaths: [] };
+    }
+    const rootResolution = resolvePlatformInstallRoot({
+      kind: targetEntry.kind,
+      assignmentPath: targetEntry.assignmentPath
+    });
+    if (!rootResolution.ok || rootResolution.installRoot === null) {
+      return { ok: false, message: `Receipt target ${targetEntry.id} does not resolve to a valid install root.` };
+    }
+    const catalogInstallRoot = await realpath(rootResolution.installRoot);
+    if (path.resolve(catalogInstallRoot) !== path.resolve(installRoot)) {
+      return {
+        ok: false,
+        message: `Receipt target ${targetEntry.id} resolves to ${catalogInstallRoot}, not receipt root ${installRoot}.`
+      };
+    }
+
+    const protectedPaths = projections
+      .map((projection) => resolveExternalProjectionDestination(installRoot, projection.destination))
+      .filter((targetPath): targetPath is string => targetPath !== null)
+      .map((targetPath) => path.resolve(targetPath));
+    return { ok: true, available: true, protectedPaths };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `Could not derive rollback catalog context: ${errorMessage(error)}`
+    };
+  }
+}
+
+function rollbackNeedsCatalogContext(record: ReceiptInstallRecord): boolean {
+  if (!isRecord(record.rollback)) return false;
+  if (record.rollback.schema === "calvinnwq.skills.rollback.v0") return true;
+  return record.rollback.schema === "calvinnwq.skills.symlink-rollback.v0"
+    && record.rollback.status === "available"
+    && record.rollback.created === true;
+}
+
+function receiptRecordSourcePath(record: ReceiptInstallRecord): string | null {
+  const direct = normalizeString(record.sourcePath);
+  if (direct !== null) return direct;
+  if (isRecord(record.source)) return normalizeString(record.source.path);
+  return null;
+}
+
+async function findCatalogRoot(sourcePath: string): Promise<string | null> {
+  let current = path.resolve(sourcePath);
+  try {
+    if (!(await lstat(current)).isDirectory()) current = path.dirname(current);
+  } catch {
+    current = path.dirname(current);
+  }
+
+  while (true) {
+    try {
+      await access(path.join(current, "skill-suitcase.yaml"));
+      return current;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return null;
+      current = parent;
+    }
   }
 }
 

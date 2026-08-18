@@ -203,6 +203,25 @@ test("cli rollback accepts receipt-only and catalog-context invocations", async 
   const contextJson = parseJsonOutput(withCatalogContext.stdout) as { ok: boolean; receipt: string };
   assert.equal(contextJson.ok, true);
   assert.equal(contextJson.receipt, receiptPath);
+
+  const withTargetOverride = runCli([
+    "rollback",
+    "--receipt",
+    receiptPath,
+    "--source",
+    sourceRoot,
+    "--target",
+    "openclaw",
+    "--codex-skills",
+    join(sourceRoot, "codex-skills-override"),
+    "--json"
+  ]);
+
+  assert.equal(withTargetOverride.status, 0);
+  assert.equal(withTargetOverride.stderr, "");
+  const overrideJson = parseJsonOutput(withTargetOverride.stdout) as { ok: boolean; receipt: string };
+  assert.equal(overrideJson.ok, true);
+  assert.equal(overrideJson.receipt, receiptPath);
 });
 
 test("cli keeps JSON on stdout and usage errors on stderr", () => {

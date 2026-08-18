@@ -19,7 +19,8 @@ import { targets } from "../catalog/targets.js";
 import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
 import {
   externalProjectionsForTarget,
-  inspectExternalProjections
+  inspectExternalProjections,
+  validateExternalProjectionMetadata
 } from "../external-projections.js";
 import {
   RECEIPT_FILE,
@@ -177,6 +178,12 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
   const source = path.resolve(input.source);
   const errors: PruneError[] = [];
   const { manifest } = await loadCatalog(source, { targetOverrides: input.targetOverrides });
+  const metadataErrors = validateExternalProjectionMetadata(manifest).map((finding) => ({
+    code: finding.code,
+    message: finding.message,
+    path: finding.path
+  }));
+  errors.push(...metadataErrors);
   const externalProjections = externalProjectionsForTarget(manifest.externalProjections, input.target);
   const targetReport = await targets({ source, targetOverrides: input.targetOverrides });
   const target = targetReport.targets.find((item) => item.id === input.target);

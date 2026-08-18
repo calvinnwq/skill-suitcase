@@ -169,7 +169,7 @@ export function validateExternalProjectionMetadata(
 
 export function isExternalProjectionErrorCode(code: string): boolean {
   return code.startsWith("external-")
-    || code.startsWith("external_projection_")
+    || code.includes("external_projection")
     || code === "external_projection_owned";
 }
 

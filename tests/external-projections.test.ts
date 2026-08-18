@@ -194,11 +194,13 @@ test("Hermes scans undeclared directory symlinks when no skills are planned", as
   const installRoot = path.join(sandbox, "managed-skills");
   const externalDirectory = path.join(sandbox, "external-directory");
   const undeclaredLink = path.join(installRoot, "undeclared-link");
+  const excludedNameLink = path.join(installRoot, ".archive");
   await mkdir(path.join(home, "skills"), { recursive: true });
   await mkdir(installRoot, { recursive: true });
   await mkdir(externalDirectory, { recursive: true });
   await writeFile(path.join(home, "config.yaml"), `skills:\n  external_dirs:\n    - ${installRoot}\n`);
   await symlink(externalDirectory, undeclaredLink, "dir");
+  await symlink(externalDirectory, excludedNameLink, "dir");
 
   const findings = await validateHermesExternalRoot({
     home,
@@ -207,6 +209,10 @@ test("Hermes scans undeclared directory symlinks when no skills are planned", as
   });
 
   assert.equal(findings.some((finding) => finding.code === "hermes_shadow_directory_symlink"), true);
+  assert.match(
+    findings.find((finding) => finding.code === "hermes_shadow_directory_symlink" && finding.message.includes(".archive"))?.message ?? "",
+    /\.archive/
+  );
 });
 
 test("external projection inspection rejects a destination beneath a symlinked parent", async (t) => {
@@ -279,6 +285,31 @@ externalProjections:
         owner: "another-provider"
       }
     }
+  );
+});
+
+test("manifest parser rejects duplicate external projection IDs", () => {
+  assert.throws(
+    () => parseSuitcaseManifest(`suitcases: {}
+assignments: {}
+assignmentPaths: {}
+externalProjections:
+  duplicate:
+    target: hermes
+    skill: first
+    destination: first
+    source: /opt/first
+    mode: symlink
+    owner: fixture
+  duplicate:
+    target: hermes
+    skill: second
+    destination: second
+    source: /opt/second
+    mode: symlink
+    owner: fixture
+`),
+    /Duplicate external projection ID duplicate/
   );
 });
 

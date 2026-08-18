@@ -737,3 +737,78 @@ compatibility:
   assert.equal(error.message.includes("pass a concrete assignmentPath target selector"), true);
   assert.deepEqual(error.candidates, ["codex-primary", "codex-secondary"]);
 });
+
+test("diff refuses ambiguous external projection ownership metadata", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-external-ownership-source-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-external-ownership-target-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  const skillRoot = path.join(source, "skills", "office-hours");
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, "SKILL.md"), "Office Hours\n");
+  await createCatalog(source, `suitcases:
+  core:
+    skills:
+      - office-hours
+assignments:
+  openclaw:
+    suitcases:
+      - core
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${targetRoot}
+externalProjections:
+  reference-a:
+    target: openclaw
+    skill: external-reference
+    destination: references/a
+    source: /opt/references/external-reference
+    mode: symlink
+    owner: fixture
+  reference-b:
+    target: openclaw
+    skill: external-reference
+    destination: references/b
+    source: /opt/references/external-reference
+    mode: symlink
+    owner: fixture
+`);
+
+  const result = await diff({ source, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "external_projection_identity_conflict"), true);
+});
+
+test("read-only diff reports declared external projections before refusing mutation", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-read-only-source-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-read-only-target-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  await createCatalog(source, `suitcases: {}
+assignments: {}
+assignmentPaths:
+  opencode:
+    kind: opencode-skills-root
+    assignment: opencode
+    path: ${targetRoot}
+externalProjections:
+  provider-reference:
+    target: opencode
+    skill: provider-reference
+    destination: references/provider-reference
+    source: /opt/references/provider-reference
+    mode: symlink
+    owner: provider
+`);
+
+  const result = await diff({ source, target: "opencode" });
+
+  assert.equal(result.readOnly, true);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.externalProjections.map((projection) => projection.id), ["provider-reference"]);
+});

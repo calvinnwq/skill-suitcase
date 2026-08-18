@@ -20,6 +20,7 @@ import {
   externalProjectionsForTarget,
   findUndeclaredDirectorySymlinks,
   inspectExternalProjections,
+  validateExternalProjectionMetadata,
   type ExternalProjectionInspection
 } from "../external-projections.js";
 
@@ -126,10 +127,29 @@ export async function diff(
   }
 
   const { manifest, sourceRoot } = await loadCatalog(source, { targetOverrides });
+  const metadataErrors: DiffResultError[] = validateExternalProjectionMetadata(manifest).map((finding) => ({
+    code: finding.code,
+    message: finding.message
+  }));
   const installation = await resolveAssignmentInstallRoot(manifest, target, targetOverrides);
+  const selectedRegistryEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides)
+    ?? findTargetRegistryEntriesByAssignment(manifest, installation.assignment ?? target, targetOverrides)[0]
+    ?? null;
+  const projectionTarget = selectedRegistryEntry?.id ?? target;
+  const declaredExternalProjections = externalProjectionsForTarget(
+    manifest.externalProjections,
+    projectionTarget
+  );
+  const readOnlyExternalProjections = installation.installRoot === null
+    ? []
+    : await inspectExternalProjections({
+      installRoot: installation.installRoot,
+      projections: declaredExternalProjections,
+      ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
+    });
   if (installation.readOnly) {
     return {
-      ok: installation.errors.length === 0,
+      ok: installation.errors.length === 0 && metadataErrors.length === 0,
       source: sourceRoot,
       target,
       assignment: installation.assignment ?? target,
@@ -138,7 +158,7 @@ export async function diff(
       planned: [],
       blocked: [],
       entries: [],
-      externalProjections: [],
+      externalProjections: readOnlyExternalProjections,
       summary: {
         create: 0,
         update: 0,
@@ -147,7 +167,7 @@ export async function diff(
         missing: 0,
         blocked: 0
       },
-      errors: installation.errors
+      errors: [...installation.errors, ...metadataErrors]
     };
   }
   const planTarget = installation.assignment ?? target;
@@ -169,7 +189,7 @@ export async function diff(
     planned: planResult.planned ?? [],
     blocked: planResult.blocked ?? [],
     entries: [],
-    externalProjections: [],
+    externalProjections: readOnlyExternalProjections,
     summary: {
       create: 0,
       update: 0,
@@ -178,7 +198,7 @@ export async function diff(
       missing: 0,
       blocked: 0
     },
-    errors: [...planResult.errors]
+    errors: [...planResult.errors, ...metadataErrors]
   };
 
   result.installRoot = installation.installRoot;
@@ -196,20 +216,6 @@ export async function diff(
     throw new Error(`diff could not resolve install root for target ${target}.`);
   }
   result.installRoot = installRoot;
-
-  const selectedRegistryEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides)
-    ?? findTargetRegistryEntriesByAssignment(manifest, planTarget, targetOverrides)[0]
-    ?? null;
-  const projectionTarget = selectedRegistryEntry?.id ?? target;
-  const declaredExternalProjections = externalProjectionsForTarget(
-    manifest.externalProjections,
-    projectionTarget
-  );
-  result.externalProjections = await inspectExternalProjections({
-    installRoot,
-    projections: declaredExternalProjections,
-    ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
-  });
   if (selectedRegistryEntry?.kind === "hermes-external-skills-root") {
     const home = selectedRegistryEntry.home;
     if (home === null) {
