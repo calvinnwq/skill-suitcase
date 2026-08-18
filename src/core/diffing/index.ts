@@ -235,19 +235,26 @@ export async function diff(
       return result;
     }
   } else {
-    const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
-      installRoot,
-      declaredTargetPaths: [
-        ...result.planned.map((plannedSkill) => path.resolve(installRoot, plannedSkill.destination)),
-        ...result.externalProjections
-          .map((inspection) => inspection.targetPath)
-          .filter((targetPath): targetPath is string => targetPath !== null)
-      ]
-    });
-    result.errors.push(...undeclaredSymlinks.map((targetPath) => ({
-      code: "external_projection_undeclared_symlink",
-      message: `Undeclared directory symlink ${targetPath} blocks catalog comparison.`
-    })));
+    try {
+      const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
+        installRoot,
+        declaredTargetPaths: [
+          ...result.planned.map((plannedSkill) => path.resolve(installRoot, plannedSkill.destination)),
+          ...result.externalProjections
+            .map((inspection) => inspection.targetPath)
+            .filter((targetPath): targetPath is string => targetPath !== null)
+        ]
+      });
+      result.errors.push(...undeclaredSymlinks.map((targetPath) => ({
+        code: "external_projection_undeclared_symlink",
+        message: `Undeclared directory symlink ${targetPath} blocks catalog comparison.`
+      })));
+    } catch (error) {
+      result.errors.push({
+        code: "external_projection_inspection_failed",
+        message: `External projection safety inspection failed: ${error instanceof Error ? error.message : "unknown error"}`
+      });
+    }
     result.errors.push(...result.externalProjections
       .filter((inspection) => inspection.state !== "external-current")
       .map((inspection) => ({

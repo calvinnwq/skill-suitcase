@@ -5,6 +5,8 @@ import { platform } from "node:os";
 import path from "node:path";
 import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
 import { loadCatalog } from "../catalog/index.js";
+import { resolveTargetRegistryEntryFromManifest } from "../catalog/target-registry.js";
+import { resolvePlatformInstallRoot } from "../platform-adapters.js";
 import {
   externalProjectionsForTarget,
   resolveExternalProjectionDestination
@@ -109,7 +111,22 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
   if (source !== undefined && target !== undefined) {
     try {
       const { manifest } = await loadCatalog(source);
-      for (const projection of externalProjectionsForTarget(manifest.externalProjections, target)) {
+      const targetEntry = resolveTargetRegistryEntryFromManifest(manifest, target);
+      if (targetEntry === null || targetEntry.source !== "manifest") {
+        throw new Error(`Target ${target} is not declared by the rollback catalog.`);
+      }
+      const rootResolution = resolvePlatformInstallRoot({
+        kind: targetEntry.kind,
+        assignmentPath: targetEntry.assignmentPath
+      });
+      if (!rootResolution.ok || rootResolution.installRoot === null) {
+        throw new Error(`Target ${targetEntry.id} does not resolve to a valid install root.`);
+      }
+      const catalogInstallRoot = await realpath(rootResolution.installRoot);
+      if (path.resolve(catalogInstallRoot) !== path.resolve(installRoot)) {
+        throw new Error(`Target ${targetEntry.id} resolves to ${catalogInstallRoot}, not receipt root ${installRoot}.`);
+      }
+      for (const projection of externalProjectionsForTarget(manifest.externalProjections, targetEntry.id)) {
         const targetPath = resolveExternalProjectionDestination(installRoot, projection.destination);
         if (targetPath !== null) protectedExternalPaths.add(path.resolve(targetPath));
       }
@@ -217,12 +234,13 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
           });
           continue;
         }
-        if (protectedExternalPaths.has(path.resolve(appliedSymlink.targetPath))) {
+        const protectedPath = overlappingExternalProjection(appliedSymlink.targetPath, protectedExternalPaths);
+        if (protectedPath !== null) {
           result.ok = false;
           result.summary.refused += 1;
           result.errors.push({
             code: "external_projection_owned",
-            message: `Rollback refuses to remove declared external projection at ${appliedSymlink.targetPath}.`,
+            message: `Rollback refuses to mutate ${appliedSymlink.targetPath} because it overlaps declared external projection ${protectedPath}.`,
             skill,
             path: appliedSymlink.targetPath
           });
@@ -346,6 +364,27 @@ export async function rollback({ receipt, source, target, __test }: RollbackInpu
         skill,
         targetPath,
         status: "noop",
+        restored: 0,
+        removed: 0,
+        failed: 0
+      });
+      continue;
+    }
+
+    const protectedPath = overlappingExternalProjection(targetPath, protectedExternalPaths);
+    if (protectedPath !== null) {
+      result.ok = false;
+      result.summary.refused += 1;
+      result.errors.push({
+        code: "external_projection_owned",
+        message: `Rollback refuses to mutate ${targetPath} because it overlaps declared external projection ${protectedPath}.`,
+        skill,
+        path: protectedPath
+      });
+      result.rollbacks.push({
+        skill,
+        targetPath,
+        status: "refused",
         restored: 0,
         removed: 0,
         failed: 0
@@ -1173,4 +1212,19 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
+}
+
+function overlappingExternalProjection(
+  targetPath: string,
+  protectedExternalPaths: ReadonlySet<string>
+): string | null {
+  for (const protectedPath of [...protectedExternalPaths].sort((left, right) => left.localeCompare(right))) {
+    if (
+      isPathInsideOrSame(targetPath, protectedPath)
+      || isPathInsideOrSame(protectedPath, targetPath)
+    ) {
+      return protectedPath;
+    }
+  }
+  return null;
 }

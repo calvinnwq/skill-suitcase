@@ -181,36 +181,33 @@ export async function findUndeclaredDirectorySymlinks({
   declaredTargetPaths?: string[];
 }): Promise<string[]> {
   const root = path.resolve(installRoot);
-  const declared = declaredTargetPaths.map((value) => path.resolve(value));
-  const isDeclaredPath = (candidate: string): boolean => declared.some((base) => {
-    const relative = path.relative(base, candidate);
-    return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-  });
+  const declared = new Set(declaredTargetPaths.map((value) => path.resolve(value)));
   const findings: string[] = [];
 
   async function visit(current: string): Promise<void> {
     let entries;
     try {
       entries = await readdir(current, { withFileTypes: true });
-    } catch {
-      return;
+    } catch (error) {
+      throw inspectionFailure("read directory", current, error);
     }
+    entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       const entryPath = path.join(current, entry.name);
       let info;
       try {
         info = await lstat(entryPath);
-      } catch {
-        continue;
+      } catch (error) {
+        throw inspectionFailure("inspect path", entryPath, error);
       }
       if (info.isSymbolicLink()) {
         let targetInfo;
         try {
           targetInfo = await stat(entryPath);
-        } catch {
-          continue;
+        } catch (error) {
+          throw inspectionFailure("inspect symlink target", entryPath, error);
         }
-        if (targetInfo.isDirectory() && !isDeclaredPath(path.resolve(entryPath))) findings.push(entryPath);
+        if (targetInfo.isDirectory() && !declared.has(path.resolve(entryPath))) findings.push(entryPath);
         continue;
       }
       if (info.isDirectory()) await visit(entryPath);
@@ -219,6 +216,11 @@ export async function findUndeclaredDirectorySymlinks({
 
   await visit(root);
   return findings.sort();
+}
+
+function inspectionFailure(operation: string, targetPath: string, error: unknown): Error {
+  const detail = error instanceof Error ? error.message : "unknown error";
+  return new Error(`Unable to ${operation} ${targetPath}: ${detail}`);
 }
 
 export function externalProjectionsForTarget(

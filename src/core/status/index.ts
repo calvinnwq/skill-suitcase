@@ -302,20 +302,28 @@ export async function status({
         continue;
       }
     } else {
-      const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
-        installRoot,
-        declaredTargetPaths: [
-          ...assignmentPlan.planned.map((plannedSkill) => path.resolve(installRoot, plannedSkill.destination)),
-          ...projectionInspections
-            .map((inspection) => inspection.targetPath)
-            .filter((targetPath): targetPath is string => targetPath !== null)
-        ]
-      });
-      const projectionErrors = [
-        ...undeclaredSymlinks.map((targetPath) => ({
+      const projectionErrors: StatusFinding[] = [];
+      try {
+        const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
+          installRoot,
+          declaredTargetPaths: [
+            ...assignmentPlan.planned.map((plannedSkill) => path.resolve(installRoot, plannedSkill.destination)),
+            ...projectionInspections
+              .map((inspection) => inspection.targetPath)
+              .filter((targetPath): targetPath is string => targetPath !== null)
+          ]
+        });
+        projectionErrors.push(...undeclaredSymlinks.map((targetPath) => ({
           code: "external_projection_undeclared_symlink",
           message: `Undeclared directory symlink ${targetPath} blocks catalog status.`
-        })),
+        })));
+      } catch (error) {
+        projectionErrors.push({
+          code: "external_projection_inspection_failed",
+          message: `External projection safety inspection failed: ${errorMessage(error)}`
+        });
+      }
+      projectionErrors.push(
         ...projectionInspections
           .filter((inspection) => inspection.state !== "external-current")
           .map((inspection) => ({
@@ -323,7 +331,7 @@ export async function status({
             message: inspection.reason,
             skill: inspection.skill
           }))
-      ];
+      );
       assignmentResult.errors.push(...projectionErrors);
       errors.push(...projectionErrors);
       if (projectionErrors.length > 0) {

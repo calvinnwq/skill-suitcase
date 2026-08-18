@@ -425,6 +425,54 @@ test("rollback removes installs that were missing before apply", async (t) => {
   assert.equal(receipt.installs?.["office-hours"], undefined);
 });
 
+test("rollback preserves an external projection nested in a copy install", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-copy-projection-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-copy-projection-target-"));
+  const externalSource = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-copy-projection-external-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(externalSource, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  const targetSkill = path.join(targetRoot, "office-hours");
+  const projectionPath = path.join(targetSkill, "references", "external-reference");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(externalSource, "SKILL.md"), "---\nname: external-reference\n---\n");
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-copy-projection-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+  const applied = await apply({ source: sourceRoot, target: "openclaw", lock: lockPath });
+  assert.equal(applied.ok, true);
+  await mkdir(path.dirname(projectionPath), { recursive: true });
+  await symlink(externalSource, projectionPath, "dir");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\nassignments:\n  openclaw:\n    suitcases:\n      - core\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\nexternalProjections:\n  external-reference:\n    target: openclaw\n    skill: external-reference\n    destination: office-hours/references/external-reference\n    source: ${externalSource}\n    mode: symlink\n    owner: fixture-provider\n`
+  );
+
+  const result = await rollback({
+    receipt: path.join(targetRoot, RECEIPT_FILE),
+    source: sourceRoot,
+    target: "openclaw"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(result.errors[0]?.code, "external_projection_owned");
+  assert.equal((await lstat(projectionPath)).isSymbolicLink(), true);
+  assert.equal((await stat(targetSkill)).isDirectory(), true);
+});
+
 test("rollback is a deterministic no-op after a successful rollback", async (t) => {
   const { receiptPath } = await createAppliedUpdate(t);
   const first = await rollback({ receipt: receiptPath });
@@ -931,6 +979,34 @@ test("rollback protects a declared external projection from a stale receipt", as
   assert.equal(result.summary.removed, 0);
   assert.equal(result.summary.refused, 1);
   assert.equal(result.errors[0]?.code, "external_projection_owned");
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+});
+
+test("rollback rejects catalog targets whose root differs from the receipt", async (t) => {
+  const { sourceRoot, targetSkill, receiptPath } = await createAppliedSymlink(t);
+  const otherRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-other-target-"));
+  t.after(() => rm(otherRoot, { recursive: true, force: true }));
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\nassignments:\n  openclaw:\n    suitcases:\n      - core\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${otherRoot}\n`
+  );
+
+  const result = await rollback({ receipt: receiptPath, source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(result.errors[0]?.code, "invalid_external_projection_context");
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+});
+
+test("rollback rejects unknown catalog targets", async (t) => {
+  const { sourceRoot, targetSkill, receiptPath } = await createAppliedSymlink(t);
+
+  const result = await rollback({ receipt: receiptPath, source: sourceRoot, target: "unknown" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(result.errors[0]?.code, "invalid_external_projection_context");
   assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
 });
 

@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
@@ -91,6 +91,7 @@ export async function validateHermesExternalRoot({
 
   const localShadows = await findSkillShadows(localSkillsRoot, plannedSkills);
   findings.push(...shadowTraversalFindings(localShadows.directorySymlinks));
+  findings.push(...shadowInspectionFindings(localShadows.inspectionErrors));
   for (const skill of localShadows.skills) {
     findings.push({
       code: "hermes_local_skill_shadow",
@@ -202,6 +203,7 @@ export async function validateHermesExternalRoot({
     managedDestinationKey
   );
   findings.push(...shadowTraversalFindings(managedShadows.directorySymlinks));
+  findings.push(...shadowInspectionFindings(managedShadows.inspectionErrors));
   for (const skill of managedShadows.skills) {
     findings.push({
       code: "hermes_managed_skill_shadow",
@@ -328,6 +330,7 @@ async function validateRegistration(
     if (!precedingRoot.exists) continue;
     const precedingShadows = await findSkillShadows(precedingRoot.path, plannedSkills);
     findings.push(...shadowTraversalFindings(precedingShadows.directorySymlinks));
+    findings.push(...shadowInspectionFindings(precedingShadows.inspectionErrors));
     for (const skill of precedingShadows.skills) {
       findings.push({
         code: "hermes_external_skill_shadow",
@@ -397,12 +400,17 @@ async function findSkillShadows(
     traverse?: boolean;
   }> = new Map(),
   plannedDestinationKey: (value: string) => string = path.resolve
-): Promise<{ skills: string[]; directorySymlinks: string[] }> {
+): Promise<{
+  skills: string[];
+  directorySymlinks: string[];
+  inspectionErrors: Array<{ path: string; message: string }>;
+}> {
   const found = new Set<string>();
   const directorySymlinks = new Set<string>();
+  const inspectionErrors: Array<{ path: string; message: string }> = [];
   const pending = [root];
   const visited = new Set<string>();
-  while (pending.length > 0 && found.size < skills.size) {
+  while (pending.length > 0) {
     const current = pending.pop()!;
     let resolved: string;
     let entries;
@@ -411,7 +419,11 @@ async function findSkillShadows(
       if (visited.has(resolved)) continue;
       visited.add(resolved);
       entries = await readdir(current, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      inspectionErrors.push({
+        path: current,
+        message: error instanceof Error ? error.message : "unknown error"
+      });
       continue;
     }
     const identity = await readLocalSkillIdentity(current, path.basename(current));
@@ -428,7 +440,14 @@ async function findSkillShadows(
           if (plannedChild.traverse !== false) pending.push(child);
           continue;
         }
-        if (await isDirectory(await canonicalizePath(child))) directorySymlinks.add(child);
+        try {
+          if ((await stat(child)).isDirectory()) directorySymlinks.add(child);
+        } catch (error) {
+          inspectionErrors.push({
+            path: child,
+            message: error instanceof Error ? error.message : "unknown error"
+          });
+        }
         continue;
       }
       if (entry.isDirectory()) {
@@ -438,7 +457,8 @@ async function findSkillShadows(
   }
   return {
     skills: [...found].sort((left, right) => left.localeCompare(right)),
-    directorySymlinks: [...directorySymlinks].sort((left, right) => left.localeCompare(right))
+    directorySymlinks: [...directorySymlinks].sort((left, right) => left.localeCompare(right)),
+    inspectionErrors: inspectionErrors.sort((left, right) => left.path.localeCompare(right.path))
   };
 }
 
@@ -459,6 +479,15 @@ function shadowTraversalFindings(directorySymlinks: string[]): HermesExternalRoo
   return directorySymlinks.map((directory) => ({
     code: "hermes_shadow_directory_symlink",
     message: `Hermes shadow validation refuses directory symlink ${directory}.`
+  }));
+}
+
+function shadowInspectionFindings(
+  errors: Array<{ path: string; message: string }>
+): HermesExternalRootFinding[] {
+  return errors.map((error) => ({
+    code: "hermes_shadow_inspection_failed",
+    message: `Hermes shadow validation could not inspect ${error.path}: ${error.message}`
   }));
 }
 

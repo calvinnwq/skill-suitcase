@@ -25,13 +25,31 @@ test("generic projection guard reports undeclared directory symlinks but ignores
   await writeFile(fileTarget, "file target\n");
   const directoryLink = path.join(installRoot, "directory-link");
   const fileLink = path.join(installRoot, "file-link");
+  const plannedSkill = path.join(installRoot, "planned-skill");
+  const nestedDirectoryLink = path.join(plannedSkill, "nested-directory-link");
+  const brokenLink = path.join(installRoot, "broken-link");
+  await mkdir(plannedSkill);
   await symlink(directoryTarget, directoryLink, "dir");
   await symlink(fileTarget, fileLink, "file");
+  await symlink(directoryTarget, nestedDirectoryLink, "dir");
 
-  assert.deepEqual(await findUndeclaredDirectorySymlinks({ installRoot }), [directoryLink]);
+  assert.deepEqual(
+    await findUndeclaredDirectorySymlinks({ installRoot }),
+    [directoryLink, nestedDirectoryLink]
+  );
   assert.deepEqual(
     await findUndeclaredDirectorySymlinks({ installRoot, declaredTargetPaths: [directoryLink] }),
-    []
+    [nestedDirectoryLink]
+  );
+  assert.deepEqual(
+    await findUndeclaredDirectorySymlinks({ installRoot, declaredTargetPaths: [plannedSkill] }),
+    [directoryLink, nestedDirectoryLink]
+  );
+
+  await symlink(path.join(sandbox, "missing-target"), brokenLink, "dir");
+  await assert.rejects(
+    findUndeclaredDirectorySymlinks({ installRoot }),
+    /Unable to inspect symlink target/
   );
 });
 
@@ -167,6 +185,28 @@ test("Hermes external validation resolves tilde sources against the overridden h
   });
 
   assert.deepEqual(findings, []);
+});
+
+test("Hermes scans undeclared directory symlinks when no skills are planned", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-empty-shadow-scan-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const home = path.join(sandbox, "hermes");
+  const installRoot = path.join(sandbox, "managed-skills");
+  const externalDirectory = path.join(sandbox, "external-directory");
+  const undeclaredLink = path.join(installRoot, "undeclared-link");
+  await mkdir(path.join(home, "skills"), { recursive: true });
+  await mkdir(installRoot, { recursive: true });
+  await mkdir(externalDirectory, { recursive: true });
+  await writeFile(path.join(home, "config.yaml"), `skills:\n  external_dirs:\n    - ${installRoot}\n`);
+  await symlink(externalDirectory, undeclaredLink, "dir");
+
+  const findings = await validateHermesExternalRoot({
+    home,
+    installRoot,
+    planned: []
+  });
+
+  assert.equal(findings.some((finding) => finding.code === "hermes_shadow_directory_symlink"), true);
 });
 
 test("external projection inspection rejects a destination beneath a symlinked parent", async (t) => {
