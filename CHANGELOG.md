@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/calvinnwq/skill-suitcase/compare/v0.18.0...v0.18.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **deps:** update postcss security fixes ([#109](https://github.com/calvinnwq/skill-suitcase/issues/109)) ([77d80c0](https://github.com/calvinnwq/skill-suitcase/commit/77d80c0d48c2d44bfc38841acfc9ca590eb1f7e9))
+* keep promote backups outside skill discovery roots ([#106](https://github.com/calvinnwq/skill-suitcase/issues/106)) ([5c8e269](https://github.com/calvinnwq/skill-suitcase/commit/5c8e2695796782662c35b44167469f73227a4bd2))
+
 ## [0.18.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.17.1...v0.18.0) (2026-07-17)
 
 
