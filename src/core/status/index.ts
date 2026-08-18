@@ -27,6 +27,7 @@ import {
 import { validateHermesExternalRoot } from "../hermes-external-root.js";
 import {
   externalProjectionsForTarget,
+  findUndeclaredDirectorySymlinks,
   inspectExternalProjections,
   type ExternalProjectionInspection
 } from "../external-projections.js";
@@ -291,6 +292,7 @@ export async function status({
         installRoot,
         planned: assignmentPlan.planned,
         externalProjections: declaredExternalProjections,
+        externalProjectionInspections: projectionInspections,
         ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
       });
       if (boundaryErrors.length > 0) {
@@ -300,13 +302,28 @@ export async function status({
         continue;
       }
     } else {
-      const projectionErrors = projectionInspections
-        .filter((inspection) => inspection.state !== "external-current")
-        .map((inspection) => ({
-          code: inspection.state,
-          message: inspection.reason,
-          skill: inspection.skill
-        }));
+      const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
+        installRoot,
+        declaredTargetPaths: [
+          ...assignmentPlan.planned.map((plannedSkill) => path.resolve(installRoot, plannedSkill.destination)),
+          ...projectionInspections
+            .map((inspection) => inspection.targetPath)
+            .filter((targetPath): targetPath is string => targetPath !== null)
+        ]
+      });
+      const projectionErrors = [
+        ...undeclaredSymlinks.map((targetPath) => ({
+          code: "external_projection_undeclared_symlink",
+          message: `Undeclared directory symlink ${targetPath} blocks catalog status.`
+        })),
+        ...projectionInspections
+          .filter((inspection) => inspection.state !== "external-current")
+          .map((inspection) => ({
+            code: inspection.state,
+            message: inspection.reason,
+            skill: inspection.skill
+          }))
+      ];
       assignmentResult.errors.push(...projectionErrors);
       errors.push(...projectionErrors);
       if (projectionErrors.length > 0) {

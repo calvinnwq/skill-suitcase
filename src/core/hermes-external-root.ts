@@ -14,7 +14,8 @@ import {
 import { classifySymlinkInstall } from "./install-modes.js";
 import {
   inspectExternalProjections,
-  type ExternalProjection
+  type ExternalProjection,
+  type ExternalProjectionInspection
 } from "./external-projections.js";
 
 export type HermesExternalRootFinding = {
@@ -28,12 +29,14 @@ export async function validateHermesExternalRoot({
   installRoot,
   planned,
   externalProjections = [],
+  externalProjectionInspections,
   homeDirectory
 }: {
   home: string;
   installRoot: string;
   planned: Array<{ skill: string; destination: string; sourcePath?: string }>;
   externalProjections?: ExternalProjection[];
+  externalProjectionInspections?: ExternalProjectionInspection[];
   homeDirectory?: string;
 }): Promise<HermesExternalRootFinding[]> {
   const findings: HermesExternalRootFinding[] = [];
@@ -128,7 +131,7 @@ export async function validateHermesExternalRoot({
     }));
   if (destinationConflicts.length > 0) return destinationConflicts;
 
-  const externalInspections = await inspectExternalProjections({
+  const externalInspections = externalProjectionInspections ?? await inspectExternalProjections({
     installRoot: normalizedRoot,
     projections: externalProjections,
     homeDirectory: normalizedProjectionHome

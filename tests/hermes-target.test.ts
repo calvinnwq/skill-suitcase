@@ -1476,6 +1476,8 @@ test("categorized Hermes symlink rollback refuses a replaced link after classifi
 
   const result = await rollback({
     receipt: path.join(fixture.externalRoot, ".skill-suitcase-receipt.json"),
+    source: fixture.source,
+    target: "hermes",
     __test: {
       afterAppliedSymlinkClassification: async (targetPath) => {
         await rm(targetPath);

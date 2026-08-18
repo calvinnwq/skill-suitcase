@@ -803,10 +803,10 @@ async function createAppliedSymlink(t: { after(fn: () => Promise<void> | void): 
 }
 
 test("rollback removes an apply --mode symlink install and leaves the catalog source intact", async (t) => {
-  const { sourceSkill, targetSkill, receiptPath } = await createAppliedSymlink(t);
+  const { sourceRoot, sourceSkill, targetSkill, receiptPath } = await createAppliedSymlink(t);
   const sourceBytesBefore = await readFile(path.join(sourceSkill, "runtime.js"), "utf8");
 
-  const result = await rollback({ receipt: receiptPath });
+  const result = await rollback({ receipt: receiptPath, source: sourceRoot, target: "openclaw" });
 
   assert.equal(result.ok, true);
   assert.equal(result.summary.removed, 1);
@@ -828,13 +828,13 @@ test("rollback removes an apply --mode symlink install and leaves the catalog so
 });
 
 test("rollback removes an apply-created symlink through a symlinked install root", async (t) => {
-  const { targetRoot, targetSkill, receiptPath } = await createAppliedSymlink(t);
+  const { sourceRoot, targetRoot, targetSkill, receiptPath } = await createAppliedSymlink(t);
   const aliasRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-symlink-root-alias-"));
   const alias = path.join(aliasRoot, "target");
   t.after(() => rm(aliasRoot, { recursive: true, force: true }));
   await symlink(targetRoot, alias);
 
-  const result = await rollback({ receipt: path.join(alias, path.basename(receiptPath)) });
+  const result = await rollback({ receipt: path.join(alias, path.basename(receiptPath)), source: sourceRoot, target: "openclaw" });
 
   assert.equal(result.ok, true);
   assert.equal(result.summary.removed, 1);
@@ -908,7 +908,7 @@ test("rollback removes an apply-created symlink after idempotent re-apply", asyn
   assert.equal(reapplied.ok, true);
   assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
 
-  const result = await rollback({ receipt: receiptPath });
+  const result = await rollback({ receipt: receiptPath, source: sourceRoot, target: "openclaw" });
 
   assert.equal(result.ok, true);
   assert.equal(result.summary.removed, 1);
@@ -918,8 +918,24 @@ test("rollback removes an apply-created symlink after idempotent re-apply", asyn
   assert.equal((await stat(sourceSkill)).isDirectory(), true);
 });
 
+test("rollback protects a declared external projection from a stale receipt", async (t) => {
+  const { sourceRoot, targetRoot, targetSkill, receiptPath } = await createAppliedSymlink(t);
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\nassignments:\n  openclaw:\n    suitcases:\n      - core\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\nexternalProjections:\n  stale-reference:\n    target: openclaw\n    skill: stale-reference\n    destination: office-hours\n    source: /opt/references/stale-reference\n    mode: symlink\n    owner: fixture-provider\n`
+  );
+
+  const result = await rollback({ receipt: receiptPath, source: sourceRoot, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.summary.removed, 0);
+  assert.equal(result.summary.refused, 1);
+  assert.equal(result.errors[0]?.code, "external_projection_owned");
+  assert.equal((await lstat(targetSkill)).isSymbolicLink(), true);
+});
+
 test("rollback refuses to delete a real directory where an apply-created symlink was expected", async (t) => {
-  const { sourceSkill, targetSkill, receiptPath } = await createAppliedSymlink(t);
+  const { sourceRoot, sourceSkill, targetSkill, receiptPath } = await createAppliedSymlink(t);
 
   // Drift: the managed link was replaced by a real directory that Suitcase never
   // captured as rollback state. ARCHITECTURE.md forbids deleting it.
@@ -927,7 +943,7 @@ test("rollback refuses to delete a real directory where an apply-created symlink
   await mkdir(targetSkill, { recursive: true });
   await writeFile(path.join(targetSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
 
-  const result = await rollback({ receipt: receiptPath });
+  const result = await rollback({ receipt: receiptPath, source: sourceRoot, target: "openclaw" });
 
   assert.equal(result.ok, false);
   assert.equal(result.summary.removed, 0);

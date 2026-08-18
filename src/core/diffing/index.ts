@@ -18,6 +18,7 @@ import {
 import { validateHermesExternalRoot } from "../hermes-external-root.js";
 import {
   externalProjectionsForTarget,
+  findUndeclaredDirectorySymlinks,
   inspectExternalProjections,
   type ExternalProjectionInspection
 } from "../external-projections.js";
@@ -222,6 +223,7 @@ export async function diff(
         installRoot,
         planned: result.planned,
         externalProjections: declaredExternalProjections,
+        externalProjectionInspections: result.externalProjections,
         ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
       }));
     }
@@ -233,6 +235,19 @@ export async function diff(
       return result;
     }
   } else {
+    const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
+      installRoot,
+      declaredTargetPaths: [
+        ...result.planned.map((plannedSkill) => path.resolve(installRoot, plannedSkill.destination)),
+        ...result.externalProjections
+          .map((inspection) => inspection.targetPath)
+          .filter((targetPath): targetPath is string => targetPath !== null)
+      ]
+    });
+    result.errors.push(...undeclaredSymlinks.map((targetPath) => ({
+      code: "external_projection_undeclared_symlink",
+      message: `Undeclared directory symlink ${targetPath} blocks catalog comparison.`
+    })));
     result.errors.push(...result.externalProjections
       .filter((inspection) => inspection.state !== "external-current")
       .map((inspection) => ({

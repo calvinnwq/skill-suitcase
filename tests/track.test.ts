@@ -109,6 +109,36 @@ test("track records existing matching office-hours and OpenClaw gnhf-postflight 
   assert.equal(statusResult.summary.current, 2);
 });
 
+test("targeted track preserves unrelated external projection failures", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-external-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-external-target-"));
+  const externalSource = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-external-reference-"));
+  const wrongSource = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-external-wrong-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(externalSource, { recursive: true, force: true }));
+  t.after(() => rm(wrongSource, { recursive: true, force: true }));
+
+  const catalogSkill = path.join(sourceRoot, "skills", "office-hours");
+  await mkdir(catalogSkill, { recursive: true });
+  await writeFile(path.join(catalogSkill, "SKILL.md"), "---\nname: office-hours\n---\n# Office hours\n");
+  await cp(catalogSkill, path.join(targetRoot, "office-hours"), { recursive: true });
+  await writeFile(path.join(externalSource, "SKILL.md"), "---\nname: reference-alpha\n---\n# Reference\n");
+  await writeFile(path.join(wrongSource, "SKILL.md"), "---\nname: wrong-reference\n---\n# Wrong\n");
+  const externalTarget = path.join(targetRoot, "reference-alpha");
+  await symlink(wrongSource, externalTarget, "dir");
+  await writeFile(
+    path.join(sourceRoot, "skill-suitcase.yaml"),
+    `suitcases:\n  core:\n    skills:\n      - office-hours\nassignments:\n  openclaw:\n    suitcases:\n      - core\nassignmentPaths:\n  openclaw:\n    kind: openclaw-skills-root\n    assignment: openclaw\n    path: ${targetRoot}\nexternalProjections:\n  reference-alpha:\n    target: openclaw\n    skill: reference-alpha\n    destination: reference-alpha\n    source: ${externalSource}\n    mode: symlink\n    owner: fixture-provider\n`
+  );
+
+  const result = await track({ source: sourceRoot, target: "openclaw", skills: ["office-hours"] });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "diff_external-drifted"), true);
+  await assert.rejects(() => stat(path.join(targetRoot, RECEIPT_FILE)));
+});
+
 test("track refuses provider-modeled read-only targets without creating roots", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-provider-src-"));
   const fakeHome = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-track-provider-home-"));

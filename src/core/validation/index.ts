@@ -2,6 +2,7 @@ import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { type Catalog, loadCatalog } from "../catalog/index.js";
 import { loadUpstreamLock } from "../upstream/index.js";
+import { validateExternalProjectionMetadata } from "../external-projections.js";
 import { isHermesCategorySegment } from "../hermes-categories.js";
 import { type ContractReport, scoreSkillContract } from "./skillify-contract.js";
 
@@ -160,6 +161,12 @@ export async function validate({ source, strict = false }: ValidateArgs): Promis
   }
 
   validateSourcePolicyMetadata(manifest.sourcePolicy, findings);
+  findings.push(...validateExternalProjectionMetadata(manifest).map((finding) => ({
+    level: "error" as const,
+    code: finding.code,
+    message: finding.message,
+    path: finding.path
+  })));
 
   for (const skillName of Object.keys(manifest.compatibility)) {
     if (!referencedSkills.has(skillName)) {

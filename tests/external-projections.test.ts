@@ -5,11 +5,35 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { parseSuitcaseManifest } from "../src/core/catalog/suitcase-manifest.js";
-import { inspectExternalProjections } from "../src/core/external-projections.js";
+import {
+  findUndeclaredDirectorySymlinks,
+  inspectExternalProjections
+} from "../src/core/external-projections.js";
 import { inspectImportSource } from "../src/core/importing/index.js";
 import { validateHermesExternalRoot } from "../src/core/hermes-external-root.js";
 
 const cliPath = path.join(process.cwd(), "dist", "src", "cli.js");
+
+test("generic projection guard reports undeclared directory symlinks but ignores file symlinks", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-external-projection-guard-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const installRoot = path.join(sandbox, "target");
+  const directoryTarget = path.join(sandbox, "directory-target");
+  const fileTarget = path.join(sandbox, "file-target.txt");
+  await mkdir(installRoot, { recursive: true });
+  await mkdir(directoryTarget, { recursive: true });
+  await writeFile(fileTarget, "file target\n");
+  const directoryLink = path.join(installRoot, "directory-link");
+  const fileLink = path.join(installRoot, "file-link");
+  await symlink(directoryTarget, directoryLink, "dir");
+  await symlink(fileTarget, fileLink, "file");
+
+  assert.deepEqual(await findUndeclaredDirectorySymlinks({ installRoot }), [directoryLink]);
+  assert.deepEqual(
+    await findUndeclaredDirectorySymlinks({ installRoot, declaredTargetPaths: [directoryLink] }),
+    []
+  );
+});
 
 function runCliResult<T>(args: string[]): { status: number | null; stdout: T; stderr: string } {
   const result = spawnSync("node", [cliPath, ...args], { encoding: "utf8" });
@@ -83,6 +107,33 @@ test("external projection inspection rejects a current symlink whose source iden
 
   assert.equal(report?.state, "external-invalid");
   assert.match(report?.reason ?? "", /declares declared-skill but its SKILL\.md identity is different-skill/);
+});
+
+test("external projection inspection rejects a source without a valid SKILL identity", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-external-projection-missing-identity-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const installRoot = path.join(sandbox, "target");
+  const source = path.join(sandbox, "declared-skill");
+  await mkdir(installRoot, { recursive: true });
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "# Missing frontmatter\n");
+  await symlink(source, path.join(installRoot, "declared-skill"), "dir");
+
+  const [report] = await inspectExternalProjections({
+    installRoot,
+    projections: [{
+      id: "declared-skill",
+      target: "fixture",
+      skill: "declared-skill",
+      destination: "declared-skill",
+      source,
+      mode: "symlink",
+      owner: "fixture"
+    }]
+  });
+
+  assert.equal(report?.state, "external-invalid");
+  assert.match(report?.reason ?? "", /SKILL\.md identity is missing/);
 });
 
 test("Hermes external validation resolves tilde sources against the overridden home", async (t) => {
@@ -323,8 +374,17 @@ externalProjections:
 
   const result = await inspectImportSource({ source });
   const codes = new Set(result.findings.map((finding) => finding.code));
+  const strictValidation = runCliResult<{ ok: boolean; findings: Array<{ code: string }> }>([
+    "validate",
+    "--source", source,
+    "--strict",
+    "--json"
+  ]);
 
   assert.equal(result.ok, false);
+  assert.equal(strictValidation.status, 1);
+  assert.equal(strictValidation.stdout.ok, false);
+  assert.equal(strictValidation.stdout.findings.some((finding) => finding.code === "invalid_external_projection"), true);
   for (const code of [
     "invalid_external_projection",
     "invalid_external_projection_mode",

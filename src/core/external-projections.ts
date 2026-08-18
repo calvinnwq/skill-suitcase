@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import { parse } from "yaml";
 import { classifySymlinkInstall, type SymlinkInstallState } from "./install-modes.js";
 
@@ -31,10 +31,195 @@ export type ExternalProjectionInspection = ExternalProjection & {
   reason: string;
 };
 
-type ExternalProjectionDeclaration = Partial<Record<
+export type ExternalProjectionDeclaration = Partial<Record<
   "target" | "skill" | "destination" | "source" | "mode" | "owner",
-  string
+  unknown
 >>;
+
+export type ExternalProjectionMetadataManifest = {
+  externalProjections: Record<string, ExternalProjectionDeclaration>;
+  assignmentPaths: Record<string, { assignment?: unknown }>;
+  assignments: Record<string, { suitcases?: unknown }>;
+  suitcases: Record<string, { skills?: unknown }>;
+};
+
+export type ExternalProjectionMetadataFinding = {
+  code: string;
+  message: string;
+  path: string;
+};
+
+export function validateExternalProjectionMetadata(
+  manifest: ExternalProjectionMetadataManifest
+): ExternalProjectionMetadataFinding[] {
+  const findings: ExternalProjectionMetadataFinding[] = [];
+  const destinations = new Map<string, string>();
+  const identities = new Map<string, string>();
+
+  for (const [projectionId, projection] of Object.entries(manifest.externalProjections).sort(([left], [right]) => left.localeCompare(right))) {
+    const target = normalize(projection.target);
+    const skill = normalize(projection.skill);
+    const destination = normalize(projection.destination);
+    const source = normalize(projection.source);
+    const mode = normalize(projection.mode);
+    const owner = normalize(projection.owner);
+    const basePath = `externalProjections.${projectionId}`;
+
+    if (!isPlainPathSegment(projectionId)) {
+      findings.push({
+        code: "invalid_external_projection",
+        message: `External projection ${projectionId} must use a plain manifest key.`,
+        path: basePath
+      });
+    }
+
+    for (const [field, value] of Object.entries({ target, skill, destination, source, mode, owner })) {
+      if (value === null) {
+        findings.push({
+          code: "invalid_external_projection",
+          message: `External projection ${projectionId} is missing required field ${field}.`,
+          path: `${basePath}.${field}`
+        });
+      }
+    }
+
+    if (target !== null && !isPlainPathSegment(target)) {
+      findings.push({
+        code: "invalid_external_projection",
+        message: `External projection ${projectionId} target ${target} must be one plain assignment-path identity segment.`,
+        path: `${basePath}.target`
+      });
+    }
+    if (target !== null && manifest.assignmentPaths[target] === undefined) {
+      findings.push({
+        code: "unknown_external_projection_target",
+        message: `External projection ${projectionId} targets unknown assignment path ${target}.`,
+        path: `${basePath}.target`
+      });
+    }
+    if (skill !== null && !isPlainPathSegment(skill)) {
+      findings.push({
+        code: "invalid_external_projection",
+        message: `External projection ${projectionId} skill ${skill} must be one plain identity segment.`,
+        path: `${basePath}.skill`
+      });
+    }
+    if (mode !== null && mode !== EXTERNAL_PROJECTION_MODE) {
+      findings.push({
+        code: "invalid_external_projection_mode",
+        message: `External projection ${projectionId} uses unsupported mode ${mode}; only ${EXTERNAL_PROJECTION_MODE} is supported.`,
+        path: `${basePath}.mode`
+      });
+    }
+    if (destination !== null && !isSafeExternalProjectionDestination(destination)) {
+      findings.push({
+        code: "unsafe_external_projection_destination",
+        message: `External projection ${projectionId} destination must be a safe relative POSIX path inside its target root.`,
+        path: `${basePath}.destination`
+      });
+    }
+    if (source !== null && !isSafeExternalProjectionSource(source)) {
+      findings.push({
+        code: "unsafe_external_projection_source",
+        message: `External projection ${projectionId} source must be an absolute path or start with ~/.`,
+        path: `${basePath}.source`
+      });
+    }
+
+    if (target === null || skill === null || destination === null) continue;
+    const assignmentName = normalize(manifest.assignmentPaths[target]?.assignment);
+    const assignedSkills = assignmentName === null
+      ? new Set<string>()
+      : assignedSkillsForAssignment(manifest, assignmentName);
+    if (assignedSkills.has(skill)) {
+      findings.push({
+        code: "external_projection_identity_conflict",
+        message: `External projection ${projectionId} duplicates catalog-assigned skill identity ${skill} for target ${target}.`,
+        path: `${basePath}.skill`
+      });
+    }
+
+    const identityKey = `${target}\0${skill}`;
+    const previousIdentity = identities.get(identityKey);
+    if (previousIdentity !== undefined) {
+      findings.push({
+        code: "external_projection_identity_conflict",
+        message: `External projections ${previousIdentity} and ${projectionId} share skill identity ${skill} for target ${target}.`,
+        path: `${basePath}.skill`
+      });
+    } else {
+      identities.set(identityKey, projectionId);
+    }
+
+    const destinationKey = `${target}\0${destination}`;
+    const previousDestination = destinations.get(destinationKey);
+    if (previousDestination !== undefined) {
+      findings.push({
+        code: "external_projection_destination_conflict",
+        message: `External projections ${previousDestination} and ${projectionId} share destination ${destination} for target ${target}.`,
+        path: `${basePath}.destination`
+      });
+    } else {
+      destinations.set(destinationKey, projectionId);
+    }
+  }
+
+  return findings;
+}
+
+export function isExternalProjectionErrorCode(code: string): boolean {
+  return code.startsWith("external-")
+    || code.startsWith("external_projection_")
+    || code === "external_projection_owned";
+}
+
+export async function findUndeclaredDirectorySymlinks({
+  installRoot,
+  declaredTargetPaths = []
+}: {
+  installRoot: string;
+  declaredTargetPaths?: string[];
+}): Promise<string[]> {
+  const root = path.resolve(installRoot);
+  const declared = declaredTargetPaths.map((value) => path.resolve(value));
+  const isDeclaredPath = (candidate: string): boolean => declared.some((base) => {
+    const relative = path.relative(base, candidate);
+    return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+  });
+  const findings: string[] = [];
+
+  async function visit(current: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      let info;
+      try {
+        info = await lstat(entryPath);
+      } catch {
+        continue;
+      }
+      if (info.isSymbolicLink()) {
+        let targetInfo;
+        try {
+          targetInfo = await stat(entryPath);
+        } catch {
+          continue;
+        }
+        if (targetInfo.isDirectory() && !isDeclaredPath(path.resolve(entryPath))) findings.push(entryPath);
+        continue;
+      }
+      if (info.isDirectory()) await visit(entryPath);
+    }
+  }
+
+  await visit(root);
+  return findings.sort();
+}
 
 export function externalProjectionsForTarget(
   declarations: Record<string, ExternalProjectionDeclaration>,
@@ -94,7 +279,7 @@ export async function inspectExternalProjections({
         targetPath,
         sourcePath,
         symlinkState: null,
-        reason: `External projection ${targetPath} has symlinked parent ${symlinkedParent}.`
+        reason: `External projection ${targetPath} has symlinked parent or non-directory parent ${symlinkedParent}.`
       });
       continue;
     }
@@ -127,26 +312,24 @@ export async function inspectExternalProjections({
   return inspections;
 }
 
-export async function readExternalProjectionIdentity(
-  directory: string,
-  fallback = path.basename(path.resolve(directory))
-): Promise<string | null> {
+export async function readExternalProjectionIdentity(directory: string): Promise<string | null> {
   try {
     const normalized = (await readFile(path.join(directory, "SKILL.md"), "utf8")).replace(/\r\n/g, "\n");
-    if (!normalized.startsWith("---")) return fallback;
+    if (!normalized.startsWith("---")) return null;
     const frontmatterAndBody = normalized.slice(3);
     const closing = /\n---\s*\n/.exec(frontmatterAndBody);
-    if (closing?.index === undefined) return fallback;
+    if (closing?.index === undefined) return null;
     const yamlContent = frontmatterAndBody.slice(0, closing.index);
     let metadata: unknown;
     try {
       metadata = parse(yamlContent) as unknown;
     } catch {
-      metadata = parseSimpleFrontmatter(yamlContent);
+      return null;
     }
-    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return fallback;
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
     const name = (metadata as Record<string, unknown>)["name"];
-    return name === undefined || name === null || String(name).length === 0 ? fallback : String(name);
+    if (typeof name !== "string" || name.trim().length === 0) return null;
+    return name.trim();
   } catch {
     return null;
   }
@@ -200,16 +383,6 @@ export function isSafeExternalProjectionSource(source: string): boolean {
     || path.isAbsolute(normalized);
 }
 
-function parseSimpleFrontmatter(value: string): Record<string, string> {
-  const metadata: Record<string, string> = {};
-  for (const line of value.trim().split("\n")) {
-    const separator = line.indexOf(":");
-    if (separator === -1) continue;
-    metadata[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
-  }
-  return metadata;
-}
-
 function externalState(state: SymlinkInstallState): ExternalProjectionState {
   if (state === "correct") return "external-current";
   if (state === "missing") return "external-missing";
@@ -223,7 +396,8 @@ async function findSymlinkedParent(installRoot: string, targetPath: string): Pro
   for (const segment of segments) {
     current = path.join(current, segment);
     try {
-      if ((await lstat(current)).isSymbolicLink()) return current;
+      const info = await lstat(current);
+      if (info.isSymbolicLink() || !info.isDirectory()) return current;
     } catch {
       return null;
     }
@@ -266,8 +440,37 @@ function hasRequiredProjectionFields(projection: ExternalProjection): boolean {
     && projection.owner.trim().length > 0;
 }
 
-function normalize(value: string | undefined): string | null {
+function normalize(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function isPlainPathSegment(value: string): boolean {
+  return value.length > 0
+    && !value.includes("/")
+    && !value.includes("\\")
+    && value !== "."
+    && value !== ".."
+    && value !== "__proto__"
+    && value !== "constructor"
+    && value !== "prototype";
+}
+
+function assignedSkillsForAssignment(
+  manifest: ExternalProjectionMetadataManifest,
+  assignmentName: string
+): Set<string> {
+  const assignedSkills = new Set<string>();
+  const suitcaseNames = manifest.assignments[assignmentName]?.suitcases;
+  if (!Array.isArray(suitcaseNames)) return assignedSkills;
+  for (const suitcaseName of suitcaseNames) {
+    if (typeof suitcaseName !== "string") continue;
+    const skills = manifest.suitcases[suitcaseName]?.skills;
+    if (!Array.isArray(skills)) continue;
+    for (const skill of skills) {
+      if (typeof skill === "string") assignedSkills.add(skill);
+    }
+  }
+  return assignedSkills;
 }

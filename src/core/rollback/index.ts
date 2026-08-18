@@ -4,6 +4,11 @@ import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, un
 import { platform } from "node:os";
 import path from "node:path";
 import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
+import { loadCatalog } from "../catalog/index.js";
+import {
+  externalProjectionsForTarget,
+  resolveExternalProjectionDestination
+} from "../external-projections.js";
 import {
   buildInstalledFiles,
   updateAndWriteReceipt,
@@ -27,6 +32,8 @@ import {
 
 type RollbackInput = {
   receipt: string;
+  source?: string;
+  target?: string;
   __test?: {
     beforeFileMutation?: (targetPath: string) => Promise<void> | void;
     beforeReconcileBackupRemoval?: (backupPath: string) => Promise<void> | void;
@@ -67,7 +74,7 @@ export type RollbackResult = {
   errors: RollbackError[];
 };
 
-export async function rollback({ receipt, __test }: RollbackInput): Promise<RollbackResult> {
+export async function rollback({ receipt, source, target, __test }: RollbackInput): Promise<RollbackResult> {
   if (!receipt) {
     throw new Error("receipt is required");
   }
@@ -89,6 +96,32 @@ export async function rollback({ receipt, __test }: RollbackInput): Promise<Roll
     rollbacks: [],
     errors: []
   };
+
+  const protectedExternalPaths = new Set<string>();
+  if ((source === undefined) !== (target === undefined)) {
+    result.ok = false;
+    result.errors.push({
+      code: "invalid_external_projection_context",
+      message: "rollback requires both --source and --target when either is provided."
+    });
+    return result;
+  }
+  if (source !== undefined && target !== undefined) {
+    try {
+      const { manifest } = await loadCatalog(source);
+      for (const projection of externalProjectionsForTarget(manifest.externalProjections, target)) {
+        const targetPath = resolveExternalProjectionDestination(installRoot, projection.destination);
+        if (targetPath !== null) protectedExternalPaths.add(path.resolve(targetPath));
+      }
+    } catch (error) {
+      result.ok = false;
+      result.errors.push({
+        code: "invalid_external_projection_context",
+        message: `Could not load rollback catalog context: ${errorMessage(error)}`
+      });
+      return result;
+    }
+  }
 
   try {
     await readReceipt(receiptPath);
@@ -165,6 +198,44 @@ export async function rollback({ receipt, __test }: RollbackInput): Promise<Roll
       // a safe no-op that leaves the link and its source untouched.
       const appliedSymlink = parseAppliedSymlinkRollback(record, installRoot, receiptDirectory);
       if (appliedSymlink.kind === "apply-created") {
+        if (source === undefined || target === undefined) {
+          result.ok = false;
+          result.summary.refused += 1;
+          result.errors.push({
+            code: "external_projection_context_required",
+            message: "Rollback refuses to remove an apply-created symlink without --source and --target catalog context.",
+            skill,
+            path: appliedSymlink.targetPath
+          });
+          result.rollbacks.push({
+            skill,
+            targetPath: appliedSymlink.targetPath,
+            status: "refused",
+            restored: 0,
+            removed: 0,
+            failed: 0
+          });
+          continue;
+        }
+        if (protectedExternalPaths.has(path.resolve(appliedSymlink.targetPath))) {
+          result.ok = false;
+          result.summary.refused += 1;
+          result.errors.push({
+            code: "external_projection_owned",
+            message: `Rollback refuses to remove declared external projection at ${appliedSymlink.targetPath}.`,
+            skill,
+            path: appliedSymlink.targetPath
+          });
+          result.rollbacks.push({
+            skill,
+            targetPath: appliedSymlink.targetPath,
+            status: "refused",
+            restored: 0,
+            removed: 0,
+            failed: 0
+          });
+          continue;
+        }
         const removal = await removeAppliedSymlink(
           appliedSymlink,
           installRoot,

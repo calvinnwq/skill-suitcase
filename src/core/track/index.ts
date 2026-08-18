@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { diff } from "../diffing/index.js";
+import { isExternalProjectionErrorCode } from "../external-projections.js";
 import type { TargetOverrides } from "../catalog/index.js";
 import {
   classifySymlinkInstall,
@@ -415,7 +416,10 @@ function collectTrackErrors(
   selectedSkills: string[]
 ): TrackError[] {
   const errors: TrackError[] = diffResult.errors
-    .filter((error) => selectedSkillSet === null || error.skill === undefined || selectedSkillSet.has(error.skill))
+    .filter((error) => selectedSkillSet === null
+      || error.skill === undefined
+      || selectedSkillSet.has(error.skill)
+      || isExternalProjectionErrorCode(error.code))
     .map((error) => trackError({
       code: trackCodeForDiffError(error.code),
       message: error.message,
