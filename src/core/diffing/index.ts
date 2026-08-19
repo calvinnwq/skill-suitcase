@@ -9,6 +9,7 @@ import {
 } from "../catalog/target-registry.js";
 import { type PlanResult, plan } from "../planning/index.js";
 import type { Catalog } from "../catalog/index.js";
+import { classifySymlinkInstall } from "../install-modes.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
 import {
   collectSourcePolicyDeniedPaths,
@@ -342,6 +343,20 @@ async function comparePlannedSkill(
 ): Promise<{ entries: DiffEntry[]; errors: DiffResultError[] }> {
   const sourceRoot = plannedSkill.sourcePath;
   const targetRoot = path.join(installRoot, plannedSkill.destination);
+  const targetRootClassification = await classifySymlinkInstall({
+    targetPath: targetRoot,
+    expectedSourcePath: sourceRoot
+  });
+  if (targetRootClassification.state === "wrong-target" || targetRootClassification.state === "broken") {
+    return {
+      entries: [],
+      errors: [{
+        code: "planned_skill_target_mismatch",
+        message: `Planned skill ${plannedSkill.skill} target ${targetRoot} is ${targetRootClassification.state} instead of an exact symlink to ${sourceRoot}.`,
+        skill: plannedSkill.skill
+      }]
+    };
+  }
   const sourceListing = await collectSourceEntries(sourceRoot, plannedSkill.skill, sourcePolicy);
   if (!sourceListing.ok) {
     return { entries: [], errors: sourceListing.errors };

@@ -96,6 +96,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
   let currentValidationPolicy: ValidationPolicyState = { skillify: false, skillifySkip: false, skillName: null };
   let currentField: CompatibilityField = null;
   let currentVariantField: VariantField = null;
+  const externalProjectionFields = new Map<string, Set<string>>();
 
   for (const rawLine of lines) {
     const line = rawLine.replace(/\s+$/, "");
@@ -239,7 +240,9 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
     if (section === "externalProjections") {
       const projection = manifest.externalProjections[name];
       if (!projection) continue;
-      parseExternalProjectionLine(projection, indent, trimmed);
+      const seenFields = externalProjectionFields.get(name) ?? new Set<string>();
+      parseExternalProjectionLine(projection, name, indent, trimmed, seenFields);
+      externalProjectionFields.set(name, seenFields);
       continue;
     }
 
@@ -431,8 +434,10 @@ function parseMappingLine(record: Record<string, string>, indent: number, trimme
 
 function parseExternalProjectionLine(
   projection: ManifestExternalProjection,
+  projectionId: string,
   indent: number,
-  trimmed: string
+  trimmed: string,
+  seenFields: Set<string>
 ): void {
   if (indent !== 4 || !trimmed.includes(":")) return;
   const separator = trimmed.indexOf(":");
@@ -447,6 +452,10 @@ function parseExternalProjectionLine(
   ) {
     return;
   }
+  if (seenFields.has(key)) {
+    throw new Error(`Duplicate external projection field ${projectionId}.${key}.`);
+  }
+  seenFields.add(key);
   projection[key] = unquoteValue(trimmed.slice(separator + 1));
 }
 

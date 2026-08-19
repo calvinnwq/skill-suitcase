@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -101,6 +101,53 @@ compatibility:
     "utf8"
   );
   assert.equal(payload, "Office Hours\n");
+});
+
+test("diff refuses a planned symlink redirected to a wrong target", async (t) => {
+  const source = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-wrong-target-source-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-wrong-target-target-"));
+  const wrongSource = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-diff-wrong-target-other-"));
+  t.after(() => rm(source, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(wrongSource, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(source, "skills", "office-hours");
+  const wrongSkill = path.join(wrongSource, "office-hours");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(wrongSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "same bytes\n");
+  await writeFile(path.join(wrongSkill, "SKILL.md"), "same bytes\n");
+  await symlink(wrongSkill, path.join(targetRoot, "office-hours"));
+  await createCatalog(
+    source,
+    `suitcases:
+  core:
+    skills:
+      - office-hours
+
+assignments:
+  openclaw:
+    suitcases:
+      - core
+
+assignmentPaths:
+  openclaw:
+    kind: openclaw-skills-root
+    assignment: openclaw
+    path: ${targetRoot}
+
+compatibility:
+  office-hours:
+    agents:
+      - openclaw
+`
+  );
+
+  const result = await diff({ source, target: "openclaw" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "planned_skill_target_mismatch"), true);
+  assert.equal(result.summary.unchanged, 0);
 });
 
 test("diff marks blocked canonical installs for a Codex-like target", async (t) => {

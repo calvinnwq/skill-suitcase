@@ -6,7 +6,7 @@ import path from "node:path";
 import { DEFAULT_SKILLS_DIRECTORY } from "../../config/defaults.js";
 import { classifySymlinkInstall, SYMLINK_MODE } from "../install-modes.js";
 import { loadCatalog, type Catalog, type TargetOverrides } from "../catalog/index.js";
-import { resolveTargetRegistryEntryFromManifest } from "../catalog/target-registry.js";
+import { resolveTargetRegistryEntryFromManifest, type TargetRegistryEntry } from "../catalog/target-registry.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
 import {
   externalProjectionsForTarget,
@@ -162,6 +162,13 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
       if (path.resolve(catalogInstallRoot) !== path.resolve(installRoot)) {
         throw new Error(`Target ${targetEntry.id} resolves to ${catalogInstallRoot}, not receipt root ${installRoot}.`);
       }
+      const provenanceError = await validateRollbackReceiptProvenance({
+        receipt: receiptPayload,
+        sourceRoot: source,
+        targetEntry,
+        manifest
+      });
+      if (provenanceError !== null) throw new Error(provenanceError);
       for (const projection of externalProjectionsForTarget(manifest.externalProjections, targetEntry.id)) {
         const targetPath = resolveExternalProjectionDestination(installRoot, projection.destination);
         if (targetPath !== null) protectedExternalPaths.add(path.resolve(targetPath));
@@ -675,6 +682,70 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
 type DerivedRollbackProtection =
   | { ok: true; available: boolean; protectedPaths: string[] }
   | { ok: false; message: string };
+
+type RollbackTargetEntry = TargetRegistryEntry;
+
+async function validateRollbackReceiptProvenance({
+  receipt,
+  sourceRoot,
+  targetEntry,
+  manifest
+}: {
+  receipt: Receipt;
+  sourceRoot: string;
+  targetEntry: RollbackTargetEntry;
+  manifest: Catalog;
+}): Promise<string | null> {
+  if (!isRecord(receipt.installs)) return null;
+  const records = collectRecords(receipt.installs).records
+    .filter(({ record }) => rollbackNeedsCatalogContext(record));
+  if (records.length === 0) return null;
+
+  let canonicalSourceRoot: string;
+  try {
+    canonicalSourceRoot = await realpath(sourceRoot);
+  } catch (error) {
+    return `Rollback cannot validate catalog provenance: ${errorMessage(error)}`;
+  }
+  const validTargetIdentities = new Set([targetEntry.id, targetEntry.assignment]);
+
+  for (const { skill, record } of records) {
+    const sourcePath = receiptRecordSourcePath(record);
+    if (sourcePath === null) {
+      return `Rollback cannot validate catalog provenance for ${skill}: receipt source paths are missing or disagree.`;
+    }
+    const recordSourceRoot = await findCatalogRoot(sourcePath);
+    if (recordSourceRoot === null) {
+      return `Rollback cannot validate catalog provenance for ${skill}: no catalog root was found above ${sourcePath}.`;
+    }
+    let canonicalRecordSourceRoot: string;
+    try {
+      canonicalRecordSourceRoot = await realpath(recordSourceRoot);
+    } catch (error) {
+      return `Rollback cannot validate catalog provenance for ${skill}: ${errorMessage(error)}`;
+    }
+    if (canonicalRecordSourceRoot !== canonicalSourceRoot) {
+      return `Rollback cannot validate catalog provenance for ${skill}: receipt source ${sourcePath} belongs to a different catalog.`;
+    }
+
+    const identities = [normalizeString(record.agent), normalizeString(record.target)]
+      .filter((identity): identity is string => identity !== null);
+    if (identities.length === 0 || identities.some((identity) => !validTargetIdentities.has(identity))) {
+      return `Rollback cannot validate catalog provenance for ${skill}: receipt target or agent identity does not match ${targetEntry.assignment}.`;
+    }
+    const recordedSkill = normalizeString(record.skill);
+    if (recordedSkill !== null && recordedSkill !== skill) {
+      return `Rollback cannot validate catalog provenance for ${skill}: receipt skill identity does not match its install key.`;
+    }
+    if (!catalogAssignmentContainsSkill(manifest, targetEntry.assignment, skill)) {
+      return `Rollback cannot validate catalog provenance for ${skill}: the skill is not assigned to target ${targetEntry.assignment}.`;
+    }
+    if (!sourcePathMatchesCatalogSkill(sourcePath, sourceRoot, skill, record.variant, manifest)) {
+      return `Rollback cannot validate catalog provenance for ${skill}: receipt source ${sourcePath} is not the exact declared catalog source for its variant.`;
+    }
+  }
+  return null;
+}
 
 async function deriveRollbackProtection({
   receipt,

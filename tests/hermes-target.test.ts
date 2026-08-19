@@ -56,7 +56,7 @@ async function createCategorizedRecoveryFixture(
   category: string;
   targetSkill: string;
   artifactPath: string;
-  writeManifest: (included?: boolean, category?: string) => Promise<void>;
+  writeManifest: (included?: boolean, category?: string, withMissingProjection?: boolean) => Promise<void>;
 }> {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-recovery-"));
   t.after(() => rm(sandbox, { recursive: true, force: true }));
@@ -71,7 +71,11 @@ async function createCategorizedRecoveryFixture(
   await mkdir(externalRoot, { recursive: true });
   await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: hello-hermes\n---\n# Catalog\n");
   await writeFile(path.join(hermesHome, "config.yaml"), `skills:\n  external_dirs: ${externalRoot}\n`);
-  const writeManifest = async (included = true, manifestCategory = "productivity") => writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
+  const writeManifest = async (
+    included = true,
+    manifestCategory = "productivity",
+    withMissingProjection = false
+  ) => writeFile(path.join(source, "skill-suitcase.yaml"), `suitcases:
   core:
     skills:${included ? "\n      - hello-hermes" : " []"}
 assignments:
@@ -86,6 +90,16 @@ assignmentPaths:
     home: ${hermesHome}
     path: ${externalRoot}
 compatibility:${included ? "\n  hello-hermes:\n    agents:\n      - hermes" : " {}"}
+${withMissingProjection ? `
+externalProjections:
+  missing-reference:
+    target: hermes
+    skill: external-reference
+    destination: research/missing-reference
+    source: ${path.join(sandbox, "external-reference")}
+    mode: symlink
+    owner: fixture-provider
+` : ""}
 `);
   await writeManifest();
   const artifactRoot = path.join(sandbox, "artifact");
@@ -104,6 +118,26 @@ compatibility:${included ? "\n  hello-hermes:\n    agents:\n      - hermes" : " 
     writeManifest
   };
 }
+
+test("targeted recovery preserves target-wide external projection failures", async (t) => {
+  const fixture = await createCategorizedRecoveryFixture(t);
+  const projectionSource = path.join(fixture.sandbox, "external-reference");
+  await mkdir(projectionSource, { recursive: true });
+  await writeFile(path.join(projectionSource, "SKILL.md"), "---\nname: external-reference\n---\n# External\n");
+  await fixture.writeManifest(true, "productivity", true);
+
+  const inputs = [
+    importTarget({ source: fixture.source, target: "hermes", skills: ["hello-hermes"], dryRun: true }),
+    reconcile({ source: fixture.source, target: "hermes", skills: ["hello-hermes"], dryRun: true }),
+    repair({ source: fixture.source, target: "hermes", skills: ["hello-hermes"], dryRun: true })
+  ];
+  const results = await Promise.all(inputs);
+
+  for (const result of results) {
+    assert.equal(result.ok, false);
+    assert.equal(result.errors.some((error) => error.code === "diff_external-missing"), true);
+  }
+});
 
 test("Hermes follows the writable target lifecycle used by OpenClaw", async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-target-"));

@@ -215,6 +215,24 @@ test("Hermes scans undeclared directory symlinks when no skills are planned", as
   );
 });
 
+test("Hermes scans unreadable local skill metadata as an inspection failure", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-unreadable-skill-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const home = path.join(sandbox, "hermes");
+  const installRoot = path.join(sandbox, "managed-skills");
+  await mkdir(path.join(home, "skills", "legacy-skill", "SKILL.md"), { recursive: true });
+  await mkdir(installRoot, { recursive: true });
+  await writeFile(path.join(home, "config.yaml"), `skills:\n  external_dirs:\n    - ${installRoot}\n`);
+
+  const findings = await validateHermesExternalRoot({ home, installRoot, planned: [] });
+
+  assert.equal(findings.some((finding) => finding.code === "hermes_shadow_inspection_failed"), true);
+  assert.match(
+    findings.find((finding) => finding.code === "hermes_shadow_inspection_failed")?.message ?? "",
+    /SKILL\.md/
+  );
+});
+
 test("external projection inspection rejects a destination beneath a symlinked parent", async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-external-projection-parent-"));
   t.after(() => rm(sandbox, { recursive: true, force: true }));
@@ -310,6 +328,25 @@ externalProjections:
     owner: fixture
 `),
     /Duplicate external projection ID duplicate/
+  );
+});
+
+test("manifest parser rejects duplicate external projection fields", () => {
+  assert.throws(
+    () => parseSuitcaseManifest(`suitcases: {}
+assignments: {}
+assignmentPaths: {}
+externalProjections:
+  duplicate:
+    target: hermes
+    skill: first
+    destination: first
+    source: /opt/first
+    source: /opt/second
+    mode: symlink
+    owner: fixture
+`),
+    /Duplicate external projection field duplicate\.source/
   );
 });
 

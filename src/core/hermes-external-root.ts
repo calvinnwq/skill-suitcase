@@ -138,6 +138,7 @@ export async function validateHermesExternalRoot({
     homeDirectory: normalizedProjectionHome
   });
   const externalIdentities = new Map<string, string>();
+  const externalIdentityInspectionErrors: Array<{ path: string; message: string }> = [];
   for (const inspection of externalInspections) {
     if (
       inspection.state !== "external-current"
@@ -152,7 +153,11 @@ export async function validateHermesExternalRoot({
       continue;
     }
 
-    const identity = await readLocalSkillIdentity(inspection.targetPath, inspection.skill);
+    const identity = await readLocalSkillIdentity(
+      inspection.targetPath,
+      inspection.skill,
+      externalIdentityInspectionErrors
+    );
     if (identity !== inspection.skill) {
       findings.push({
         code: "external_projection_identity_mismatch",
@@ -195,6 +200,7 @@ export async function validateHermesExternalRoot({
       traverse: false
     });
   }
+  findings.push(...shadowInspectionFindings(externalIdentityInspectionErrors));
 
   const managedShadows = await findSkillShadows(
     normalizedRoot,
@@ -426,7 +432,7 @@ async function findSkillShadows(
       });
       continue;
     }
-    const identity = await readLocalSkillIdentity(current, path.basename(current));
+    const identity = await readLocalSkillIdentity(current, path.basename(current), inspectionErrors);
     const plannedDestination = plannedDestinations.get(plannedDestinationKey(current));
     if (identity !== null && skills.has(identity) && identity !== plannedDestination?.identity) found.add(identity);
     entries.sort((left, right) => left.name.localeCompare(right.name));
@@ -434,7 +440,7 @@ async function findSkillShadows(
       const child = path.join(current, entry.name);
       if (entry.isSymbolicLink()) {
         const plannedChild = plannedDestinations.get(plannedDestinationKey(child));
-        if (plannedChild !== undefined && await isExpectedPlannedSkillSymlink(child, plannedChild)) {
+        if (plannedChild !== undefined && await isExpectedPlannedSkillSymlink(child, plannedChild, inspectionErrors)) {
           if (plannedChild.traverse !== false) pending.push(child);
           continue;
         }
@@ -464,7 +470,8 @@ async function findSkillShadows(
 
 async function isExpectedPlannedSkillSymlink(
   targetPath: string,
-  planned: { identity: string; sourcePath: string | null; traverse?: boolean }
+  planned: { identity: string; sourcePath: string | null; traverse?: boolean },
+  inspectionErrors?: Array<{ path: string; message: string }>
 ): Promise<boolean> {
   if (planned.sourcePath === null) return false;
   const classification = await classifySymlinkInstall({
@@ -472,7 +479,7 @@ async function isExpectedPlannedSkillSymlink(
     expectedSourcePath: planned.sourcePath
   });
   if (classification.state !== "correct") return false;
-  return await readLocalSkillIdentity(targetPath, path.basename(targetPath)) === planned.identity;
+  return await readLocalSkillIdentity(targetPath, path.basename(targetPath), inspectionErrors) === planned.identity;
 }
 
 function shadowTraversalFindings(directorySymlinks: string[]): HermesExternalRootFinding[] {
@@ -491,9 +498,13 @@ function shadowInspectionFindings(
   }));
 }
 
-async function readLocalSkillIdentity(directory: string, fallback: string): Promise<string | null> {
+async function readLocalSkillIdentity(
+  directory: string,
+  fallback: string,
+  inspectionErrors?: Array<{ path: string; message: string }>
+): Promise<string | null> {
+  const skillIndex = path.join(directory, "SKILL.md");
   try {
-    const skillIndex = path.join(directory, "SKILL.md");
     const normalized = (await readFile(skillIndex, "utf8")).replace(/\r\n/g, "\n");
     if (!normalized.startsWith("---")) return fallback;
     const frontmatterAndBody = normalized.slice(3);
@@ -509,7 +520,13 @@ async function readLocalSkillIdentity(directory: string, fallback: string): Prom
     if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return fallback;
     const name = (metadata as Record<string, unknown>)["name"];
     return name === undefined || name === null || String(name).length === 0 ? fallback : String(name);
-  } catch {
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      inspectionErrors?.push({
+        path: skillIndex,
+        message: errorMessage(error)
+      });
+    }
     return null;
   }
 }
@@ -540,4 +557,8 @@ function isInsideOrEqual(candidate: string, root: string): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

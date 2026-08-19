@@ -18,6 +18,7 @@ import {
   withReceiptTransaction
 } from "../receipts/transaction.js";
 import { SYMLINK_MODE } from "../install-modes.js";
+import { isExternalProjectionErrorCode } from "../external-projections.js";
 import { readSkillVersion } from "../skill-metadata.js";
 import { status } from "../status/index.js";
 import {
@@ -573,7 +574,11 @@ async function planImport(input: ImportTargetInput, selectedSkills: string[]): P
   }
 
   for (const error of diffResult.errors) {
-    if (error.skill !== undefined && !selectedSkillSet.has(error.skill)) {
+    if (
+      error.skill !== undefined
+      && !selectedSkillSet.has(error.skill)
+      && !isExternalProjectionErrorCode(error.code)
+    ) {
       continue;
     }
     errors.push(importError({
@@ -632,7 +637,11 @@ async function planImport(input: ImportTargetInput, selectedSkills: string[]): P
   }
   const statusResult = await status(statusInput);
   for (const statusError of statusResult.errors) {
-    if (statusError.skill !== undefined && !selectedSkillSet.has(statusError.skill)) {
+    if (
+      statusError.skill !== undefined
+      && !selectedSkillSet.has(statusError.skill)
+      && !isExternalProjectionErrorCode(statusError.code)
+    ) {
       continue;
     }
     errors.push(importError({

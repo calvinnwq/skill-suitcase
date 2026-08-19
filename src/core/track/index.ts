@@ -504,6 +504,9 @@ function trackCodeForDiffError(code: string): string {
   if (code === "source_missing" || code === "source_unreadable") {
     return code;
   }
+  if (code === "planned_skill_target_mismatch") {
+    return "target_symlink_mismatch";
+  }
   return `diff_${code}`;
 }
 

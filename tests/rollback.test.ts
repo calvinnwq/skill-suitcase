@@ -109,6 +109,35 @@ test("apply captures rollback state and rollback restores previous file bytes", 
   assert.equal(await readFile(path.join(targetSkill, "runtime.js"), "utf8"), "console.log(\"old\");\n");
 });
 
+test("rollback rejects explicit catalog context for a foreign receipt source", async (t) => {
+  const fixture = await createAppliedUpdate(t);
+  const foreignRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-foreign-catalog-"));
+  t.after(() => rm(foreignRoot, { recursive: true, force: true }));
+  await writeCatalog(foreignRoot, fixture.targetRoot);
+  const foreignSkill = path.join(foreignRoot, "skills", "office-hours");
+  await mkdir(foreignSkill, { recursive: true });
+  await writeFile(path.join(foreignSkill, "SKILL.md"), "---\nversion: foreign\n---\n");
+
+  const receipt = JSON.parse(await readFile(fixture.receiptPath, "utf8")) as {
+    installs: { "office-hours": { source: { path: string }; sourcePath: string } };
+  };
+  receipt.installs["office-hours"].source = { path: foreignSkill };
+  receipt.installs["office-hours"].sourcePath = foreignSkill;
+  await writeFile(fixture.receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  const receiptAfterTamper = await readFile(fixture.receiptPath, "utf8");
+
+  const result = await rollback({
+    receipt: fixture.receiptPath,
+    source: fixture.sourceRoot,
+    target: "openclaw"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "invalid_external_projection_context"), true);
+  assert.equal(await readFile(path.join(fixture.targetSkill, "runtime.js"), "utf8"), "console.log(\"new\");\n");
+  assert.equal(await readFile(fixture.receiptPath, "utf8"), receiptAfterTamper);
+});
+
 test("rollback preserves the replaced target file mode", async (t) => {
   const { receiptPath, targetSkill } = await createAppliedUpdate(t);
   const runtimePath = path.join(targetSkill, "runtime.js");
