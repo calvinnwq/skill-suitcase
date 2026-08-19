@@ -89,7 +89,7 @@ export async function validateHermesExternalRoot({
     });
   }
 
-  const localShadows = await findSkillShadows(localSkillsRoot, plannedSkills);
+  const localShadows = await findSkillShadows(localSkillsRoot, plannedSkills, new Map(), path.resolve, true);
   findings.push(...shadowTraversalFindings(localShadows.directorySymlinks));
   findings.push(...shadowInspectionFindings(localShadows.inspectionErrors));
   for (const skill of localShadows.skills) {
@@ -405,7 +405,8 @@ async function findSkillShadows(
     sourcePath: string | null;
     traverse?: boolean;
   }> = new Map(),
-  plannedDestinationKey: (value: string) => string = path.resolve
+  plannedDestinationKey: (value: string) => string = path.resolve,
+  allowMissingRoot = false
 ): Promise<{
   skills: string[];
   directorySymlinks: string[];
@@ -426,6 +427,13 @@ async function findSkillShadows(
       visited.add(resolved);
       entries = await readdir(current, { withFileTypes: true });
     } catch (error) {
+      if (current === root && allowMissingRoot && isMissingPathError(error)) {
+        try {
+          await lstat(current);
+        } catch (rootError) {
+          if (isMissingPathError(rootError)) continue;
+        }
+      }
       inspectionErrors.push({
         path: current,
         message: error instanceof Error ? error.message : "unknown error"

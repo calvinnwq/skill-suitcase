@@ -454,6 +454,50 @@ test("rollback removes installs that were missing before apply", async (t) => {
   assert.equal(receipt.installs?.["office-hours"], undefined);
 });
 
+test("receipt-only rollback refuses to remove a target containing an undeclared directory symlink", async (t) => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-undeclared-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-undeclared-target-"));
+  const externalRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-undeclared-external-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+  t.after(() => rm(externalRoot, { recursive: true, force: true }));
+
+  await writeCatalog(sourceRoot, targetRoot);
+  const sourceSkill = path.join(sourceRoot, "skills", "office-hours");
+  const targetSkill = path.join(targetRoot, "office-hours");
+  const undeclaredPath = path.join(targetSkill, "undeclared");
+  await mkdir(sourceSkill, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nversion: 2026.06.11\n---\n");
+  await writeFile(path.join(sourceSkill, "runtime.js"), "console.log(\"created\");\n");
+
+  const lockPath = path.join(await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-undeclared-lock-")), "plan-lock.json");
+  t.after(() => rm(path.dirname(lockPath), { recursive: true, force: true }));
+  await writeFile(
+    lockPath,
+    `${JSON.stringify(await buildPlanLock({
+      source: sourceRoot,
+      target: "openclaw",
+      assignmentPath: "openclaw",
+      sourceCommit: "deadbeef"
+    }), null, 2)}\n`
+  );
+
+  const applied = await apply({ source: sourceRoot, target: "openclaw", lock: lockPath });
+  assert.equal(applied.ok, true);
+  await symlink(externalRoot, undeclaredPath, "dir");
+  const receiptPath = path.join(targetRoot, RECEIPT_FILE);
+  const receiptBefore = await readFile(receiptPath, "utf8");
+
+  const result = await rollback({ receipt: receiptPath });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "external_projection_undeclared_symlink"), true);
+  assert.equal((await lstat(targetSkill)).isDirectory(), true);
+  assert.equal((await lstat(undeclaredPath)).isSymbolicLink(), true);
+  assert.equal(await readlink(undeclaredPath), externalRoot);
+  assert.equal(await readFile(receiptPath, "utf8"), receiptBefore);
+});
+
 test("rollback preserves an external projection nested in a copy install", async (t) => {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-copy-projection-src-"));
   const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-rollback-copy-projection-target-"));

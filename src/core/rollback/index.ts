@@ -10,6 +10,7 @@ import { resolveTargetRegistryEntryFromManifest, type TargetRegistryEntry } from
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
 import {
   externalProjectionsForTarget,
+  findUndeclaredDirectorySymlinks,
   resolveExternalProjectionDestination,
   validateExternalProjectionMetadata
 } from "../external-projections.js";
@@ -293,10 +294,19 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
           });
           continue;
         }
+        const mutationSafety = await inspectRollbackMutationRoot({
+          mutationRoot: path.dirname(appliedSymlink.targetPath),
+          declaredTargetPaths: [appliedSymlink.targetPath, ...protectedExternalPaths]
+        });
+        if (!mutationSafety.ok) {
+          refuseRollbackMutation(result, skill, appliedSymlink.targetPath, mutationSafety);
+          continue;
+        }
         const removal = await removeAppliedSymlink(
           appliedSymlink,
           installRoot,
-          __test?.afterAppliedSymlinkClassification
+          __test?.afterAppliedSymlinkClassification,
+          [...protectedExternalPaths]
         );
         if (removal.kind === "removed") {
           result.summary.removed += 1;
@@ -317,7 +327,7 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
         if (removal.kind === "refused") {
           result.summary.refused += 1;
           result.errors.push({
-            code: "target_drift",
+            code: removal.code ?? "target_drift",
             message: removal.message,
             skill,
             path: appliedSymlink.targetPath
@@ -503,6 +513,22 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
       continue;
     }
 
+    const destructiveMutationRoot = installWasPreviouslyMissing(record)
+      ? targetPath
+      : installWasPreviouslyUnmanagedReconcile(record) && rollbackState.backupPath !== null
+        ? rollbackState.backupPath
+        : null;
+    if (destructiveMutationRoot !== null) {
+      const mutationSafety = await inspectRollbackMutationRoot({
+        mutationRoot: destructiveMutationRoot,
+        declaredTargetPaths: [...protectedExternalPaths]
+      });
+      if (!mutationSafety.ok) {
+        refuseRollbackMutation(result, skill, targetPath, mutationSafety);
+        continue;
+      }
+    }
+
     const item: RollbackResultItem = {
       skill,
       targetPath,
@@ -545,7 +571,11 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
     } else {
       if (installWasPreviouslyMissing(record)) {
         await __test?.beforeMissingInstallTargetRemoval?.(targetPath);
-        const removedTarget = await removeMissingInstallTarget(targetPath, installRoot);
+        const removedTarget = await removeMissingInstallTarget(
+          targetPath,
+          installRoot,
+          [...protectedExternalPaths]
+        );
         if (removedTarget.status === "failed") {
           item.failed += 1;
           result.summary.failed += 1;
@@ -573,7 +603,8 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
           targetPath,
           backupPath: rollbackState.backupPath,
           installRoot,
-          beforeRemoval: __test?.beforeReconcileBackupRemoval
+          beforeRemoval: __test?.beforeReconcileBackupRemoval,
+          declaredTargetPaths: [...protectedExternalPaths]
         });
         if (removedBackup.status === "failed") {
           item.failed += 1;
@@ -996,10 +1027,11 @@ function removeReceiptInstallRecord(
 async function removeAppliedSymlink(
   rollback: { targetPath: string; expectedSourcePath: string },
   installRoot: string,
-  afterClassification?: ((targetPath: string) => Promise<void> | void) | undefined
+  afterClassification?: ((targetPath: string) => Promise<void> | void) | undefined,
+  declaredTargetPaths: string[] = []
 ): Promise<
   | { kind: "removed" }
-  | { kind: "refused"; message: string }
+  | { kind: "refused"; code?: string; message: string }
   | { kind: "failed"; message: string }
 > {
   if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, rollback.targetPath))) {
@@ -1033,6 +1065,17 @@ async function removeAppliedSymlink(
     return {
       kind: "refused",
       message: `Refusing to remove ${rollback.targetPath}: expected a symlink to ${rollback.expectedSourcePath} but found ${finalClassification.state}.`
+    };
+  }
+  const mutationSafety = await inspectRollbackMutationRoot({
+    mutationRoot: path.dirname(rollback.targetPath),
+    declaredTargetPaths: [rollback.targetPath, ...declaredTargetPaths]
+  });
+  if (!mutationSafety.ok) {
+    return {
+      kind: "refused",
+      code: mutationSafety.code,
+      message: mutationSafety.message
     };
   }
   try {
@@ -1206,7 +1249,11 @@ function installWasPreviouslyUnmanagedReconcile(record: ReceiptInstallRecord): b
   return record.mode === "reconcile" && isRecord(record.priorState) && record.priorState.status === "unknown";
 }
 
-async function removeMissingInstallTarget(targetPath: string, installRoot: string): Promise<
+async function removeMissingInstallTarget(
+  targetPath: string,
+  installRoot: string,
+  declaredTargetPaths: string[] = []
+): Promise<
   | { status: "removed" }
   | { status: "failed"; code: string; message: string }
 > {
@@ -1220,8 +1267,22 @@ async function removeMissingInstallTarget(targetPath: string, installRoot: strin
       }
       return { status: "removed" };
     }
+    if (!(await targetRootIsRealDirectoryUnderInstallRoot(installRoot, targetPath))) {
+      throw new Error(`Refusing to remove ${targetPath}: the target is not a real directory under ${installRoot}.`);
+    }
     if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, targetPath))) {
       throw new Error(`Refusing to remove ${targetPath}: its parent is not a real directory under ${installRoot}.`);
+    }
+    const mutationSafety = await inspectRollbackMutationRoot({
+      mutationRoot: targetPath,
+      declaredTargetPaths
+    });
+    if (!mutationSafety.ok) {
+      return {
+        status: "failed",
+        code: mutationSafety.code,
+        message: mutationSafety.message
+      };
     }
     await rm(targetPath, { recursive: true, force: true });
     return { status: "removed" };
@@ -1239,13 +1300,15 @@ async function removeReconcileBackup({
   targetPath,
   backupPath,
   installRoot,
-  beforeRemoval
+  beforeRemoval,
+  declaredTargetPaths = []
 }: {
   skill: string;
   targetPath: string;
   backupPath: string | null;
   installRoot: string;
   beforeRemoval?: ((backupPath: string) => Promise<void> | void) | undefined;
+  declaredTargetPaths?: string[];
 }): Promise<
   | { status: "removed" | "skipped" }
   | { status: "failed"; code: string; message: string; path: string }
@@ -1273,8 +1336,23 @@ async function removeReconcileBackup({
       }
       return { status: "removed" };
     }
+    if (!(await targetRootIsRealDirectoryUnderInstallRoot(installRoot, backupPath))) {
+      throw new Error(`Refusing to remove ${backupPath}: the backup is not a real directory under ${installRoot}.`);
+    }
     if (!(await symlinkParentIsRealDirectoryUnderInstallRoot(installRoot, backupPath))) {
       throw new Error(`Refusing to remove ${backupPath}: its parent is not a real directory under the receipt install root.`);
+    }
+    const mutationSafety = await inspectRollbackMutationRoot({
+      mutationRoot: backupPath,
+      declaredTargetPaths
+    });
+    if (!mutationSafety.ok) {
+      return {
+        status: "failed",
+        code: mutationSafety.code,
+        message: mutationSafety.message,
+        path: backupPath
+      };
     }
     await rm(backupPath, { recursive: true, force: true });
     return { status: "removed" };
@@ -1544,6 +1622,88 @@ async function rollbackTargetIsMissing(targetPath: string): Promise<boolean> {
     if (isNodeError(error) && error.code === "ENOENT") return true;
     throw error;
   }
+}
+
+type RollbackMutationSafety =
+  | { ok: true }
+  | { ok: false; code: string; message: string; path: string };
+
+async function inspectRollbackMutationRoot({
+  mutationRoot,
+  declaredTargetPaths
+}: {
+  mutationRoot: string;
+  declaredTargetPaths: string[];
+}): Promise<RollbackMutationSafety> {
+  const normalizedRoot = path.resolve(mutationRoot);
+  let rootInfo;
+  try {
+    rootInfo = await lstat(normalizedRoot);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return { ok: true };
+    return {
+      ok: false,
+      code: "external_projection_inspection_failed",
+      message: `Rollback external projection safety inspection failed for ${normalizedRoot}: ${errorMessage(error)}`,
+      path: normalizedRoot
+    };
+  }
+
+  if (rootInfo.isSymbolicLink()) {
+    return {
+      ok: false,
+      code: "external_projection_undeclared_symlink",
+      message: `Undeclared directory symlink ${normalizedRoot} blocks rollback.`,
+      path: normalizedRoot
+    };
+  }
+  if (!rootInfo.isDirectory()) return { ok: true };
+
+  try {
+    const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
+      installRoot: normalizedRoot,
+      declaredTargetPaths
+    });
+    const firstUndeclaredSymlink = undeclaredSymlinks[0];
+    if (firstUndeclaredSymlink === undefined) return { ok: true };
+    return {
+      ok: false,
+      code: "external_projection_undeclared_symlink",
+      message: `Undeclared directory symlink ${firstUndeclaredSymlink} blocks rollback.`,
+      path: firstUndeclaredSymlink
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "external_projection_inspection_failed",
+      message: `Rollback external projection safety inspection failed for ${normalizedRoot}: ${errorMessage(error)}`,
+      path: normalizedRoot
+    };
+  }
+}
+
+function refuseRollbackMutation(
+  result: RollbackResult,
+  skill: string,
+  targetPath: string,
+  safety: RollbackMutationSafety & { ok: false }
+): void {
+  result.ok = false;
+  result.summary.refused += 1;
+  result.errors.push({
+    code: safety.code,
+    message: safety.message,
+    skill,
+    path: safety.path
+  });
+  result.rollbacks.push({
+    skill,
+    targetPath,
+    status: "refused",
+    restored: 0,
+    removed: 0,
+    failed: 0
+  });
 }
 
 async function isDirectory(candidatePath: string): Promise<boolean> {

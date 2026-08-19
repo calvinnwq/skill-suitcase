@@ -233,6 +233,24 @@ test("Hermes scans unreadable local skill metadata as an inspection failure", as
   );
 });
 
+test("Hermes treats a missing local skills root as an empty shadow root", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-fresh-home-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const home = path.join(sandbox, "hermes");
+  const installRoot = path.join(sandbox, "managed-skills");
+  await mkdir(home, { recursive: true });
+  await mkdir(installRoot, { recursive: true });
+  await writeFile(path.join(home, "config.yaml"), `skills:\n  external_dirs:\n    - ${installRoot}\n`);
+
+  const findings = await validateHermesExternalRoot({
+    home,
+    installRoot,
+    planned: []
+  });
+
+  assert.deepEqual(findings, []);
+});
+
 test("external projection inspection rejects a destination beneath a symlinked parent", async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-external-projection-parent-"));
   t.after(() => rm(sandbox, { recursive: true, force: true }));
