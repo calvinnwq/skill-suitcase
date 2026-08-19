@@ -41,6 +41,14 @@ type ManifestCompatibility = {
   variant?: string;
   reason?: string;
 };
+type ManifestExternalProjection = {
+  target?: string;
+  skill?: string;
+  destination?: string;
+  source?: string;
+  mode?: string;
+  owner?: string;
+};
 type ParsedManifest = {
   suitcases: Record<string, ManifestSuitcase>;
   assignments: Record<string, ManifestAssignment>;
@@ -50,9 +58,10 @@ type ParsedManifest = {
   validationPolicy: ManifestValidationPolicy;
   compatibility: Record<string, ManifestCompatibility>;
   variants: Record<string, Record<string, ManifestVariant>>;
+  externalProjections: Record<string, ManifestExternalProjection>;
 };
 
-type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "groups" | "sourcePolicy" | "validationPolicy" | "compatibility" | "variants" | null;
+type ParsedSection = "suitcases" | "assignments" | "assignmentPaths" | "groups" | "sourcePolicy" | "validationPolicy" | "compatibility" | "variants" | "externalProjections" | null;
 type AssignmentField = "suitcases" | "categories" | null;
 type GroupField = "skills" | "suitcases" | "assignments" | "tags" | null;
 type SourcePolicyField = "exclude" | "deny" | null;
@@ -73,7 +82,8 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
     sourcePolicy: {},
     validationPolicy: { skillify: { skip: {} } },
     compatibility: {},
-    variants: {}
+    variants: {},
+    externalProjections: {}
   };
 
   const lines = text.split(/\r?\n/);
@@ -86,6 +96,7 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
   let currentValidationPolicy: ValidationPolicyState = { skillify: false, skillifySkip: false, skillName: null };
   let currentField: CompatibilityField = null;
   let currentVariantField: VariantField = null;
+  const externalProjectionFields = new Map<string, Set<string>>();
 
   for (const rawLine of lines) {
     const line = rawLine.replace(/\s+$/, "");
@@ -107,7 +118,8 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         sectionValue === "sourcePolicy" ||
         sectionValue === "validationPolicy" ||
         sectionValue === "compatibility" ||
-        sectionValue === "variants"
+        sectionValue === "variants" ||
+        sectionValue === "externalProjections"
       )
         ? sectionValue
         : null;
@@ -130,7 +142,8 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
       section !== "sourcePolicy" &&
       section !== "validationPolicy" &&
       section !== "compatibility" &&
-      section !== "variants"
+      section !== "variants" &&
+      section !== "externalProjections"
     ) {
       continue;
     }
@@ -165,6 +178,14 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         manifest.groups[currentName] = {};
       } else if (section === "compatibility") {
         manifest.compatibility[currentName] = {};
+      } else if (section === "externalProjections") {
+        if (currentName === "__proto__") {
+          throw new Error("Invalid external projection ID __proto__.");
+        }
+        if (Object.prototype.hasOwnProperty.call(manifest.externalProjections, currentName)) {
+          throw new Error(`Duplicate external projection ID ${currentName}.`);
+        }
+        manifest.externalProjections[currentName] = {};
       } else {
         manifest.variants[currentName] = {};
       }
@@ -213,6 +234,15 @@ export function parseSuitcaseManifest(text: string): ParsedManifest {
         trimmed,
         currentField
       );
+      continue;
+    }
+
+    if (section === "externalProjections") {
+      const projection = manifest.externalProjections[name];
+      if (!projection) continue;
+      const seenFields = externalProjectionFields.get(name) ?? new Set<string>();
+      parseExternalProjectionLine(projection, name, indent, trimmed, seenFields);
+      externalProjectionFields.set(name, seenFields);
       continue;
     }
 
@@ -400,6 +430,33 @@ function parseMappingLine(record: Record<string, string>, indent: number, trimme
   const key = trimmed.slice(0, separator).trim();
   const value = trimmed.slice(separator + 1).trim();
   record[key] = value;
+}
+
+function parseExternalProjectionLine(
+  projection: ManifestExternalProjection,
+  projectionId: string,
+  indent: number,
+  trimmed: string,
+  seenFields: Set<string>
+): void {
+  if (indent !== 4 || !trimmed.includes(":")) return;
+  const separator = trimmed.indexOf(":");
+  const key = trimmed.slice(0, separator).trim();
+  if (
+    key !== "target"
+    && key !== "skill"
+    && key !== "destination"
+    && key !== "source"
+    && key !== "mode"
+    && key !== "owner"
+  ) {
+    return;
+  }
+  if (seenFields.has(key)) {
+    throw new Error(`Duplicate external projection field ${projectionId}.${key}.`);
+  }
+  seenFields.add(key);
+  projection[key] = unquoteValue(trimmed.slice(separator + 1));
 }
 
 function parseSuitcaseLine(suitcase: ManifestSuitcase, indent: number, trimmed: string): void {

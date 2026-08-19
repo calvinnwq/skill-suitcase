@@ -3441,7 +3441,7 @@ assignmentPaths:
 
   assert.equal(firstItem(validAssignment.statuses, "validAssignment.statuses").status, "current");
   assert.equal(firstItem(brokenAssignment.statuses, "brokenAssignment.statuses").status, "unknown");
-  assert.equal(firstItem(brokenAssignment.errors, "brokenAssignment.errors").code, "target_read_failed");
+  assert.equal(brokenAssignment.errors.some((error) => error.code === "target_read_failed"), true);
 });
 
 test("status reports receipt-hash target read failures instead of dirty", async (t) => {

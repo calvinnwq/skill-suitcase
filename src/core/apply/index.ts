@@ -1113,10 +1113,19 @@ function groupDiffEntriesBySkill(entries: DiffForApply["entries"]): Map<string, 
 }
 
 function diffFailureErrors(diffResult: DiffForApply): ApplyFinding[] {
-  const errors = diffResult.errors.map((error) => ({
-    code: `diff_${error.code}`,
-    message: error.message
-  }));
+  const errors = diffResult.errors.flatMap((error) => {
+    const finding = {
+      code: `diff_${error.code}`,
+      message: error.message
+    };
+    if (error.code === "planned_skill_target_mismatch") {
+      return [finding, {
+        code: "unsafe_target_state",
+        message: error.message
+      }];
+    }
+    return [finding];
+  });
 
   for (const blocked of diffResult.blocked) {
     errors.push({

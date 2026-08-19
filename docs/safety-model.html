@@ -104,7 +104,7 @@
                 <tr><td>reconcile --apply</td><td><code>--apply</code> plus explicitly named skills</td><td>receiptless mismatched target replaced from catalog</td></tr>
                 <tr><td>repair --apply</td><td><code>--apply</code> plus explicitly named skills</td><td>dirty receipt-owned copy restored from catalog</td></tr>
                 <tr><td>prune --apply</td><td>explicit skills plus exact plan ID from dry-run</td><td>obsolete receipt-owned installs</td></tr>
-                <tr><td>rollback</td><td>explicit receipt path</td><td>receipt-backed state eligible for rollback</td></tr>
+                <tr><td>rollback</td><td>explicit receipt path; paired catalog source and target for external-projection protection or apply-created symlink removal</td><td>receipt-backed state eligible for rollback</td></tr>
                 <tr><td>promote --apply</td><td><code>--apply</code> plus an explicit target skill path</td><td>new target skill copied to catalog and linked back</td></tr>
                 <tr><td>import-target --apply</td><td><code>--apply</code> plus explicitly named skills</td><td>intentional receipt-owned target edit copied to catalog</td></tr>
                 <tr><td>upstream import --apply</td><td><code>--apply</code> plus exactly one named skill</td><td>selected catalog source and upstream lock only</td></tr>
@@ -160,6 +160,27 @@
                 Skill Suitcase validates these conditions before live target work
                 and revalidates containment during mutation and rollback.
               </p>
+            </div>
+          </section>
+
+          <section>
+            <h2>External projections</h2>
+            <p>
+              Manifest <code>externalProjections</code> entries identify externally
+              owned skill symlinks by assignment-path target, skill identity, safe
+              relative destination, expected source, <code>symlink</code> mode, and
+              owner. Skill Suitcase verifies and reports these links but never
+              adopts them into catalog receipts or mutation ownership.
+              Rollback protects declared destinations when given paired catalog
+              source and target context, and requires that context before it
+              removes an apply-created symlink.
+            </p>
+            <div class="def-rows">
+              <div><span class="k">external-current</span><span class="v">the exact declared symlink is present and points to the expected source</span></div>
+              <div><span class="k">external-missing</span><span class="v">the declared destination is absent</span></div>
+              <div><span class="k">external-broken</span><span class="v">the link exists but its source does not</span></div>
+              <div><span class="k">external-drifted</span><span class="v">the destination is a real directory, wrong-target link, non-link, or lies beneath a symlinked parent</span></div>
+              <div><span class="k">external-invalid</span><span class="v">the declaration is incomplete, unsafe, or uses an unsupported mode</span></div>
             </div>
           </section>
 

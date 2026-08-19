@@ -31,6 +31,7 @@ test("inspects the fixture catalog as an importable source", async () => {
     assignments: 7,
     assignmentPaths: 7,
     groups: 3,
+    externalProjections: 0,
     compatibilityEntries: 3,
     variantEntries: 3,
     warnings: 0,

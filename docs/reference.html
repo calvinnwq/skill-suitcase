@@ -413,6 +413,12 @@ skill-suitcase pack \
               <div class="cmd-head"><h3>rollback</h3><span class="cmd-flag approval">approval</span></div>
               <pre><code>skill-suitcase rollback \
   --receipt "/path/to/target/.skill-suitcase-receipt.json" \
+  --json
+
+skill-suitcase rollback \
+  --receipt "/path/to/target/.skill-suitcase-receipt.json" \
+  --source "$SRC" \
+  --target hermes \
   --json</code></pre>
               <p>
                 Reverses recorded apply, reconcile, or repair state after verifying
@@ -422,6 +428,10 @@ skill-suitcase pack \
                 promotions or arbitrary catalog edits.
                 Categorized Hermes records use their nested target and destination
                 while refusing category-parent symlinks or containment escapes.
+                Pass <code>--source</code> and <code>--target</code> together for a
+                catalog with external projections so rollback can protect their
+                declared destinations. The same context is mandatory before
+                removing an apply-created symlink.
               </p>
             </div>
 

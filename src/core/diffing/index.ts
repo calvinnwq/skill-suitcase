@@ -9,6 +9,7 @@ import {
 } from "../catalog/target-registry.js";
 import { type PlanResult, plan } from "../planning/index.js";
 import type { Catalog } from "../catalog/index.js";
+import { classifySymlinkInstall } from "../install-modes.js";
 import { resolvePlatformInstallRoot } from "../platform-adapters.js";
 import {
   collectSourcePolicyDeniedPaths,
@@ -16,6 +17,13 @@ import {
   sourcePolicyPrunesDirectory
 } from "../source-policy.js";
 import { validateHermesExternalRoot } from "../hermes-external-root.js";
+import {
+  externalProjectionsForTarget,
+  findUndeclaredDirectorySymlinks,
+  inspectExternalProjections,
+  validateExternalProjectionMetadata,
+  type ExternalProjectionInspection
+} from "../external-projections.js";
 
 type DiffSourceFileRead =
   | {
@@ -77,6 +85,7 @@ type DiffResult = {
   planned: PlanItem[];
   blocked: PlanItem[];
   entries: DiffEntry[];
+  externalProjections: ExternalProjectionInspection[];
   summary: DiffSummary;
   errors: DiffResultError[];
 };
@@ -119,10 +128,29 @@ export async function diff(
   }
 
   const { manifest, sourceRoot } = await loadCatalog(source, { targetOverrides });
+  const metadataErrors: DiffResultError[] = validateExternalProjectionMetadata(manifest).map((finding) => ({
+    code: finding.code,
+    message: finding.message
+  }));
   const installation = await resolveAssignmentInstallRoot(manifest, target, targetOverrides);
+  const selectedRegistryEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides)
+    ?? findTargetRegistryEntriesByAssignment(manifest, installation.assignment ?? target, targetOverrides)[0]
+    ?? null;
+  const projectionTarget = selectedRegistryEntry?.id ?? target;
+  const declaredExternalProjections = externalProjectionsForTarget(
+    manifest.externalProjections,
+    projectionTarget
+  );
+  const readOnlyExternalProjections = installation.installRoot === null
+    ? []
+    : await inspectExternalProjections({
+      installRoot: installation.installRoot,
+      projections: declaredExternalProjections,
+      ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
+    });
   if (installation.readOnly) {
     return {
-      ok: installation.errors.length === 0,
+      ok: installation.errors.length === 0 && metadataErrors.length === 0,
       source: sourceRoot,
       target,
       assignment: installation.assignment ?? target,
@@ -131,6 +159,7 @@ export async function diff(
       planned: [],
       blocked: [],
       entries: [],
+      externalProjections: readOnlyExternalProjections,
       summary: {
         create: 0,
         update: 0,
@@ -139,7 +168,7 @@ export async function diff(
         missing: 0,
         blocked: 0
       },
-      errors: installation.errors
+      errors: [...installation.errors, ...metadataErrors]
     };
   }
   const planTarget = installation.assignment ?? target;
@@ -161,6 +190,7 @@ export async function diff(
     planned: planResult.planned ?? [],
     blocked: planResult.blocked ?? [],
     entries: [],
+    externalProjections: readOnlyExternalProjections,
     summary: {
       create: 0,
       update: 0,
@@ -169,7 +199,7 @@ export async function diff(
       missing: 0,
       blocked: 0
     },
-    errors: [...planResult.errors]
+    errors: [...planResult.errors, ...metadataErrors]
   };
 
   result.installRoot = installation.installRoot;
@@ -187,10 +217,6 @@ export async function diff(
     throw new Error(`diff could not resolve install root for target ${target}.`);
   }
   result.installRoot = installRoot;
-
-  const selectedRegistryEntry = resolveTargetRegistryEntryFromManifest(manifest, target, targetOverrides)
-    ?? findTargetRegistryEntriesByAssignment(manifest, planTarget, targetOverrides)[0]
-    ?? null;
   if (selectedRegistryEntry?.kind === "hermes-external-skills-root") {
     const home = selectedRegistryEntry.home;
     if (home === null) {
@@ -202,13 +228,49 @@ export async function diff(
       result.errors.push(...await validateHermesExternalRoot({
         home,
         installRoot,
-        planned: result.planned
+        planned: result.planned,
+        externalProjections: declaredExternalProjections,
+        externalProjectionInspections: result.externalProjections,
+        ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
       }));
     }
     if (result.errors.length > 0) {
       for (const blockedEntry of result.blocked) {
         result.entries.push(blockedEntryFromPlan(blockedEntry));
       }
+      result.summary = summarizeActions(result.entries);
+      return result;
+    }
+  } else {
+    try {
+      const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
+        installRoot,
+        declaredTargetPaths: [
+          ...result.planned.map((plannedSkill) => path.resolve(installRoot, plannedSkill.destination)),
+          ...result.externalProjections
+            .map((inspection) => inspection.targetPath)
+            .filter((targetPath): targetPath is string => targetPath !== null)
+        ]
+      });
+      result.errors.push(...undeclaredSymlinks.map((targetPath) => ({
+        code: "external_projection_undeclared_symlink",
+        message: `Undeclared directory symlink ${targetPath} blocks catalog comparison.`
+      })));
+    } catch (error) {
+      result.errors.push({
+        code: "external_projection_inspection_failed",
+        message: `External projection safety inspection failed: ${error instanceof Error ? error.message : "unknown error"}`
+      });
+    }
+    result.errors.push(...result.externalProjections
+      .filter((inspection) => inspection.state !== "external-current")
+      .map((inspection) => ({
+        code: inspection.state,
+        message: inspection.reason,
+        skill: inspection.skill
+      })));
+    if (result.errors.length > 0) {
+      for (const blockedEntry of result.blocked) result.entries.push(blockedEntryFromPlan(blockedEntry));
       result.summary = summarizeActions(result.entries);
       return result;
     }
@@ -281,6 +343,20 @@ async function comparePlannedSkill(
 ): Promise<{ entries: DiffEntry[]; errors: DiffResultError[] }> {
   const sourceRoot = plannedSkill.sourcePath;
   const targetRoot = path.join(installRoot, plannedSkill.destination);
+  const targetRootClassification = await classifySymlinkInstall({
+    targetPath: targetRoot,
+    expectedSourcePath: sourceRoot
+  });
+  if (targetRootClassification.state === "wrong-target" || targetRootClassification.state === "broken") {
+    return {
+      entries: [],
+      errors: [{
+        code: "planned_skill_target_mismatch",
+        message: `Planned skill ${plannedSkill.skill} target ${targetRoot} is ${targetRootClassification.state} instead of an exact symlink to ${sourceRoot}.`,
+        skill: plannedSkill.skill
+      }]
+    };
+  }
   const sourceListing = await collectSourceEntries(sourceRoot, plannedSkill.skill, sourcePolicy);
   if (!sourceListing.ok) {
     return { entries: [], errors: sourceListing.errors };

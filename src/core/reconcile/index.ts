@@ -17,6 +17,7 @@ import {
   withReceiptTransaction
 } from "../receipts/transaction.js";
 import { readSkillVersion } from "../skill-metadata.js";
+import { isExternalProjectionErrorCode } from "../external-projections.js";
 import {
   sourcePolicyDecision,
   sourcePolicyPrunesDirectory,
@@ -270,7 +271,11 @@ async function planReconcile(input: ReconcileInput, selectedSkills: string[]): P
   }
 
   for (const error of diffResult.errors) {
-    if (error.skill !== undefined && !selectedSkillSet.has(error.skill)) {
+    if (
+      error.skill !== undefined
+      && !selectedSkillSet.has(error.skill)
+      && !isExternalProjectionErrorCode(error.code)
+    ) {
       continue;
     }
     errors.push(reconcileError({
@@ -331,7 +336,11 @@ async function planReconcile(input: ReconcileInput, selectedSkills: string[]): P
   }
   const statusResult = await status(statusInput);
   for (const statusError of statusResult.errors) {
-    if (statusError.skill !== undefined && !selectedSkillSet.has(statusError.skill)) {
+    if (
+      statusError.skill !== undefined
+      && !selectedSkillSet.has(statusError.skill)
+      && !isExternalProjectionErrorCode(statusError.code)
+    ) {
       continue;
     }
     errors.push(reconcileError({

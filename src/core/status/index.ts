@@ -25,6 +25,13 @@ import {
   type SourcePolicy
 } from "../source-policy.js";
 import { validateHermesExternalRoot } from "../hermes-external-root.js";
+import {
+  externalProjectionsForTarget,
+  findUndeclaredDirectorySymlinks,
+  inspectExternalProjections,
+  validateExternalProjectionMetadata,
+  type ExternalProjectionInspection
+} from "../external-projections.js";
 import { isCaseInsensitiveFilesystem } from "../filesystem-comparison.js";
 import {
   errorMessage,
@@ -80,6 +87,7 @@ type StatusAssignment = {
   installRoot: string;
   statusCount: number;
   statuses: StatusItem[];
+  externalProjections: ExternalProjectionInspection[];
   errors: StatusFinding[];
 };
 type StatusResult = {
@@ -88,6 +96,7 @@ type StatusResult = {
   manifestPath: string;
   assignments: StatusAssignment[];
   statuses: StatusItem[];
+  externalProjections: ExternalProjectionInspection[];
   summary: StatusSummary;
   errors: StatusFinding[];
 };
@@ -142,6 +151,7 @@ export async function status({
   };
   const assignments: StatusAssignment[] = [];
   const statuses: StatusItem[] = [];
+  const externalProjections: ExternalProjectionInspection[] = [];
   const errors: StatusFinding[] = [];
 
   const assignmentPaths = manifest.assignmentPaths ?? {};
@@ -156,8 +166,26 @@ export async function status({
       manifestPath,
       assignments,
       statuses,
+      externalProjections,
       summary,
       errors
+    };
+  }
+  const metadataErrors = validateExternalProjectionMetadata(manifest).map((finding) => ({
+    code: finding.code,
+    message: finding.message,
+    path: finding.path
+  }));
+  if (metadataErrors.length > 0) {
+    return {
+      ok: false,
+      source: sourceRoot,
+      manifestPath,
+      assignments,
+      statuses,
+      externalProjections,
+      summary,
+      errors: metadataErrors
     };
   }
   const registryEntries = resolveTargetRegistryEntries(manifest, targetOverrides);
@@ -179,6 +207,7 @@ export async function status({
       installRoot: "",
       statusCount: 0,
       statuses: [],
+      externalProjections: [],
       errors: []
     };
 
@@ -252,6 +281,18 @@ export async function status({
       continue;
     }
 
+    const declaredExternalProjections = externalProjectionsForTarget(
+      manifest.externalProjections,
+      assignmentPathId
+    );
+    const projectionInspections = await inspectExternalProjections({
+      installRoot,
+      projections: declaredExternalProjections,
+      ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
+    });
+    assignmentResult.externalProjections.push(...projectionInspections);
+    externalProjections.push(...projectionInspections);
+
     if (kind === "hermes-external-skills-root") {
       const home = registryEntry.home;
       if (home === null) {
@@ -267,11 +308,51 @@ export async function status({
       const boundaryErrors = await validateHermesExternalRoot({
         home,
         installRoot,
-        planned: assignmentPlan.planned
+        planned: assignmentPlan.planned,
+        externalProjections: declaredExternalProjections,
+        externalProjectionInspections: projectionInspections,
+        ...(targetOverrides?.home !== undefined ? { homeDirectory: targetOverrides.home } : {})
       });
       if (boundaryErrors.length > 0) {
         assignmentResult.errors.push(...boundaryErrors);
         errors.push(...boundaryErrors);
+        assignments.push(assignmentResult);
+        continue;
+      }
+    } else {
+      const projectionErrors: StatusFinding[] = [];
+      try {
+        const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
+          installRoot,
+          declaredTargetPaths: [
+            ...assignmentPlan.planned.map((plannedSkill) => path.resolve(installRoot, plannedSkill.destination)),
+            ...projectionInspections
+              .map((inspection) => inspection.targetPath)
+              .filter((targetPath): targetPath is string => targetPath !== null)
+          ]
+        });
+        projectionErrors.push(...undeclaredSymlinks.map((targetPath) => ({
+          code: "external_projection_undeclared_symlink",
+          message: `Undeclared directory symlink ${targetPath} blocks catalog status.`
+        })));
+      } catch (error) {
+        projectionErrors.push({
+          code: "external_projection_inspection_failed",
+          message: `External projection safety inspection failed: ${errorMessage(error)}`
+        });
+      }
+      projectionErrors.push(
+        ...projectionInspections
+          .filter((inspection) => inspection.state !== "external-current")
+          .map((inspection) => ({
+            code: inspection.state,
+            message: inspection.reason,
+            skill: inspection.skill
+          }))
+      );
+      assignmentResult.errors.push(...projectionErrors);
+      errors.push(...projectionErrors);
+      if (projectionErrors.some((error) => error.code !== "external_projection_inspection_failed")) {
         assignments.push(assignmentResult);
         continue;
       }
@@ -419,6 +500,7 @@ export async function status({
     manifestPath,
     assignments,
     statuses,
+    externalProjections,
     summary,
     errors
   };

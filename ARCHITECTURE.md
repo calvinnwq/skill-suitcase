@@ -163,6 +163,9 @@ The durable state model belongs to Skill Suitcase:
   non-empty exclude policy, while denied or secret-like paths refuse with
   path-level evidence before any target write
 - manifest `validationPolicy.skillify.skip` records reviewed exceptions for referenced skills that strict validation must not score against the local Skillify-10 authoring contract
+- manifest `externalProjections` records exact externally owned symlink
+  destinations and provenance; status and diff verify them but receipts and
+  mutation workflows never adopt them
 - receipts record ownership, source provenance, relative destination, install
   mode, file hashes, and rollback state; receipt writers use atomic replacement and a receipt-local
   transaction lock so concurrent workflows cannot discard one another's state
@@ -188,6 +191,24 @@ overlap the owned root, and the plan itself must not contain duplicate
 Category and skill parents are revalidated around filesystem operations so a
 symlink swap cannot redirect categorized writes, adoption, recovery, pruning,
 or rollback outside the owned root.
+
+External projections form a parallel, non-receipt ownership plane.
+The manifest declares exact target, skill identity, relative destination,
+source, symlink mode, and external owner metadata without adding the skill to a
+suitcase or assignment.
+A target-scoped inspector classifies each declaration before mutation, rejects
+symlinked parents and unsafe paths, and exposes projection state separately from
+catalog-planned status.
+Platform adapters may consume the same generic projection evidence; the Hermes
+shadow scanner additionally treats only exact `external-current` declarations
+as traversal exclusions while every undeclared directory symlink remains a
+hard refusal.
+Mutation code never creates, adopts, receipts, prunes, or repairs an external
+projection.
+Rollback accepts catalog context only as a paired source and target.
+Callers must provide that context when a catalog declares external projections
+so rollback can refuse any receipt operation that overlaps a declared
+projection; removing an apply-created symlink always requires the same context.
 
 Manifest-owned logical groups are reporting metadata. They may name product
 families, upstream suites, provider boundaries, or other operator-facing buckets
@@ -405,6 +426,9 @@ Symlink mode must treat these states as distinct:
 Rollback for symlink installs should remove a Skill Suitcase-created symlink or
 restore the previous target state recorded in the receipt. It must not delete a
 real directory that was not first captured as rollback state.
+Removing an apply-created symlink requires paired catalog source and target
+context so rollback can verify the receipt root and protect declared external
+projection destinations.
 
 ## Command Semantics
 
@@ -466,7 +490,9 @@ Keep the command verbs separate:
   operate without explicit `--skill` filters, or run implicitly from a drift
   report.
 - `rollback` reverses prior `apply`, `reconcile`, or `repair` mutations using
-  receipt rollback state.
+  receipt rollback state. It accepts `--source` and `--target` only together,
+  requires them before removing an apply-created symlink, and uses them to
+  protect declared external projections from overlapping receipt operations.
   A valid symlink alias in the receipt path may name the install root or an
   earlier path component, but a symlinked target leaf remains unsafe.
   Missing receipt parents must not be created while acquiring the receipt lock.

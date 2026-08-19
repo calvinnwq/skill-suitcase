@@ -325,6 +325,23 @@ operator reporting. Groups are catalog metadata only: they validate references
 deterministically but do not change planning, packing, installation, receipt,
 or target assignment semantics.
 
+### Manifest `externalProjections`
+
+`externalProjections` declares externally owned skill symlinks that share a
+runtime root with catalog-managed skills.
+Each entry names an assignment-path target, skill identity, safe relative
+destination, absolute or `~/` source path, `symlink` mode, and owner.
+`status` and `diff` report these separately as `external-current`,
+`external-missing`, `external-broken`, `external-drifted`, or
+`external-invalid`.
+Current projections are preserved and excluded from catalog ownership.
+Target-aware catalog workflows fail closed on malformed, missing, broken,
+drifted, identity-conflicting, or undeclared symlinks before mutation.
+Pass both catalog source and target to `rollback` so it can protect declared
+projection paths; this context is mandatory when removing an apply-created
+symlink.
+The external owner remains responsible for creating and updating the link.
+
 ### Manifest `sourcePolicy`
 
 `sourcePolicy.exclude` omits approved generated or cache paths from pack,

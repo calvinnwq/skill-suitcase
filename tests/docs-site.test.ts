@@ -543,6 +543,7 @@ test("catalog model page documents groups and source policy boundaries", () => {
     "suitcases",
     "assignments",
     "assignmentPaths",
+    "externalProjections",
     "groups",
     "compatibility",
     "variants",

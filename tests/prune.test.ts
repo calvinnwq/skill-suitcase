@@ -83,6 +83,110 @@ compatibility:
   return { sourceRoot, targetRoot, directoryTarget, symlinkTarget };
 }
 
+async function createProjectionFixture(
+  t: { after(fn: () => Promise<void> | void): void },
+  {
+    currentProjection,
+    undeclaredSymlink
+  }: { currentProjection: boolean; undeclaredSymlink: boolean }
+): Promise<{ sourceRoot: string; targetRoot: string; obsoleteTarget: string }> {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-prune-projection-src-"));
+  const targetRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-prune-projection-target-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  t.after(() => rm(targetRoot, { recursive: true, force: true }));
+
+  const sourceSkill = path.join(sourceRoot, "skills", "obsolete");
+  const projectionSource = path.join(sourceRoot, "external", "reference");
+  const obsoleteTarget = path.join(targetRoot, "obsolete");
+  await mkdir(sourceSkill, { recursive: true });
+  await mkdir(projectionSource, { recursive: true });
+  await mkdir(obsoleteTarget, { recursive: true });
+  await writeFile(path.join(sourceSkill, "SKILL.md"), "---\nname: obsolete\n---\n# Obsolete\n");
+  await writeFile(path.join(projectionSource, "SKILL.md"), "---\nname: reference\n---\n# Reference\n");
+  await writeFile(path.join(obsoleteTarget, "SKILL.md"), "---\nname: obsolete\n---\n# Obsolete\n");
+  await writeFile(path.join(sourceRoot, "skill-suitcase.yaml"), `suitcases:
+  core:
+    skills: []
+
+assignments:
+  codex:
+    suitcases:
+      - core
+
+assignmentPaths:
+  codex:
+    kind: codex-home
+    assignment: codex
+    codexHome: ${path.dirname(targetRoot)}
+    skillsPath: ${targetRoot}
+
+externalProjections:
+  protected-reference:
+    target: codex
+    skill: reference
+    destination: ${currentProjection ? "obsolete/protected-reference" : "protected/reference"}
+    source: ${projectionSource}
+    mode: symlink
+    owner: fixture-provider
+`);
+
+  if (currentProjection) {
+    await symlink(
+      projectionSource,
+      path.join(targetRoot, "obsolete", "protected-reference"),
+      "dir"
+    );
+  }
+  if (undeclaredSymlink) {
+    const undeclaredSource = path.join(sourceRoot, "external", "undeclared");
+    await mkdir(undeclaredSource, { recursive: true });
+    await symlink(undeclaredSource, path.join(targetRoot, "undeclared"), "dir");
+  }
+
+  await writeReceipt({
+    installRoot: targetRoot,
+    receipt: {
+      installs: {
+        obsolete: buildInstallRecord({
+          skill: "obsolete",
+          agent: "codex",
+          target: "codex",
+          mode: "copy",
+          sourcePath: sourceSkill,
+          targetPath: obsoleteTarget,
+          destination: "obsolete",
+          sourceHash: "obsolete-source",
+          installedFiles: await buildInstalledFiles(obsoleteTarget)
+        })
+      }
+    }
+  });
+  return { sourceRoot, targetRoot, obsoleteTarget };
+}
+
+test("flat-target prune fails closed for non-current projections and undeclared symlinks", async (t) => {
+  const fixture = await createProjectionFixture(t, { currentProjection: false, undeclaredSymlink: true });
+
+  const result = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["obsolete"], dryRun: true });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.candidates.length, 0);
+  assert.equal(result.errors.some((error) => error.code === "external-missing"), true);
+  assert.equal(result.errors.some((error) => error.code === "external_projection_undeclared_symlink"), true);
+  assert.equal((await stat(fixture.obsoleteTarget)).isDirectory(), true);
+});
+
+test("flat-target prune rejects receipt candidates overlapping a declared projection", async (t) => {
+  const fixture = await createProjectionFixture(t, { currentProjection: true, undeclaredSymlink: false });
+
+  const result = await prune({ source: fixture.sourceRoot, target: "codex", skills: ["obsolete"], dryRun: true });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.candidates.length, 0);
+  assert.equal(result.errors.some((error) => error.code === "external_projection_owned"), true);
+  assert.equal((await stat(fixture.obsoleteTarget)).isDirectory(), true);
+});
+
 test("prune dry-run plans explicit obsolete directory and symlink without mutation", async (t) => {
   const fixture = await createFixture(t);
   const result = await prune({

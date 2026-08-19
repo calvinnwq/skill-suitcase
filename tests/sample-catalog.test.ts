@@ -367,6 +367,12 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
     "rollback",
     "--receipt",
     path.join(targetRoot, ".skill-suitcase-receipt.json"),
+    "--source",
+    source,
+    "--target",
+    "agents",
+    "--agents-skills",
+    targetRoot,
     "--json"
   ]);
   assert.equal(rolledBack.ok, true);

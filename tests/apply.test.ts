@@ -1853,7 +1853,10 @@ test("apply refuses dirty-behind updates through nested target symlinks", async 
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.errors.some((error) => error.code === "unsafe_target_state"), true);
+  assert.equal(
+    result.errors.some((error) => error.code === "diff_external_projection_undeclared_symlink"),
+    true
+  );
   assert.equal(result.postApplyStatus, null);
   assert.equal(await readFile(path.join(externalNested, "config.json"), "utf8"), beforeExternalConfig);
   assert.equal((await lstat(path.join(targetSkill, "nested"))).isSymbolicLink(), true);

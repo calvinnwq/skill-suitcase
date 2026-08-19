@@ -388,7 +388,7 @@ test("import-target refuses a dirty target whose tree contains a symlink", async
   assert.equal(result.ok, false);
   assert.equal(result.candidates.length, 0);
   assert.equal(
-    result.errors.some((error) => error.code === "unsafe_target_tree" && error.skill === "skill-cleaner"),
+    result.errors.some((error) => error.code === "diff_external_projection_undeclared_symlink"),
     true
   );
 });

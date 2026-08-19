@@ -60,6 +60,9 @@ The usual source catalog is `$HOME/.skill-suitcase/skills`; the CLI is either th
   to adopt OpenCode, Pi, or other provider-backed adapter roots, even when the
   catalog declares a custom manifest `assignmentPaths` entry for review.
 - The current `rollback` command reverses apply, reconcile, and repair state, but it does not restore promotions.
+- Pass `--source "$SRC" --target <target-id>` together whenever rollback may
+  encounter declared external projections; rollback also requires this catalog
+  context before removing an apply-created symlink.
 
 ## Phases
 
@@ -205,6 +208,17 @@ with `source_denied_path`/`diff_source_denied_path`.
 Do not work around a denied path by copying it manually into a target home.
 Manifest `validationPolicy.skillify.skip` is a strict-validation boundary only.
 It does not change planning, packing, installation, receipt ownership, or target drift handling.
+
+Manifest `externalProjections` is a separate external-ownership boundary.
+Each entry must declare one target assignment path, plain skill identity, safe
+relative destination, absolute or `~/` source, `symlink` mode, and owner.
+Run `import`, strict `validate`, target-scoped `status`, and `diff` before any
+catalog mutation.
+Proceed only when every declared projection is `external-current`.
+Never adopt, overwrite, prune, or receipt these projections through catalog
+workflows; route creation and updates to the declared external owner.
+An undeclared symlink or an `external-missing`, `external-broken`,
+`external-drifted`, or `external-invalid` state remains a stop condition.
 
 ## Source And Target Matrix
 

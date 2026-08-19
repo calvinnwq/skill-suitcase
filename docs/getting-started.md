@@ -283,7 +283,10 @@ skill-suitcase status --source "$SRC" --target claude --claude-skills "$TARGET" 
 ```
 
 `rollback` first verifies that the current target bytes still match the applied receipt; drift is a refusal, not something it overwrites.
-It reverses recorded `apply`, `reconcile`, and `repair` state, including links created by `apply --mode symlink`.
+This copy-mode walkthrough uses the receipt-only form.
+For an apply-created symlink or a catalog with external projections, follow the
+paired `--source` and `--target` rollback form in
+[`command-reference.md`](command-reference.md#rollback).
 It does not restore promotions; a promotion receipt is a safe no-op with its own preserved backup.
 After the rollback, `status` reports the skill as `missing` again and the walkthrough is complete.
 

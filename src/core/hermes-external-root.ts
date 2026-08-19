@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
@@ -12,6 +12,11 @@ import {
   normalizeFilesystemComparisonPath
 } from "./filesystem-comparison.js";
 import { classifySymlinkInstall } from "./install-modes.js";
+import {
+  inspectExternalProjections,
+  type ExternalProjection,
+  type ExternalProjectionInspection
+} from "./external-projections.js";
 
 export type HermesExternalRootFinding = {
   code: string;
@@ -22,14 +27,21 @@ export type HermesExternalRootFinding = {
 export async function validateHermesExternalRoot({
   home,
   installRoot,
-  planned
+  planned,
+  externalProjections = [],
+  externalProjectionInspections,
+  homeDirectory
 }: {
   home: string;
   installRoot: string;
   planned: Array<{ skill: string; destination: string; sourcePath?: string }>;
+  externalProjections?: ExternalProjection[];
+  externalProjectionInspections?: ExternalProjectionInspection[];
+  homeDirectory?: string;
 }): Promise<HermesExternalRootFinding[]> {
   const findings: HermesExternalRootFinding[] = [];
   const normalizedHome = path.resolve(home);
+  const normalizedProjectionHome = path.resolve(homeDirectory ?? os.homedir());
   const normalizedRoot = path.resolve(installRoot);
   const localSkillsRoot = path.join(normalizedHome, "skills");
   const [canonicalRoot, canonicalLocalRoot] = await Promise.all([
@@ -77,8 +89,9 @@ export async function validateHermesExternalRoot({
     });
   }
 
-  const localShadows = await findSkillShadows(localSkillsRoot, plannedSkills);
+  const localShadows = await findSkillShadows(localSkillsRoot, plannedSkills, new Map(), path.resolve, true);
   findings.push(...shadowTraversalFindings(localShadows.directorySymlinks));
+  findings.push(...shadowInspectionFindings(localShadows.inspectionErrors));
   for (const skill of localShadows.skills) {
     findings.push({
       code: "hermes_local_skill_shadow",
@@ -92,7 +105,11 @@ export async function validateHermesExternalRoot({
     path.resolve(value),
     managedRootCaseInsensitive
   );
-  const plannedDestinations = new Map<string, { identity: string; sourcePath: string | null }>();
+  const plannedDestinations = new Map<string, {
+    identity: string;
+    sourcePath: string | null;
+    traverse: boolean;
+  }>();
   const plannedByDestination = new Map<string, typeof plannedIdentities>();
   for (const item of plannedIdentities) {
     const key = managedDestinationKey(path.resolve(normalizedRoot, item.destination));
@@ -101,7 +118,8 @@ export async function validateHermesExternalRoot({
     plannedByDestination.set(key, entries);
     plannedDestinations.set(key, {
       identity: item.identity,
-      sourcePath: item.sourcePath ?? null
+      sourcePath: item.sourcePath ?? null,
+      traverse: true
     });
   }
   const destinationConflicts = [...plannedByDestination.values()]
@@ -113,6 +131,77 @@ export async function validateHermesExternalRoot({
       skill: items[0]!.skill
     }));
   if (destinationConflicts.length > 0) return destinationConflicts;
+
+  const externalInspections = externalProjectionInspections ?? await inspectExternalProjections({
+    installRoot: normalizedRoot,
+    projections: externalProjections,
+    homeDirectory: normalizedProjectionHome
+  });
+  const externalIdentities = new Map<string, string>();
+  const externalIdentityInspectionErrors: Array<{ path: string; message: string }> = [];
+  for (const inspection of externalInspections) {
+    if (
+      inspection.state !== "external-current"
+      || inspection.targetPath === null
+      || inspection.sourcePath === null
+    ) {
+      findings.push({
+        code: inspection.state,
+        message: inspection.reason,
+        skill: inspection.skill
+      });
+      continue;
+    }
+
+    const identity = await readLocalSkillIdentity(
+      inspection.targetPath,
+      inspection.skill,
+      externalIdentityInspectionErrors
+    );
+    if (identity !== inspection.skill) {
+      findings.push({
+        code: "external_projection_identity_mismatch",
+        message: `External projection ${inspection.id} declares ${inspection.skill} but its SKILL.md identity is ${identity ?? "missing"}.`,
+        skill: inspection.skill
+      });
+      continue;
+    }
+    if (plannedSkills.has(identity)) {
+      findings.push({
+        code: "external_projection_identity_conflict",
+        message: `External projection ${inspection.id} duplicates catalog-planned Hermes skill identity ${identity}.`,
+        skill: identity
+      });
+      continue;
+    }
+    const previousProjection = externalIdentities.get(identity);
+    if (previousProjection !== undefined) {
+      findings.push({
+        code: "external_projection_identity_conflict",
+        message: `External projections ${previousProjection} and ${inspection.id} share Hermes skill identity ${identity}.`,
+        skill: identity
+      });
+      continue;
+    }
+
+    const destinationKey = managedDestinationKey(inspection.targetPath);
+    if (plannedDestinations.has(destinationKey)) {
+      findings.push({
+        code: "external_projection_destination_conflict",
+        message: `External projection ${inspection.id} collides with another planned destination ${inspection.destination}.`,
+        skill: identity
+      });
+      continue;
+    }
+    externalIdentities.set(identity, inspection.id);
+    plannedDestinations.set(destinationKey, {
+      identity,
+      sourcePath: inspection.sourcePath,
+      traverse: false
+    });
+  }
+  findings.push(...shadowInspectionFindings(externalIdentityInspectionErrors));
+
   const managedShadows = await findSkillShadows(
     normalizedRoot,
     plannedSkills,
@@ -120,6 +209,7 @@ export async function validateHermesExternalRoot({
     managedDestinationKey
   );
   findings.push(...shadowTraversalFindings(managedShadows.directorySymlinks));
+  findings.push(...shadowInspectionFindings(managedShadows.inspectionErrors));
   for (const skill of managedShadows.skills) {
     findings.push({
       code: "hermes_managed_skill_shadow",
@@ -246,6 +336,7 @@ async function validateRegistration(
     if (!precedingRoot.exists) continue;
     const precedingShadows = await findSkillShadows(precedingRoot.path, plannedSkills);
     findings.push(...shadowTraversalFindings(precedingShadows.directorySymlinks));
+    findings.push(...shadowInspectionFindings(precedingShadows.inspectionErrors));
     for (const skill of precedingShadows.skills) {
       findings.push({
         code: "hermes_external_skill_shadow",
@@ -309,14 +400,24 @@ async function canonicalizePath(value: string): Promise<string> {
 async function findSkillShadows(
   root: string,
   skills: Set<string>,
-  plannedDestinations: ReadonlyMap<string, { identity: string; sourcePath: string | null }> = new Map(),
-  plannedDestinationKey: (value: string) => string = path.resolve
-): Promise<{ skills: string[]; directorySymlinks: string[] }> {
+  plannedDestinations: ReadonlyMap<string, {
+    identity: string;
+    sourcePath: string | null;
+    traverse?: boolean;
+  }> = new Map(),
+  plannedDestinationKey: (value: string) => string = path.resolve,
+  allowMissingRoot = false
+): Promise<{
+  skills: string[];
+  directorySymlinks: string[];
+  inspectionErrors: Array<{ path: string; message: string }>;
+}> {
   const found = new Set<string>();
   const directorySymlinks = new Set<string>();
+  const inspectionErrors: Array<{ path: string; message: string }> = [];
   const pending = [root];
   const visited = new Set<string>();
-  while (pending.length > 0 && found.size < skills.size) {
+  while (pending.length > 0) {
     const current = pending.pop()!;
     let resolved: string;
     let entries;
@@ -325,26 +426,44 @@ async function findSkillShadows(
       if (visited.has(resolved)) continue;
       visited.add(resolved);
       entries = await readdir(current, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (current === root && allowMissingRoot && isMissingPathError(error)) {
+        try {
+          await lstat(current);
+        } catch (rootError) {
+          if (isMissingPathError(rootError)) continue;
+        }
+      }
+      inspectionErrors.push({
+        path: current,
+        message: error instanceof Error ? error.message : "unknown error"
+      });
       continue;
     }
-    const identity = await readLocalSkillIdentity(current, path.basename(current));
+    const identity = await readLocalSkillIdentity(current, path.basename(current), inspectionErrors);
     const plannedDestination = plannedDestinations.get(plannedDestinationKey(current));
     if (identity !== null && skills.has(identity) && identity !== plannedDestination?.identity) found.add(identity);
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
-      if (HERMES_EXCLUDED_SKILL_DIRECTORIES.has(entry.name)) continue;
-      if (identity !== null && HERMES_SKILL_SUPPORT_DIRECTORIES.has(entry.name)) continue;
       const child = path.join(current, entry.name);
       if (entry.isSymbolicLink()) {
         const plannedChild = plannedDestinations.get(plannedDestinationKey(child));
-        if (plannedChild !== undefined && await isExpectedPlannedSkillSymlink(child, plannedChild)) {
-          pending.push(child);
+        if (plannedChild !== undefined && await isExpectedPlannedSkillSymlink(child, plannedChild, inspectionErrors)) {
+          if (plannedChild.traverse !== false) pending.push(child);
           continue;
         }
-        if (await isDirectory(await canonicalizePath(child))) directorySymlinks.add(child);
+        try {
+          if ((await stat(child)).isDirectory()) directorySymlinks.add(child);
+        } catch (error) {
+          inspectionErrors.push({
+            path: child,
+            message: error instanceof Error ? error.message : "unknown error"
+          });
+        }
         continue;
       }
+      if (HERMES_EXCLUDED_SKILL_DIRECTORIES.has(entry.name)) continue;
+      if (identity !== null && HERMES_SKILL_SUPPORT_DIRECTORIES.has(entry.name)) continue;
       if (entry.isDirectory()) {
         pending.push(child);
       }
@@ -352,13 +471,15 @@ async function findSkillShadows(
   }
   return {
     skills: [...found].sort((left, right) => left.localeCompare(right)),
-    directorySymlinks: [...directorySymlinks].sort((left, right) => left.localeCompare(right))
+    directorySymlinks: [...directorySymlinks].sort((left, right) => left.localeCompare(right)),
+    inspectionErrors: inspectionErrors.sort((left, right) => left.path.localeCompare(right.path))
   };
 }
 
 async function isExpectedPlannedSkillSymlink(
   targetPath: string,
-  planned: { identity: string; sourcePath: string | null }
+  planned: { identity: string; sourcePath: string | null; traverse?: boolean },
+  inspectionErrors?: Array<{ path: string; message: string }>
 ): Promise<boolean> {
   if (planned.sourcePath === null) return false;
   const classification = await classifySymlinkInstall({
@@ -366,7 +487,7 @@ async function isExpectedPlannedSkillSymlink(
     expectedSourcePath: planned.sourcePath
   });
   if (classification.state !== "correct") return false;
-  return await readLocalSkillIdentity(targetPath, path.basename(targetPath)) === planned.identity;
+  return await readLocalSkillIdentity(targetPath, path.basename(targetPath), inspectionErrors) === planned.identity;
 }
 
 function shadowTraversalFindings(directorySymlinks: string[]): HermesExternalRootFinding[] {
@@ -376,9 +497,22 @@ function shadowTraversalFindings(directorySymlinks: string[]): HermesExternalRoo
   }));
 }
 
-async function readLocalSkillIdentity(directory: string, fallback: string): Promise<string | null> {
+function shadowInspectionFindings(
+  errors: Array<{ path: string; message: string }>
+): HermesExternalRootFinding[] {
+  return errors.map((error) => ({
+    code: "hermes_shadow_inspection_failed",
+    message: `Hermes shadow validation could not inspect ${error.path}: ${error.message}`
+  }));
+}
+
+async function readLocalSkillIdentity(
+  directory: string,
+  fallback: string,
+  inspectionErrors?: Array<{ path: string; message: string }>
+): Promise<string | null> {
+  const skillIndex = path.join(directory, "SKILL.md");
   try {
-    const skillIndex = path.join(directory, "SKILL.md");
     const normalized = (await readFile(skillIndex, "utf8")).replace(/\r\n/g, "\n");
     if (!normalized.startsWith("---")) return fallback;
     const frontmatterAndBody = normalized.slice(3);
@@ -394,7 +528,13 @@ async function readLocalSkillIdentity(directory: string, fallback: string): Prom
     if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return fallback;
     const name = (metadata as Record<string, unknown>)["name"];
     return name === undefined || name === null || String(name).length === 0 ? fallback : String(name);
-  } catch {
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      inspectionErrors?.push({
+        path: skillIndex,
+        message: errorMessage(error)
+      });
+    }
     return null;
   }
 }
@@ -425,4 +565,8 @@ function isInsideOrEqual(candidate: string, root: string): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

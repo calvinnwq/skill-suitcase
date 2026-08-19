@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import os from "node:os";
 import {
   chmod,
   lstat,
@@ -15,7 +16,13 @@ import {
 import path from "node:path";
 import { plan } from "../planning/index.js";
 import { targets } from "../catalog/targets.js";
-import type { TargetOverrides } from "../catalog/index.js";
+import { loadCatalog, type TargetOverrides } from "../catalog/index.js";
+import {
+  externalProjectionsForTarget,
+  findUndeclaredDirectorySymlinks,
+  inspectExternalProjections,
+  validateExternalProjectionMetadata
+} from "../external-projections.js";
 import {
   RECEIPT_FILE,
   RECEIPT_SCHEMA,
@@ -126,6 +133,9 @@ export type PruneResult = PrunePlanResult | PruneApplyResult | PruneApplyRefusal
 type PlannedPrune = PruneBaseResult & {
   receipt: Receipt | null;
   targetIdentity: string;
+  categorizedExternalRoot: boolean;
+  plannedTargetPaths: string[];
+  externalProjectionTargetPaths: Map<string, string>;
 };
 
 type TreeEntry = {
@@ -171,12 +181,45 @@ export async function prune(input: PruneInput): Promise<PruneResult> {
 async function planPrune(input: PruneInput, selected: string[]): Promise<PlannedPrune> {
   const source = path.resolve(input.source);
   const errors: PruneError[] = [];
+  const { manifest } = await loadCatalog(source, { targetOverrides: input.targetOverrides });
+  const metadataErrors = validateExternalProjectionMetadata(manifest).map((finding) => ({
+    code: finding.code,
+    message: finding.message,
+    path: finding.path
+  }));
+  errors.push(...metadataErrors);
+  const externalProjections = externalProjectionsForTarget(manifest.externalProjections, input.target);
   const targetReport = await targets({ source, targetOverrides: input.targetOverrides });
   const target = targetReport.targets.find((item) => item.id === input.target);
   const installRoot = target?.platform?.installRoot ?? null;
   const assignment = target?.assignment ?? null;
   const targetIdentity = assignment ?? input.target;
   const categorizedExternalRoot = target?.platform?.metadata["categorizedExternalRoot"] === true;
+  const externalProjectionTargetPaths = new Map<string, string>();
+  let externalProjectionSafetyBlocked = false;
+  if (installRoot !== null && externalProjections.length > 0) {
+    const inspections = await inspectExternalProjections({
+      installRoot,
+      projections: externalProjections,
+      homeDirectory: input.targetOverrides?.home ?? os.homedir()
+    });
+    for (const inspection of inspections) {
+      if (inspection.state !== "external-current") {
+        externalProjectionSafetyBlocked = true;
+        const code = inspection.state === "external-drifted" && inspection.reason.includes("symlinked parent")
+          ? "unsafe_target_path"
+          : inspection.state;
+        errors.push({
+          code,
+          message: inspection.reason,
+          skill: inspection.skill,
+          ...(inspection.targetPath === null ? {} : { path: inspection.targetPath })
+        });
+      } else if (inspection.targetPath !== null) {
+        externalProjectionTargetPaths.set(path.resolve(inspection.targetPath), inspection.id);
+      }
+    }
+  }
   if (target === undefined) errors.push({ code: "unknown_target", message: `Unknown target ${input.target}.` });
   if (target?.platform?.metadata["readOnly"] === true) errors.push({ code: "read_only_target", message: `Target ${input.target} is read-only.` });
   if (target !== undefined && target.safety.classification !== "live-install-root") {
@@ -193,7 +236,9 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
       errors.push(...await validateHermesExternalRoot({
         home: target.home,
         installRoot,
-        planned: []
+        planned: [],
+        externalProjections,
+        ...(input.targetOverrides?.home !== undefined ? { homeDirectory: input.targetOverrides.home } : {})
       }));
     }
   }
@@ -215,6 +260,7 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
   for (const error of assignmentPlan.errors.filter((item) => item.skill === undefined)) {
     errors.push({ code: "assignment_unverifiable", message: `Cannot verify target assignment: ${error.message}` });
   }
+  const plannedTargetPaths = assignmentPlan.planned.map((item) => path.resolve(installRoot ?? source, item.destination));
   const assigned = new Set([
     ...assignmentPlan.planned.map((item) => item.skill),
     ...assignmentPlan.blocked.map((item) => item.skill),
@@ -249,8 +295,33 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
     }
   }
 
+  if (installRoot !== null && !categorizedExternalRoot) {
+    try {
+      const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
+        installRoot,
+        declaredTargetPaths: [
+          ...plannedTargetPaths,
+          ...receiptTargetPaths(receipt, installRoot),
+          ...externalProjectionTargetPaths.keys()
+        ]
+      });
+      errors.push(...undeclaredSymlinks.map((targetPath) => ({
+        code: "external_projection_undeclared_symlink",
+        message: `Undeclared directory symlink ${targetPath} blocks prune.`,
+        path: targetPath
+      })));
+      externalProjectionSafetyBlocked ||= undeclaredSymlinks.length > 0;
+    } catch (error) {
+      externalProjectionSafetyBlocked = true;
+      errors.push({
+        code: "external_projection_inspection_failed",
+        message: `External projection safety inspection failed: ${errorMessage(error)}`
+      });
+    }
+  }
+
   const candidates: PruneCandidate[] = [];
-  if (installRoot !== null && receipt !== null) {
+  if (installRoot !== null && receipt !== null && !externalProjectionSafetyBlocked) {
     for (const skill of selected) {
       if (assigned.has(skill)) continue;
       if (!isPlainSegment(skill)) {
@@ -272,6 +343,16 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
       const targetPath = recordTargetPath === null ? installRoot : path.resolve(installRoot, recordTargetPath);
       if (!isInside(targetPath, installRoot)) {
         errors.push({ code: "unsafe_target_path", message: `Target path ${targetPath} escapes ${installRoot}.`, skill, path: targetPath });
+        continue;
+      }
+      const externalProjection = overlappingExternalProjection(targetPath, externalProjectionTargetPaths);
+      if (externalProjection !== null) {
+        errors.push({
+          code: "external_projection_owned",
+          message: `Skill ${skill} receipt record targets declared external projection ${externalProjection.id} at ${externalProjection.path}.`,
+          skill,
+          path: externalProjection.path
+        });
         continue;
       }
       const candidate = await inspectCandidate(skill, targetPath, installRoot, record);
@@ -327,7 +408,10 @@ async function planPrune(input: PruneInput, selected: string[]): Promise<Planned
     },
     errors,
     receipt,
-    targetIdentity
+    targetIdentity,
+    categorizedExternalRoot,
+    plannedTargetPaths,
+    externalProjectionTargetPaths
   };
 }
 
@@ -507,6 +591,13 @@ async function executePruneLocked(input: PruneInput, planned: PlannedPrune): Pro
     for (const candidate of planned.candidates) {
       await input.__test?.beforeMutationForSkill?.(candidate.skill);
       await revalidateAssignments(input, planned, [candidate.skill]);
+      const currentExternalProjectionPaths = await revalidateExternalProjectionSafety(input, planned);
+      const overlappingProjection = overlappingExternalProjection(candidate.targetPath, currentExternalProjectionPaths);
+      if (overlappingProjection !== null) {
+        throw new Error(
+          `Prune refuses to mutate ${candidate.targetPath} because it overlaps declared external projection ${overlappingProjection.id} at ${overlappingProjection.path}.`
+        );
+      }
       await revalidateCandidate(planned, candidate);
       await input.__test?.afterCandidateRevalidation?.(candidate.skill);
       if (candidate.kind === "directory") {
@@ -664,6 +755,42 @@ async function revalidateAssignments(input: PruneInput, planned: PlannedPrune, s
   if (newlyAssigned !== undefined) {
     throw new Error(`Skill ${newlyAssigned} became assigned during prune transaction.`);
   }
+}
+
+async function revalidateExternalProjectionSafety(
+  input: PruneInput,
+  planned: PlannedPrune
+): Promise<Map<string, string>> {
+  const { manifest } = await loadCatalog(planned.source, { targetOverrides: input.targetOverrides });
+  const projections = externalProjectionsForTarget(manifest.externalProjections, planned.target);
+  const inspections = await inspectExternalProjections({
+    installRoot: planned.installRoot!,
+    projections,
+    homeDirectory: input.targetOverrides?.home ?? os.homedir()
+  });
+  const invalid = inspections.filter((inspection) => inspection.state !== "external-current");
+  if (invalid.length > 0) {
+    throw new Error(invalid.map((inspection) => inspection.reason).join("; "));
+  }
+
+  const paths = new Map<string, string>();
+  for (const inspection of inspections) {
+    if (inspection.targetPath !== null) paths.set(path.resolve(inspection.targetPath), inspection.id);
+  }
+  if (!planned.categorizedExternalRoot) {
+    const undeclaredSymlinks = await findUndeclaredDirectorySymlinks({
+      installRoot: planned.installRoot!,
+      declaredTargetPaths: [
+        ...planned.plannedTargetPaths,
+        ...receiptTargetPaths(planned.receipt, planned.installRoot!),
+        ...paths.keys()
+      ]
+    });
+    if (undeclaredSymlinks.length > 0) {
+      throw new Error(`Undeclared directory symlink ${undeclaredSymlinks[0]} blocks prune.`);
+    }
+  }
+  return paths;
 }
 
 function removeCandidateRecords(
@@ -830,6 +957,18 @@ function receiptSourcePath(record: ReceiptInstallRecord): string | null {
   return null;
 }
 
+function receiptTargetPaths(receipt: Receipt | null, installRoot: string): string[] {
+  if (receipt === null || !receipt.installs) return [];
+  const paths: string[] = [];
+  for (const value of Object.values(receipt.installs)) {
+    for (const record of Array.isArray(value) ? value : [value]) {
+      const targetPath = normalize(record.targetPath);
+      if (targetPath !== null) paths.push(path.resolve(installRoot, targetPath));
+    }
+  }
+  return paths;
+}
+
 function normalizeInstalledFiles(value: unknown): Array<{ path: string; hash: string }> | null {
   if (!Array.isArray(value)) return null;
   const files: Array<{ path: string; hash: string }> = [];
@@ -927,7 +1066,14 @@ function finalizeApplyRefusal(planned: PlannedPrune): PruneApplyRefusalResult {
 }
 
 function stripReceipt(planned: PlannedPrune): PruneBaseResult {
-  const { receipt: _receipt, targetIdentity: _targetIdentity, ...result } = planned;
+  const {
+    receipt: _receipt,
+    targetIdentity: _targetIdentity,
+    categorizedExternalRoot: _categorizedExternalRoot,
+    plannedTargetPaths: _plannedTargetPaths,
+    externalProjectionTargetPaths: _externalProjectionTargetPaths,
+    ...result
+  } = planned;
   return result;
 }
 
@@ -944,7 +1090,12 @@ function failedValidation(
     plan: { schema: PRUNE_PLAN_SCHEMA, id: null, receiptPath: null, receiptHash: null, quarantineRoot: null },
     candidates: [], preserved: { assigned: [] }, refused: { skills: selected },
     summary: { selected: selected.length, candidates: 0, directories: 0, symlinks: 0, refused: selected.length },
-    errors: [{ code, message }], receipt: null, targetIdentity: input.target
+    errors: [{ code, message }],
+    receipt: null,
+    targetIdentity: input.target,
+    categorizedExternalRoot: false,
+    plannedTargetPaths: [],
+    externalProjectionTargetPaths: new Map()
   };
   return wantsApply ? finalizeApplyRefusal(planned) : finalizePlan(planned);
 }
@@ -961,6 +1112,25 @@ function isPlainSegment(value: string): boolean {
 function isInside(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+function overlappingExternalProjection(
+  targetPath: string,
+  protectedExternalPaths: ReadonlyMap<string, string>
+): { path: string; id: string } | null {
+  for (const [protectedPath, id] of [...protectedExternalPaths].sort(([left], [right]) => left.localeCompare(right))) {
+    if (
+      isInsideOrEqual(targetPath, protectedPath)
+      || isInsideOrEqual(protectedPath, targetPath)
+    ) {
+      return { path: protectedPath, id };
+    }
+  }
+  return null;
+}
+function isInsideOrEqual(candidate: string, root: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === ""
+    || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 async function pathExists(candidate: string): Promise<boolean> {
   try {

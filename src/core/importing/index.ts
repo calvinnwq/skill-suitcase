@@ -4,6 +4,7 @@ import { readTextFile } from "../../adapters/filesystem.js";
 import { DEFAULT_SKILLS_DIRECTORY, DEFAULT_SUITCASE_MANIFEST_FILE } from "../../config/defaults.js";
 import { type Catalog } from "../catalog/index.js";
 import { parseSuitcaseManifest } from "../catalog/suitcase-manifest.js";
+import { validateExternalProjectionMetadata } from "../external-projections.js";
 import { isHermesCategorySegment } from "../hermes-categories.js";
 import { resolvePlatformAdapter } from "../platform-adapters.js";
 
@@ -61,6 +62,7 @@ type ImportSummary = {
   assignments: number;
   assignmentPaths: number;
   groups: number;
+  externalProjections: number;
   compatibilityEntries: number;
   variantEntries: number;
   warnings: number;
@@ -144,6 +146,7 @@ export async function inspectImportSource({ source }: ImportArgs): Promise<Impor
       assignments: Object.keys(manifest.assignments).length,
       assignmentPaths: Object.keys(manifest.assignmentPaths).length,
       groups: Object.keys(manifest.groups).length,
+      externalProjections: Object.keys(manifest.externalProjections).length,
       compatibilityEntries: Object.keys(manifest.compatibility).length,
       variantEntries: countVariantEntries(manifest),
       warnings,
@@ -358,6 +361,9 @@ function validateManifestShape(
   }
 
   validateSourcePolicyMetadata(manifest.sourcePolicy, findings);
+  findings.push(...validateExternalProjectionMetadata(manifest).map((finding) =>
+    error(finding.code, finding.message, finding.path)
+  ));
 
   for (const [pathName, assignmentPath] of Object.entries(manifest.assignmentPaths)) {
     const assignment = normalizedString(assignmentPath.assignment);
@@ -858,7 +864,8 @@ function emptyManifest(): Catalog {
     sourcePolicy: {},
     validationPolicy: { skillify: { skip: {} } },
     compatibility: {},
-    variants: {}
+    variants: {},
+    externalProjections: {}
   };
 }
 
