@@ -238,6 +238,16 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
   const records = collected.records;
   records.sort((left, right) => left.skill.localeCompare(right.skill));
 
+  // Every apply-created symlink target recorded in the receipt is declared
+  // for the rollback safety scan. Without this, two or more symlink skills
+  // applied into the same flat target directory would refuse each other as
+  // undeclared directory symlinks during rollback, leaving the links stuck.
+  const receiptOwnedSymlinkTargetPaths = collectReceiptOwnedSymlinkTargetPaths(
+    records,
+    installRoot,
+    receiptDirectory
+  );
+
   for (const { skill, record } of records) {
     if (record.mode === SYMLINK_MODE) {
       // A symlink install is a live link from the agent home into the catalog
@@ -296,7 +306,11 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
         }
         const mutationSafety = await inspectRollbackMutationRoot({
           mutationRoot: path.dirname(appliedSymlink.targetPath),
-          declaredTargetPaths: [appliedSymlink.targetPath, ...protectedExternalPaths]
+          declaredTargetPaths: [
+            appliedSymlink.targetPath,
+            ...receiptOwnedSymlinkTargetPaths,
+            ...protectedExternalPaths
+          ]
         });
         if (!mutationSafety.ok) {
           refuseRollbackMutation(result, skill, appliedSymlink.targetPath, mutationSafety);
@@ -306,7 +320,11 @@ export async function rollback({ receipt, source, target, targetOverrides, __tes
           appliedSymlink,
           installRoot,
           __test?.afterAppliedSymlinkClassification,
-          [...protectedExternalPaths]
+          [
+            appliedSymlink.targetPath,
+            ...receiptOwnedSymlinkTargetPaths,
+            ...protectedExternalPaths
+          ]
         );
         if (removal.kind === "removed") {
           result.summary.removed += 1;
@@ -1014,6 +1032,29 @@ function removeReceiptInstallRecord(
   if (existing === record) {
     delete installs[skill];
   }
+}
+
+/**
+ * Collect the resolved target path of every apply-created symlink recorded in
+ * the receipt. These links are receipt-owned: they were created by apply and
+ * are the records this rollback will remove, so the rollback safety scan must
+ * count them as declared rather than flag them as undeclared directory
+ * symlinks. Path resolution reuses parseAppliedSymlinkRollback so receipt
+ * parsing is never duplicated.
+ */
+function collectReceiptOwnedSymlinkTargetPaths(
+  records: Array<{ skill: string; record: ReceiptInstallRecord }>,
+  installRoot: string,
+  receiptDirectory: string
+): string[] {
+  const targetPaths = new Set<string>();
+  for (const { record } of records) {
+    if (record.mode !== SYMLINK_MODE) continue;
+    const appliedSymlink = parseAppliedSymlinkRollback(record, installRoot, receiptDirectory);
+    if (appliedSymlink.kind !== "apply-created") continue;
+    targetPaths.add(path.resolve(appliedSymlink.targetPath));
+  }
+  return [...targetPaths];
 }
 
 /**

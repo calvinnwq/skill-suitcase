@@ -1525,6 +1525,185 @@ test("categorized Hermes symlink rollback refuses a replaced link after classifi
   assert.equal(await readFile(fixture.targetSkill, "utf8"), replacement);
 });
 
+test("categorized Hermes symlink rollback removes every receipt-owned sibling link in a shared flat target", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-flat-rollback-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+
+  const source = path.join(sandbox, "catalog");
+  const hermesHome = path.join(sandbox, "hermes");
+  const externalRoot = path.join(hermesHome, "skill-suitcase", "skills");
+  const artifactRoot = path.join(sandbox, "pack");
+  const skills = [
+    { name: "alpha-skill", category: "productivity" },
+    { name: "beta-skill", category: "productivity" }
+  ];
+
+  await mkdir(externalRoot, { recursive: true });
+  await mkdir(path.join(hermesHome, "skills"), { recursive: true });
+  await writeFile(path.join(hermesHome, "config.yaml"), `skills:\n  external_dirs:\n    - ${externalRoot}\n`);
+  for (const skill of skills) {
+    await mkdir(path.join(source, "skills", skill.name), { recursive: true });
+    await writeFile(path.join(source, "skills", skill.name, "SKILL.md"), `---\nname: ${skill.name}\n---\n\n# ${skill.name}\n`);
+  }
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - alpha-skill
+      - beta-skill
+
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      alpha-skill: productivity
+      beta-skill: productivity
+
+assignmentPaths:
+  hermes:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: ${hermesHome}
+    path: ${externalRoot}
+
+compatibility:
+  alpha-skill:
+    agents:
+      - hermes
+  beta-skill:
+    agents:
+      - hermes
+`
+  );
+
+  const packed = runCli<{ bundle: { artifactPath: string } }>([
+    "pack", "--source", source, "--target", "hermes", "--output", artifactRoot, "--json"
+  ]);
+  const applied = await apply({
+    source,
+    target: "hermes",
+    artifact: packed.bundle.artifactPath,
+    mode: "symlink"
+  });
+  assert.equal(applied.ok, true);
+  assert.deepEqual(applied.applied.skills, ["alpha-skill", "beta-skill"]);
+
+  const categoryPath = path.join(externalRoot, "productivity");
+  const alphaTarget = path.join(categoryPath, "alpha-skill");
+  const betaTarget = path.join(categoryPath, "beta-skill");
+  const alphaSource = path.join(source, "skills", "alpha-skill");
+  const betaSource = path.join(source, "skills", "beta-skill");
+  assert.equal(await readlink(alphaTarget), alphaSource);
+  assert.equal(await readlink(betaTarget), betaSource);
+
+  const receiptPath = path.join(externalRoot, ".skill-suitcase-receipt.json");
+  const receiptBefore = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: Record<string, { mode: string; targetPath: string }>;
+  };
+  assert.equal(receiptBefore.installs["alpha-skill"]?.mode, "symlink");
+  assert.equal(receiptBefore.installs["beta-skill"]?.mode, "symlink");
+
+  const result = await rollback({
+    receipt: receiptPath,
+    source,
+    target: "hermes"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.summary.removed, 2);
+  await assert.rejects(readFile(alphaTarget, "utf8"));
+  await assert.rejects(readFile(betaTarget, "utf8"));
+  assert.equal(await readFile(path.join(alphaSource, "SKILL.md"), "utf8"), `---\nname: alpha-skill\n---\n\n# alpha-skill\n`);
+  assert.equal(await readFile(path.join(betaSource, "SKILL.md"), "utf8"), `---\nname: beta-skill\n---\n\n# beta-skill\n`);
+
+  const receiptAfter = JSON.parse(await readFile(receiptPath, "utf8")) as {
+    installs: Record<string, unknown>;
+  };
+  assert.equal(receiptAfter.installs["alpha-skill"], undefined);
+  assert.equal(receiptAfter.installs["beta-skill"], undefined);
+});
+
+test("categorized Hermes symlink rollback still refuses an undeclared directory symlink in the mutation root", async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-hermes-undeclared-rollback-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+
+  const source = path.join(sandbox, "catalog");
+  const hermesHome = path.join(sandbox, "hermes");
+  const externalRoot = path.join(hermesHome, "skill-suitcase", "skills");
+  const artifactRoot = path.join(sandbox, "pack");
+  const skill = { name: "alpha-skill", category: "productivity" };
+
+  await mkdir(externalRoot, { recursive: true });
+  await mkdir(path.join(hermesHome, "skills"), { recursive: true });
+  await writeFile(path.join(hermesHome, "config.yaml"), `skills:\n  external_dirs:\n    - ${externalRoot}\n`);
+  await mkdir(path.join(source, "skills", skill.name), { recursive: true });
+  await writeFile(path.join(source, "skills", skill.name, "SKILL.md"), `---\nname: ${skill.name}\n---\n\n# ${skill.name}\n`);
+  await writeFile(
+    path.join(source, "skill-suitcase.yaml"),
+    `suitcases:
+  core:
+    skills:
+      - alpha-skill
+
+assignments:
+  hermes:
+    suitcases:
+      - core
+    categories:
+      alpha-skill: productivity
+
+assignmentPaths:
+  hermes:
+    kind: hermes-external-skills-root
+    assignment: hermes
+    home: ${hermesHome}
+    path: ${externalRoot}
+
+compatibility:
+  alpha-skill:
+    agents:
+      - hermes
+`
+  );
+
+  const packed = runCli<{ bundle: { artifactPath: string } }>([
+    "pack", "--source", source, "--target", "hermes", "--output", artifactRoot, "--json"
+  ]);
+  const applied = await apply({
+    source,
+    target: "hermes",
+    artifact: packed.bundle.artifactPath,
+    mode: "symlink"
+  });
+  assert.equal(applied.ok, true);
+
+  const categoryPath = path.join(externalRoot, "productivity");
+  const alphaTarget = path.join(categoryPath, "alpha-skill");
+  const alphaSource = path.join(source, "skills", "alpha-skill");
+  assert.equal(await readlink(alphaTarget), alphaSource);
+
+  const undeclaredRoot = path.join(sandbox, "undeclared-source");
+  const undeclaredTarget = path.join(categoryPath, "undeclared-skill");
+  await mkdir(undeclaredRoot, { recursive: true });
+  await writeFile(path.join(undeclaredRoot, "SKILL.md"), "---\nname: undeclared-skill\n---\n# Outside\n");
+  await symlink(undeclaredRoot, undeclaredTarget, "dir");
+
+  const receiptPath = path.join(externalRoot, ".skill-suitcase-receipt.json");
+  const result = await rollback({
+    receipt: receiptPath,
+    source,
+    target: "hermes"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "external_projection_undeclared_symlink"), true);
+  assert.equal(await readlink(alphaTarget), alphaSource);
+  assert.equal(await readlink(undeclaredTarget), undeclaredRoot);
+});
+
 test("categorized Hermes copy rollback revalidates before restoring a file", async (t) => {
   const fixture = await createCategorizedRecoveryFixture(t);
   const initial = await apply({ source: fixture.source, target: "hermes", artifact: fixture.artifactPath });
