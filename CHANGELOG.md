@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.19.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.18.1...v0.19.0) (2026-08-19)
+
+
+### Features
+
+* **core:** add safe external skill projections ([2077541](https://github.com/calvinnwq/skill-suitcase/commit/20775419c6fa5d4518f07a4611410ad1a070666a))
+* support external skill projections ([92ab6c6](https://github.com/calvinnwq/skill-suitcase/commit/92ab6c69e8173bd72d860935b0aca125db96acde))
+
+
+### Bug Fixes
+
+* close external projection rollback boundaries ([f9046e7](https://github.com/calvinnwq/skill-suitcase/commit/f9046e76157152d55626d9cc98a3d86e73caa216))
+* close receipt-only rollback provenance gaps ([ddc0662](https://github.com/calvinnwq/skill-suitcase/commit/ddc066211d38934d87804c50e64089a56e79fbb6))
+* close residual projection rollback gaps ([602cade](https://github.com/calvinnwq/skill-suitcase/commit/602cadeb7dd06cb18d4a665555a6ae7e9f688de1))
+* **core:** close external projection safety gaps ([118a725](https://github.com/calvinnwq/skill-suitcase/commit/118a72514552e9430a89393e071535712bfb9649))
+* **core:** guard rollback mutation roots ([f464824](https://github.com/calvinnwq/skill-suitcase/commit/f464824e5bda79fac63c45bda2d80b019ec5384d))
+* harden external projection safety boundaries ([ad3f1c6](https://github.com/calvinnwq/skill-suitcase/commit/ad3f1c62e5072802f94099f7777e00b6f1c1e8da))
+* **rollback:** declare receipt-owned sibling symlinks in flat-target rollback scans ([51da50b](https://github.com/calvinnwq/skill-suitcase/commit/51da50be4501112ef7c6fc7f32c21d71f06d23dc))
+
 ## [0.18.1](https://github.com/calvinnwq/skill-suitcase/compare/v0.18.0...v0.18.1) (2026-08-17)
 
 
