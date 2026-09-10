@@ -14,7 +14,7 @@ import { targetsCommand } from "./targets.js";
 import { trackCommand } from "./track.js";
 import { upstreamCommand } from "./upstream.js";
 import { validateCommand } from "./validate.js";
-import { exitCodeForCommandResult, EXIT_CODE_USAGE } from "../renderers/exit-codes.js";
+import { exitCodeForCommandResult, EXIT_CODE_SUCCESS, EXIT_CODE_USAGE } from "../renderers/exit-codes.js";
 import { usageText } from "../renderers/usage.js";
 import type { CommandModule, CommandName, DispatchResult, ParsedCommandArgs, ValueFlagName } from "./types.js";
 
@@ -62,18 +62,30 @@ export function createCommandRegistry(): CommandRegistry {
 }
 
 export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
+  if (argv[0] === "help" && argv[1] !== undefined && !argv[1].startsWith("-")) {
+    return parseCommandArgs([...argv.slice(1), "--help"]);
+  }
   const [command = "", ...rest] = argv;
+  if (!isKnownCommand(command) && !["", "help", "--help", "-h"].includes(command)) {
+    throw new Error(`Unknown command: ${command}`);
+  }
   const args: ParsedCommandArgs = {
     command: isKnownCommand(command) ? command : "help",
     dryRun: false,
     json: false
   };
+  if (args.command === "help") args.help = true;
   const commandRest = args.command === "upstream" ? parseUpstreamAction(rest, args) : rest;
 
   for (let index = 0; index < commandRest.length; index += 1) {
     const token = commandRest[index];
     if (token === undefined) {
       break;
+    }
+
+    if (token === "--help" || token === "-h") {
+      args.help = true;
+      continue;
     }
 
     if (token === "--json") {
@@ -110,7 +122,7 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
         throw new Error(`Unknown argument: ${token}`);
       }
       const value = commandRest[index + 1];
-      if (value === undefined || value === "" || value.startsWith("--")) {
+      if (value === undefined || value === "" || value === "-h" || value.startsWith("--")) {
         throw new Error(`${token} requires a value`);
       }
       if (value.trim().length === 0) {
@@ -126,7 +138,7 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
         throw new Error(`Unknown argument: ${token}`);
       }
       const value = commandRest[index + 1];
-      if (value === undefined || value === "" || value.startsWith("--")) {
+      if (value === undefined || value === "" || value === "-h" || value.startsWith("--")) {
         throw new Error(`${token} requires a value`);
       }
       const key = valueFlagName(token);
@@ -149,8 +161,17 @@ export async function dispatchCommand(argv: string[]): Promise<DispatchResult> {
     return {
       type: "usage",
       message: error instanceof Error ? error.message : "Failed to parse arguments.",
-      usage: usageText(),
+      usage: argv[0] === "help" ? usageText(argv[1], argv[2]) : usageText(argv[0], argv[1]),
       exitCode: EXIT_CODE_USAGE
+    };
+  }
+
+  if (args.help === true) {
+    return {
+      type: "usage",
+      message: null,
+      usage: usageText(args.command, args.upstreamAction),
+      exitCode: EXIT_CODE_SUCCESS
     };
   }
 
@@ -159,7 +180,7 @@ export async function dispatchCommand(argv: string[]): Promise<DispatchResult> {
     return {
       type: "usage",
       message: null,
-      usage: usageText(),
+      usage: usageText(args.command, args.upstreamAction),
       exitCode: EXIT_CODE_USAGE
     };
   }
@@ -190,7 +211,7 @@ function parseUpstreamAction(rest: string[], args: ParsedCommandArgs): string[] 
     args.upstreamAction = action;
     return remaining;
   }
-  if (action === undefined || action.startsWith("--")) {
+  if (action === undefined || action.startsWith("-")) {
     return rest;
   }
   throw new Error(`Unknown upstream action: ${action}`);
