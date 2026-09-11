@@ -33,6 +33,9 @@ Skill Suitcase requires Node.js 20 or newer:
 npm install --global skill-suitcase
 ```
 
+Later, `skill-suitcase update --check --json` reports whether a newer stable release exists, and `skill-suitcase update --json` installs it into the same global npm installation.
+Updating the CLI never changes catalogs, installed skills, or agent homes.
+
 For a hands-on first run covering installation, catalog setup, local target overrides, read-only audit, staged apply, and rollback, follow [`docs/getting-started.md`](docs/getting-started.md).
 
 ### Recommended agent setup

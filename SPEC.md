@@ -339,6 +339,14 @@ Parser and usage failures, uncaught fatal diagnostics, and non-JSON notices go
 to stderr. They must not be mixed into machine-readable stdout. Exit status is
 derived separately from the structured result or fatal failure.
 
+Two stderr-only surfaces exist for CLI maintenance. The `update` command prints
+a readable summary on stderr when `--json` is omitted, and successful ordinary
+commands may print a one-line update reminder on interactive stderr. Neither
+changes JSON stdout, exit codes, or structured warnings, and
+`SKILL_SUITCASE_NO_UPDATE_CHECK=1` disables the reminder. `update` changes only
+the npm-installed CLI package; catalogs, installed skills, and receipts are out
+of its scope. See [`docs/command-reference.md`](docs/command-reference.md#cli-maintenance).
+
 This boundary is enforced by [renderer tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/renderers.test.ts),
 [CLI tests](https://github.com/calvinnwq/skill-suitcase/blob/main/tests/cli.test.ts),
 [architecture contract tests](https://github.com/calvinnwq/skill-suitcase/blob/main/scripts/architecture-contract.test.mjs), and

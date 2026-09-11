@@ -6,8 +6,9 @@ is the normative current-state contract, and this document carries the longer
 operational detail.
 
 Command execution requires `--json`; help does not.
+The one exception is `update`, which prints a readable summary on stderr when `--json` is omitted.
 Result objects go to stdout, including structured `ok: false` results with machine-readable errors.
-Parser/usage failures and uncaught fatal diagnostics go to stderr.
+Parser/usage failures, uncaught fatal diagnostics, and the optional update reminder go to stderr.
 Examples use portable paths; set `SRC` and target overrides for the machine running the CLI.
 
 The CLI without arguments, or with `--help`, `-h`, or `help`, shows a compact command index.
@@ -492,6 +493,46 @@ skill-suitcase upstream import \
 Repeats the pinned isolated fetch, refuses dirty selected catalog source, and
 writes only `skills/<name>` plus `.skill-suitcase/upstream-lock.json`. It never
 installs into a live target and never commits the resulting Git diff.
+
+## CLI Maintenance
+
+### `update`
+
+```bash
+skill-suitcase update --check --json
+skill-suitcase update --json
+```
+
+`update` maintains the CLI package itself, not catalogs, installed skills, copied operator skills, agent homes, or receipts.
+It takes no catalog flags and no version argument.
+Without `--json` it prints a short summary on stderr and writes nothing to stdout; with `--json` it writes one structured result to stdout.
+
+`--check` reports whether a newer stable release exists without installing anything and without writing the reminder cache.
+Without `--check`, invoking the command is the approval to install: it fetches the latest stable release metadata from the public npm registry, installs that exact version with the npm bundled beside the running Node.js runtime, and reports `updated` only after the installed package version, its declared entrypoint, and the global launcher have been verified and help has run in a fresh process.
+Prereleases are never selected and the CLI never downgrades; an installed version equal to or newer than the registry version succeeds with `up-to-date` or `ahead`.
+
+Self-update supports only a verified global npm installation on macOS and Linux: the running package must be the real `skill-suitcase` directory in the global root that npm reports for the same Node.js runtime.
+Source checkouts, `npm link` installs, project-local packages, ephemeral runners, other package managers, and Windows installs receive `installation.canSelfUpdate: false` with a reason code and portable guidance.
+`update --check` still reports availability for those installations; `update` without `--check` refuses them before any network request.
+
+The result carries `ok`, `action` (`check` or `update`), `status`, `currentVersion`, `latestVersion`, `installedVersion`, `updateAvailable`, `installation`, and `error`.
+Statuses are `update-available`, `up-to-date`, `ahead`, `updated`, `unsupported-installation`, and `failed`.
+Error codes distinguish `invalid-current-version`, `registry-unreachable`, `registry-response-invalid`, `unsupported-installation`, `node-engine-incompatible`, `install-failed`, `install-timeout`, and `verification-failed`.
+A discovered update is not a failure: successful checks and updates exit `0`, structured failures exit `1`, and usage errors exit `2`.
+
+npm installation is not a Suitcase transaction.
+Finish other `skill-suitcase` work first, because replacing the package can interfere with an invocation that is still running.
+If npm fails, times out, or the post-install verification fails, the global package may be partially changed; the result names the exact `npm install --global skill-suitcase@<version>` command to repair it.
+The updater never escalates privileges.
+
+### Update reminders
+
+Successful ordinary commands may print a one-line reminder on stderr when a newer stable release is known, including when the command runs with `--json`.
+The JSON on stdout, the exit code, and structured warnings are unchanged.
+The reminder appears only when stderr is an interactive terminal; it is skipped in CI, for help and usage failures, for failed commands, and for the `update` command itself.
+Passive checks are bounded to well under a second, cached for 24 hours on success and one hour on failure under `$XDG_CACHE_HOME/skill-suitcase/` (or `~/.cache/skill-suitcase/`), and never install anything.
+Set `SKILL_SUITCASE_NO_UPDATE_CHECK=1` to disable passive checks and reminders; explicit `update` and `update --check` still work.
+Source checkouts receive installation guidance instead of a self-update hint.
 
 ## Receipt Library API
 

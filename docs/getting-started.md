@@ -19,8 +19,11 @@ Skill Suitcase requires Node.js 20 or newer.
 npm install --global skill-suitcase
 ```
 
+Update an existing global install later with `skill-suitcase update --json`, or preview with `skill-suitcase update --check --json`.
+Updating the CLI leaves catalogs, installed skills, and agent homes unchanged.
+
 See the [command reference](command-reference.md) for the command directory and focused help.
-Command results always go to stdout; usage and fatal diagnostics go to stderr.
+Command results always go to stdout; usage, fatal diagnostics, and the optional update reminder go to stderr.
 
 ## 2. Install The Operator Skill Into Your Agent
 

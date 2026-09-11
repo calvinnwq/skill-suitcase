@@ -41,6 +41,27 @@ test("every command supports focused help without executing its workflow", () =>
   }
 });
 
+test("update help is local and documents its optional --json exception", () => {
+  const expected = runHelp(["update", "--help"]);
+  assert.equal(expected.status, 0);
+  assert.equal(expected.stdout, "");
+  assert.match(expected.stderr, /Usage:\n  skill-suitcase update \[flags\]/);
+  assert.match(expected.stderr, /--check/);
+  assert.match(expected.stderr, /--json\s+Write a deterministic JSON result instead of the summary/);
+  assert.doesNotMatch(expected.stderr, /required to run\)|--source|--force|--yes|--beta/);
+  assert.match(expected.stderr, /never catalogs, skills, or agent homes/);
+  assert.equal(runHelp(["update", "--check", "--help"]).stderr, expected.stderr);
+  assert.equal(runHelp(["help", "update"]).stderr, expected.stderr);
+  assert.match(runHelp(["--help"]).stderr, /required to run, except for update/);
+  for (const args of [["update", "0.20.0"], ["update", "--force"], ["update", "--source", "/path/to/catalog"]]) {
+    const result = runHelp(args);
+    assert.equal(result.status, 2, args.join(" "));
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Unknown argument/);
+    assert.match(result.stderr, /Usage:\n  skill-suitcase update /);
+  }
+});
+
 test("upstream help drills down to the selected action", () => {
   for (const action of ["check", "fetch", "import"]) {
     const expected = runHelp(["upstream", action, "--help"]);

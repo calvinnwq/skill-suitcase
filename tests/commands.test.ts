@@ -23,8 +23,24 @@ test("command registry exposes every public command explicitly", () => {
     "promote",
     "prune",
     "import-target",
-    "upstream"
+    "upstream",
+    "update"
   ]);
+});
+
+test("parseCommandArgs accepts only the update command surface", () => {
+  assert.deepEqual(parseCommandArgs(["update"]), { command: "update", dryRun: false, json: false });
+  assert.deepEqual(parseCommandArgs(["update", "--check"]), { command: "update", dryRun: false, json: false, check: true });
+  assert.deepEqual(parseCommandArgs(["update", "--check", "--json"]), { command: "update", dryRun: false, json: true, check: true });
+  for (const argv of [["update", "0.20.0"], ["update", "--force"], ["update", "--yes"], ["update", "--beta"],
+    ["update", "--dry-run"], ["update", "--source", fixtureSource], ["update", "--target", "codex"], ["update", "latest"]]) {
+    assert.throws(() => parseCommandArgs(argv), /Unknown argument/, argv.join(" "));
+  }
+  assert.throws(() => parseCommandArgs(["status", "--source", fixtureSource, "--check", "--json"]), /Unknown argument: --check/);
+  const registry = createCommandRegistry();
+  assert.equal(registry.find(parseCommandArgs(["update"]))?.name, "update");
+  assert.equal(registry.find(parseCommandArgs(["update", "--check"]))?.name, "update");
+  assert.equal(registry.find(parseCommandArgs(["status", "--source", fixtureSource])), null, "ordinary commands still require --json");
 });
 
 test("parseCommandArgs preserves current flag parsing and unknown argument errors", () => {

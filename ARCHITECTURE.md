@@ -434,6 +434,12 @@ projection destinations.
 
 Keep the command verbs separate:
 
+- `update` maintains the CLI package itself through npm and never touches
+  catalog source, installed skills, copied operator skills, agent homes, or
+  receipts. It installs only into a verified global npm installation, never
+  downgrades or selects prereleases, and reports success only after the
+  installed entrypoint and launcher are verified in a fresh process.
+
 - `track` adopts an existing target that already matches the selected catalog
   source. It writes receipts only and does not rewrite skill files.
 - `apply` installs or updates skills from an approved plan lock or artifact.
@@ -726,6 +732,15 @@ For command results:
 
 Do not print free-form notices, usage text, or fatal diagnostics to stdout when `--json` is used.
 Warnings that are part of a command's structured result remain in the JSON stdout payload.
+
+The `update` command is the only command that runs without `--json`; its
+readable summary is a separate dispatch presentation rendered on stderr with
+no stdout. Passive update reminders are optional presentation metadata attached
+to a successful ordinary dispatch result, rendered on stderr by `src/cli.ts`
+only when stderr is interactive. The `src/core/cli-update/` module owns
+version, ownership, install, and reminder policy; `src/adapters/cli-update.ts`
+owns registry, cache, and npm subprocess IO. Neither the entrypoint nor the
+command module performs network or filesystem work.
 
 ## Adding New CLI Features
 

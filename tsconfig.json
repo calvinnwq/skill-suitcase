@@ -79,6 +79,11 @@
     "src/promote.ts",
     "src/import-target.ts",
     "src/upstream.ts",
-    "src/adapters/filesystem.ts"
+    "src/adapters/filesystem.ts",
+    "src/adapters/cli-update.ts",
+    "src/config/cli-update.ts",
+    "src/core/cli-update/index.ts",
+    "src/commands/update.ts",
+    "src/renderers/update.ts"
   ]
 }

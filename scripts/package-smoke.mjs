@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +8,11 @@ import { promisify } from "node:util";
 import { parsePackJson, validatePackResult } from "./package-validation.mjs";
 
 const execFileAsync = promisify(execFile);
+
+function runInstalledCli(binPath, args, options) {
+  const result = spawnSync(binPath, args, { ...options, encoding: "utf8" });
+  return { ...result, json: () => JSON.parse(result.stdout) };
+}
 const root = process.cwd();
 const tempRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-package-smoke-"));
 
@@ -112,6 +117,57 @@ try {
     throw new Error(`installed sample contract tests returned an unexpected result: ${sampleTestStderr.trim()}`);
   }
 
+  const globalPrefix = path.join(tempRoot, "global-prefix");
+  const smokeHome = path.join(tempRoot, "home");
+  await mkdir(globalPrefix);
+  await mkdir(smokeHome);
+  const globalEnv = {
+    ...process.env,
+    HOME: smokeHome,
+    XDG_CACHE_HOME: path.join(smokeHome, ".cache"),
+    npm_config_prefix: globalPrefix,
+    npm_config_cache: path.join(tempRoot, "npm-cache"),
+    npm_config_userconfig: path.join(smokeHome, ".npmrc"),
+    npm_config_globalconfig: path.join(smokeHome, "npmrc-global"),
+    npm_config_update_notifier: "false"
+  };
+
+  const localUpdate = runInstalledCli(binPath, ["update", "--json"], { cwd: installDirectory, env: globalEnv });
+  const localUpdateResult = localUpdate.json();
+  if (
+    localUpdate.status !== 1
+      || localUpdate.stderr !== ""
+      || localUpdateResult.ok !== false
+      || localUpdateResult.status !== "unsupported-installation"
+      || localUpdateResult.installation?.reason !== "outside-global-root"
+  ) {
+    throw new Error(`project-local skill-suitcase did not refuse self-update: ${localUpdate.stdout.trim()} ${localUpdate.stderr.trim()}`);
+  }
+
+  await execFileAsync(
+    "npm",
+    ["install", "--global", "--prefix", globalPrefix, "--ignore-scripts", "--no-audit", "--no-fund", tarballPath],
+    { cwd: globalPrefix, env: globalEnv, maxBuffer: 10 * 1024 * 1024 }
+  );
+  const globalBinPath = path.join(globalPrefix, "bin", "skill-suitcase");
+  const globalHelp = runInstalledCli(globalBinPath, ["update", "--help"], { cwd: globalPrefix, env: globalEnv });
+  if (globalHelp.status !== 0 || globalHelp.stdout !== "" || !globalHelp.stderr.includes("Usage:")) {
+    throw new Error(`global skill-suitcase update --help misbehaved: ${globalHelp.stdout.trim()} ${globalHelp.stderr.trim()}`);
+  }
+  const globalCheck = runInstalledCli(globalBinPath, ["update", "--check", "--json"], { cwd: globalPrefix, env: globalEnv });
+  const globalCheckResult = globalCheck.json();
+  const checkSucceeded = globalCheck.status === 0 && globalCheckResult.ok === true;
+  const checkOffline = globalCheck.status === 1 && globalCheckResult.error?.code === "registry-unreachable";
+  if (
+    globalCheck.stderr !== ""
+      || globalCheckResult.action !== "check"
+      || globalCheckResult.installation?.kind !== "npm-global"
+      || globalCheckResult.installation?.canSelfUpdate !== true
+      || !(checkSucceeded || checkOffline)
+  ) {
+    throw new Error(`global skill-suitcase update --check returned an unexpected result: ${globalCheck.stdout.trim()} ${globalCheck.stderr.trim()}`);
+  }
+
   const installedPackageJson = JSON.parse(
     await readFile(path.join(installDirectory, "node_modules", "skill-suitcase", "package.json"), "utf8")
   );
@@ -124,7 +180,9 @@ try {
     bin: validated.bin,
     command: "targets",
     sampleValidation: "strict",
-    sampleContractTests: "passed"
+    sampleContractTests: "passed",
+    localSelfUpdate: "refused",
+    globalSelfUpdateCheck: checkSucceeded ? globalCheckResult.status : "registry-unreachable"
   }, null, 2)}\n`);
 } finally {
   await rm(tempRoot, { recursive: true, force: true });

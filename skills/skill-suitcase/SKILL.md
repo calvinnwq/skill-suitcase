@@ -1,6 +1,6 @@
 ---
 name: skill-suitcase
-description: Use when asked to install, audit, sync, recover, track, reconcile, repair, prune, promote, import-target, apply, rollback, refresh upstream catalog source, or explain Skill Suitcase-managed agent skills, especially Hermes targets and explicit compatibility targets such as Codex, Claude, OpenClaw, OpenClaw-Codex, shared agents, Grok, or another machine using a skills catalog.
+description: Use when asked to install, audit, sync, recover, track, reconcile, repair, prune, promote, import-target, apply, rollback, refresh upstream catalog source, update the Skill Suitcase CLI itself, or explain Skill Suitcase-managed agent skills, especially Hermes targets and explicit compatibility targets such as Codex, Claude, OpenClaw, OpenClaw-Codex, shared agents, Grok, or another machine using a skills catalog.
 ---
 
 # Skill Suitcase
@@ -126,6 +126,33 @@ Then restart the read-only audit.
 
 New-machine setup uses this catalog plus Suitcase `pack`, `apply`, `track`, `status`, and `diff` flows.
 If a selected upstream-managed skill needs source refresh, fetch it only through the catalog-only refresh lane, review the ordinary repository diff, and then return to the normal target sync workflow.
+
+## CLI Update
+
+`update` maintains the CLI package only. It never refreshes catalogs, installed
+skills, this operator skill copy, agent homes, or receipts, so it is not a sync
+or upstream verb.
+
+```bash
+skill-suitcase update --check --json
+```
+
+Report the result before installing. Only a verified global npm installation
+can self-update (`installation.canSelfUpdate`); source checkouts, `npm link`,
+and project-local installs return guidance instead. Install a newer stable
+release only after the human approves it, and finish any other
+`skill-suitcase` work first:
+
+```bash
+skill-suitcase update --json
+```
+
+`status: updated` means the new version and launcher were verified in a fresh
+process. On `install-failed`, `install-timeout`, or `verification-failed`, show
+the reinstall command from `error.message` rather than retrying automatically.
+Passive update reminders appear only on interactive stderr and are irrelevant
+when the CLI is driven through pipes; set `SKILL_SUITCASE_NO_UPDATE_CHECK=1` to
+silence them.
 
 ## Upstream Source Refresh
 

@@ -30,6 +30,18 @@ npm install --global skill-suitcase
 test -d "$HOME/.skill-suitcase/skills" && skill-suitcase targets --source "$HOME/.skill-suitcase/skills" --json
 ```
 
+If a global npm install already exists, check for and install a newer stable
+release with the CLI itself instead of repeating the installation:
+
+```bash
+skill-suitcase update --check --json
+skill-suitcase update --json
+```
+
+`update` changes only the CLI package; it does not refresh the operator skill
+copy, catalogs, or agent homes, so repeat step 2 after a CLI update when the
+skill changed. Source checkouts update with `git pull` and a rebuild.
+
 Source installs require Node.js 20 or newer and pnpm 10.34.4, as pinned by
 `packageManager` in `package.json`. Install from source with npm's ephemeral
 executor so the pinned pnpm version runs without changing Corepack or global

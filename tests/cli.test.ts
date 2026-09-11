@@ -250,3 +250,32 @@ test("cli keeps JSON on stdout and usage errors on stderr", () => {
   assert.equal(usageResult.stderr.includes("Unknown argument: --unknown"), true);
   assert.equal(usageResult.stderr.includes("Usage:"), true);
 });
+
+test("cli update in a source checkout refuses without network and keeps stdout reserved for JSON", async (t) => {
+  const cacheHome = await mkdtemp(join(os.tmpdir(), "skill-suitcase-cli-update-cache-"));
+  t.after(() => rm(cacheHome, { recursive: true, force: true }));
+  const env = { ...process.env, XDG_CACHE_HOME: cacheHome, HOME: cacheHome };
+
+  const json = spawnSync("node", [join(process.cwd(), "dist", "src", "cli.js"), "update", "--json"], { encoding: "utf8", env });
+  assert.equal(json.status, 1);
+  assert.equal(json.stderr, "");
+  const parsed = parseJsonOutput(json.stdout) as {
+    ok: boolean; action: string; status: string; latestVersion: unknown; updateAvailable: unknown;
+    installation: { kind: string; canSelfUpdate: boolean; reason: string; guidance: string }; error: { code: string };
+  };
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.action, "update");
+  assert.equal(parsed.status, "unsupported-installation");
+  assert.equal(parsed.latestVersion, null);
+  assert.equal(parsed.updateAvailable, null);
+  assert.deepEqual([parsed.installation.kind, parsed.installation.canSelfUpdate, parsed.installation.reason],
+    ["unsupported", false, "source-checkout"]);
+  assert.equal(parsed.error.code, "unsupported-installation");
+  assert.doesNotMatch(json.stdout, /\/Users\/|\/home\/|\/tmp\//);
+
+  const summary = spawnSync("node", [join(process.cwd(), "dist", "src", "cli.js"), "update"], { encoding: "utf8", env });
+  assert.equal(summary.status, 1);
+  assert.equal(summary.stdout, "");
+  assert.match(summary.stderr, /^Cannot self-update skill-suitcase \d+\.\d+\.\d+: The CLI runs from a source checkout/);
+  await assert.rejects(readFile(join(cacheHome, "skill-suitcase", "update-check.json"), "utf8"), /ENOENT/);
+});
