@@ -7,3 +7,4 @@ dist/
 # Local agent review artifacts
 .artshelf/
 .lavish/
+.worktrees/
