@@ -49,6 +49,7 @@ export type FakeIoLog = {
 export const FAKE_PREFIX = "/fixtures/prefix with space";
 export const FAKE_GLOBAL_ROOT = join(FAKE_PREFIX, "lib", "node_modules");
 export const FAKE_PACKAGE_ROOT = join(FAKE_GLOBAL_ROOT, "skill-suitcase");
+export const FAKE_NODE = "/fixtures/node/bin/node";
 export const FAKE_NPM_CLI = "/fixtures/node/lib/node_modules/npm/bin/npm-cli.js";
 
 export function registryDocument(version: string, extra: Record<string, unknown> = {}): RegistryFetchResult {
@@ -83,7 +84,7 @@ export function createFakeIo(model: FakeIoModel = {}): { io: UpdateIo; log: Fake
     moduleUrl: "file:///fixtures/module.js",
     env: model.env ?? {},
     platform: model.platform ?? "darwin",
-    execPath: "/fixtures/node/bin/node",
+    execPath: FAKE_NODE,
     nodeVersion: model.nodeVersion ?? "v22.0.0",
     homeDirectory: model.homeDirectory ?? "/fixtures/home",
     registryUrl: model.registryUrl ?? "https://registry.npmjs.org",

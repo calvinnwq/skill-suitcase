@@ -1,4 +1,4 @@
-import { CLI_UPDATE_OPT_OUT_ENV, CLI_UPDATE_PACKAGE_NAME } from "../config/cli-update.js";
+import { CLI_UPDATE_PACKAGE_NAME } from "../config/cli-update.js";
 
 type UpdateSummaryInput = {
   action: "check" | "update";
@@ -43,9 +43,5 @@ export function renderUpdateNotice(notice: UpdateNoticeInput): string {
   const action = notice.installation === "package"
     ? "Update with the tool that installed this CLI."
     : `This launch does not self-update; install the published package with npm install --global ${NAME}.`;
-  return [
-    `A newer ${NAME} is available: ${notice.currentVersion} -> ${notice.latestVersion}. ${action}`,
-    `Set ${CLI_UPDATE_OPT_OUT_ENV}=1 to silence this notice.`,
-    ""
-  ].join("\n");
+  return `A newer ${NAME} is available: ${notice.currentVersion} -> ${notice.latestVersion}. ${action}\n`;
 }

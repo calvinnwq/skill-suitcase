@@ -524,7 +524,7 @@ A discovered update is not a failure: successful checks and updates exit `0`, st
 
 npm installation is not a Suitcase transaction.
 Finish other `skill-suitcase` work first, because replacing the package can interfere with an invocation that is still running.
-If npm fails, times out, or the post-install verification fails, the global package may be partially changed; the result names the exact `npm install --global skill-suitcase@<version>` command to repair it.
+If npm fails, times out, or the post-install verification fails, the global package may be partially changed; the result includes a repair command that runs the verified npm entrypoint with the verified global prefix for the exact selected version.
 The updater never escalates privileges.
 
 ### Update reminders

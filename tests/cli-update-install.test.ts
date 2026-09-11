@@ -193,7 +193,10 @@ test("self-update replaces a disposable global installation and verifies every b
   const unlinked = await core.updateCli({ check: false, io: core.createUpdateIo({ registryUrl, env: { ...env, npm_config_bin_links: "false" } }) });
   assert.deepEqual([unlinked.ok, unlinked.status, unlinked.error?.code, unlinked.installedVersion],
     [false, "failed", "verification-failed", versionC], JSON.stringify(unlinked));
-  assert.match(unlinked.error?.message ?? "", /launcher/);
-  assert.match(unlinked.error?.message ?? "", new RegExp(`npm install --global ${PACKAGE}@${versionC}`));
-  assert.doesNotMatch(unlinked.error?.message ?? "", /sudo/);
+  const unlinkedMessage = unlinked.error?.message ?? "";
+  assert.match(unlinkedMessage, /launcher/);
+  assert.ok(unlinkedMessage.includes(`${PACKAGE}@${versionC}`), `recovery guidance names the exact target: ${unlinkedMessage}`);
+  assert.ok(unlinkedMessage.includes(`--prefix "${prefix}"`), `recovery guidance names the verified global prefix: ${unlinkedMessage}`);
+  assert.ok(unlinkedMessage.includes(`"${process.execPath}"`), `recovery guidance names the verified Node.js executable: ${unlinkedMessage}`);
+  assert.doesNotMatch(unlinkedMessage, /sudo/);
 });

@@ -5,6 +5,7 @@ import { updateCli } from "../src/core/cli-update/index.js";
 import {
   createFakeIo,
   FAKE_GLOBAL_ROOT,
+  FAKE_NODE,
   FAKE_NPM_CLI,
   FAKE_PACKAGE_ROOT,
   FAKE_PREFIX,
@@ -228,8 +229,13 @@ test("install failures are classified distinctly from verification failures", as
     assert.equal(result.status, "failed");
     assert.equal(result.error?.code, code, JSON.stringify(model));
     assert.equal(result.installedVersion, installedVersion, JSON.stringify(model));
-    assert.match(result.error?.message ?? "", /skill-suitcase@0\.20\.0/);
-    assert.doesNotMatch(result.error?.message ?? "", /sudo|\/fixtures|npm ERR/);
+    const message = result.error?.message ?? "";
+    assert.match(message, /skill-suitcase@0\.20\.0/);
+    assert.doesNotMatch(message, /sudo|npm ERR/);
+    assert.ok(
+      message.includes(`"${FAKE_NODE}" "${FAKE_NPM_CLI}" install --global --prefix "${FAKE_PREFIX}" skill-suitcase@0.20.0`),
+      `recovery guidance names the verified npm and prefix: ${message}`
+    );
   }
   const classifications: Array<[string, RegExp]> = [
     ["npm ERR! code EACCES\nnpm ERR! syscall mkdir", /\(permission denied\)/],

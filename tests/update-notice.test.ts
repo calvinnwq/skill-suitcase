@@ -204,6 +204,7 @@ test("interactive stderr shows the reminder while piped stdout bytes and exit co
   assert.equal(pty.status, 0, `${pty.stdout}\n${pty.stderr}`);
   const terminal = pty.stdout.replace(/\r/g, "");
   assert.match(terminal, /A newer skill-suitcase is available: \d+\.\d+\.\d+ -> 999\.0\.0\./);
+  assert.doesNotMatch(terminal, /NO_UPDATE_CHECK/, "the reminder is a single line without the opt-out sentence");
   assert.match(terminal, /exit=0/);
 
   const piped = spawnSync(process.execPath, [cli, "validate", "--source", catalog, "--json"], { encoding: "utf8", env });

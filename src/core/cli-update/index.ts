@@ -214,7 +214,6 @@ async function performInstall(
   checked: Omit<CliUpdateResult, "ok" | "status" | "installation" | "error">
 ): Promise<CliUpdateResult> {
   const target = `${CLI_UPDATE_PACKAGE_NAME}@${release.version}`;
-  const recovery = `The installation may be partially changed; reinstall with npm install --global ${target}.`;
   const fail = (code: CliUpdateErrorCode, message: string, installedVersion: string | null = null): CliUpdateResult => ({
     ...checked, ok: false, status: "failed", installedVersion, installation, error: { code, message }
   });
@@ -228,6 +227,7 @@ async function performInstall(
       error: { code: "unsupported-installation", message: recheck.installation.guidance } };
   }
   const context = recheck.context;
+  const recovery = `The installation may be partially changed; reinstall the verified target with "${io.execPath}" "${context.npmCli}" install --global --prefix "${context.prefix}" ${target}`;
   const install = await io.runProcess(io.execPath, [
     context.npmCli, "install", "--global", "--prefix", context.prefix, "--registry", io.registryUrl,
     "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel", "error", target

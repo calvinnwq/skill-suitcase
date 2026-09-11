@@ -74,14 +74,15 @@ test("update summary renderer covers every status without paths or logs", () => 
   );
 });
 
-test("update notice renderer distinguishes package installs from source launches", () => {
+test("update notice renderer emits one-line reminders and distinguishes package installs from source launches", () => {
   const packageNotice = renderUpdateNotice({ currentVersion: "0.19.0", latestVersion: "0.20.0", installation: "package" });
   assert.equal(
     packageNotice,
     "A newer skill-suitcase is available: 0.19.0 -> 0.20.0. Update with the tool that installed this CLI.\n"
-      + "Set SKILL_SUITCASE_NO_UPDATE_CHECK=1 to silence this notice.\n"
   );
+  assert.equal(packageNotice.trimEnd().split("\n").length, 1, "the reminder is exactly one line");
   const sourceNotice = renderUpdateNotice({ currentVersion: "0.19.0", latestVersion: "0.20.0", installation: "source" });
   assert.match(sourceNotice, /does not self-update; install the published package with npm install --global skill-suitcase/);
   assert.doesNotMatch(sourceNotice, /"skill-suitcase update"/);
+  assert.equal(sourceNotice.trimEnd().split("\n").length, 1, "the reminder is exactly one line");
 });
