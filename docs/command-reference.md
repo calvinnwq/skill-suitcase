@@ -532,10 +532,11 @@ The updater never escalates privileges.
 Successful ordinary commands may print a one-line reminder on stderr when a newer stable release is known, including when the command runs with `--json`.
 The JSON on stdout, the exit code, and structured warnings are unchanged.
 The reminder appears only when stderr is an interactive terminal; it is skipped in CI, for help and usage failures, for failed commands, and for the `update` command itself.
+Piping stdout alone does not suppress the reminder.
 Passive registry requests have a 750 ms timeout and never install anything.
 Results are cached for 24 hours on success and one hour on failure under `$XDG_CACHE_HOME/skill-suitcase/` when `XDG_CACHE_HOME` is absolute, otherwise under `~/.cache/skill-suitcase/`.
 Set `SKILL_SUITCASE_NO_UPDATE_CHECK=1` to disable passive checks and reminders; explicit `update` and `update --check` still work.
-Source checkouts receive installation guidance instead of a self-update hint.
+Source checkouts receive installation guidance; other packages are directed to the tool that installed the CLI because passive checks do not verify installation ownership.
 
 ## Receipt Library API
 

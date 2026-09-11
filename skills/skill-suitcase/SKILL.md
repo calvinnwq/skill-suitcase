@@ -150,9 +150,7 @@ skill-suitcase update --json
 `status: updated` means the new version and launcher were verified in a fresh
 process. On `install-failed`, `install-timeout`, or `verification-failed`, show
 the reinstall command from `error.message` rather than retrying automatically.
-Passive update reminders appear only on interactive stderr and are irrelevant
-when the CLI is driven through pipes; set `SKILL_SUITCASE_NO_UPDATE_CHECK=1` to
-silence them.
+See the [update reminder reference](https://github.com/calvinnwq/skill-suitcase/blob/main/docs/command-reference.md#update-reminders) for terminal eligibility and the environment opt-out.
 
 ## Upstream Source Refresh
 
