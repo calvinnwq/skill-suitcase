@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { dispatchCommand } from "../src/commands/index.js";
 import { cacheFilePath, passiveUpdateNotice } from "../src/core/cli-update/index.js";
+import { renderUpdateNotice } from "../src/renderers/update.js";
 import { createFakeIo, registryDocument } from "./helpers/cli-update-fake-io.js";
 import type { FakeIoModel } from "./helpers/cli-update-fake-io.js";
 
@@ -100,6 +101,17 @@ test("passive failures back off, stay silent, and never notify about downgrades"
   assert.equal(JSON.parse(malformed.log.cacheWrites[0] ?? "").ok, false);
 });
 
+test("unverified package notices offer neutral guidance without npm discovery", async () => {
+  for (const model of [{ packageRoot: "/fixtures/project/node_modules/skill-suitcase", slotKind: "missing" as const }, { platform: "win32" as const }]) {
+    const { result, log } = await notice({ ...model, cache: cacheEntry() });
+    assert.ok(result);
+    const rendered = renderUpdateNotice(result);
+    assert.match(rendered, /Update with the tool that installed this CLI\./);
+    assert.doesNotMatch(rendered, /Run "skill-suitcase update" to install it/);
+    assert.equal(log.processes.length, 0);
+  }
+});
+
 test("cache path prefers an absolute XDG_CACHE_HOME and falls back to the home cache directory", () => {
   assert.equal(cacheFilePath({ env: { XDG_CACHE_HOME: "/cache root" }, homeDirectory: "/home/user" }),
     join("/cache root", "skill-suitcase", "update-check.json"));
@@ -110,7 +122,7 @@ test("cache path prefers an absolute XDG_CACHE_HOME and falls back to the home c
 });
 
 async function seededCacheHome(t: { after(fn: () => Promise<void>): void }, latestVersion: string): Promise<string> {
-  const cacheHome = await mkdtemp(join(os.tmpdir(), "skill-suitcase-update-notice-"));
+  const cacheHome = await mkdtemp(join(os.tmpdir(), "skill-suitcase update's notice-"));
   t.after(() => rm(cacheHome, { recursive: true, force: true }));
   const { version } = JSON.parse(await readFile("package.json", "utf8")) as { version: string };
   await mkdir(join(cacheHome, "skill-suitcase"), { recursive: true });
@@ -175,14 +187,19 @@ test("interactive stderr shows the reminder while piped stdout bytes and exit co
     return;
   }
   const cacheHome = await seededCacheHome(t, "999.0.0");
-  const catalog = join(process.cwd(), "tests", "fixtures", "skills-catalog");
-  const cli = join(process.cwd(), "dist", "src", "cli.js");
+  const checkout = join(cacheHome, "checkout's directory");
+  const node = join(cacheHome, "node executable");
+  await symlink(process.cwd(), checkout, "dir");
+  await symlink(process.execPath, node);
+  const catalog = join(checkout, "tests", "fixtures", "skills-catalog");
+  const cli = join(checkout, "dist", "src", "cli.js");
   const stdoutFile = join(cacheHome, "stdout.json");
   const env: Record<string, string | undefined> = { ...process.env, XDG_CACHE_HOME: cacheHome, HOME: cacheHome, TERM: "dumb" };
   delete env.CI;
   delete env.SKILL_SUITCASE_NO_UPDATE_CHECK;
-  const inner = `${process.execPath} ${cli} validate --source ${catalog} --json > ${stdoutFile}; printf 'exit=%s' "$?" >&2`;
-  const args = process.platform === "darwin" ? ["-q", "/dev/null", "sh", "-c", inner] : ["-q", "-c", `sh -c '${inner.replace(/'/g, "'\\''")}'`, "/dev/null"];
+  const quote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+  const inner = `${quote(node)} ${quote(cli)} validate --source ${quote(catalog)} --json > ${quote(stdoutFile)}; printf 'exit=%s' "$?" >&2`;
+  const args = process.platform === "darwin" ? ["-q", "/dev/null", "sh", "-c", inner] : ["-q", "-c", `sh -c ${quote(inner)}`, "/dev/null"];
   const pty = spawnSync("script", args, { encoding: "utf8", env, timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] });
   assert.equal(pty.status, 0, `${pty.stdout}\n${pty.stderr}`);
   const terminal = pty.stdout.replace(/\r/g, "");

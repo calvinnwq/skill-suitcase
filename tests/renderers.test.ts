@@ -78,7 +78,7 @@ test("update notice renderer distinguishes package installs from source launches
   const packageNotice = renderUpdateNotice({ currentVersion: "0.19.0", latestVersion: "0.20.0", installation: "package" });
   assert.equal(
     packageNotice,
-    "A newer skill-suitcase is available: 0.19.0 -> 0.20.0. Run \"skill-suitcase update\" to install it.\n"
+    "A newer skill-suitcase is available: 0.19.0 -> 0.20.0. Update with the tool that installed this CLI.\n"
       + "Set SKILL_SUITCASE_NO_UPDATE_CHECK=1 to silence this notice.\n"
   );
   const sourceNotice = renderUpdateNotice({ currentVersion: "0.19.0", latestVersion: "0.20.0", installation: "source" });

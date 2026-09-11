@@ -41,7 +41,7 @@ export function renderUpdateSummary(result: UpdateSummaryInput): string {
 
 export function renderUpdateNotice(notice: UpdateNoticeInput): string {
   const action = notice.installation === "package"
-    ? `Run "${NAME} update" to install it.`
+    ? "Update with the tool that installed this CLI."
     : `This launch does not self-update; install the published package with npm install --global ${NAME}.`;
   return [
     `A newer ${NAME} is available: ${notice.currentVersion} -> ${notice.latestVersion}. ${action}`,
