@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { test } from "node:test";
 import { updateCli } from "../src/core/cli-update/index.js";
@@ -233,7 +234,7 @@ test("install failures are classified distinctly from verification failures", as
     assert.match(message, /skill-suitcase@0\.20\.0/);
     assert.doesNotMatch(message, /sudo|npm ERR/);
     assert.ok(
-      message.includes(`"${FAKE_NODE}" "${FAKE_NPM_CLI}" install --global --prefix "${FAKE_PREFIX}" skill-suitcase@0.20.0`),
+      message.includes(`'${FAKE_NODE}' '${FAKE_NPM_CLI}' install --global --prefix '${FAKE_PREFIX}' skill-suitcase@0.20.0`),
       `recovery guidance names the verified npm and prefix: ${message}`
     );
   }
@@ -250,4 +251,33 @@ test("install failures are classified distinctly from verification failures", as
     assert.equal(result.error?.code, "install-failed");
     assert.match(result.error?.message ?? "", expected, stderr);
   }
+});
+
+test("recovery commands preserve literal paths through shell parsing", async () => {
+  const special = "space 'quote\" $channel $(printf expanded) `printf expanded` \\path";
+  const prefix = join("/fixtures", special, "prefix");
+  const globalRoot = join(prefix, "lib", "node_modules");
+  const npmCli = join("/fixtures", special, "npm-cli.js");
+  const { io } = createFakeIo({
+    prefix,
+    globalRoot,
+    packageRoot: join(globalRoot, "skill-suitcase"),
+    npmCli,
+    installExit: 1,
+    registry: registryDocument("0.20.0")
+  });
+  io.execPath = join("/fixtures", special, "node");
+  const result = await updateCli({ check: false, io });
+  assert.ok(result.error);
+  assert.equal(result.error?.code, "install-failed");
+  const command = result.error.message.split("reinstall the verified target with ")[1];
+  assert.ok(command);
+  const parsed = spawnSync("/bin/sh", ["-c", `set -- ${command}\nprintf '%s\\0' "$@"`], {
+    encoding: "utf8",
+    env: { channel: "expanded" }
+  });
+  assert.equal(parsed.status, 0, parsed.stderr);
+  assert.deepEqual(parsed.stdout.split("\0"), [
+    io.execPath, npmCli, "install", "--global", "--prefix", prefix, "skill-suitcase@0.20.0", ""
+  ]);
 });
