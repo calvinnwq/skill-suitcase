@@ -5,10 +5,17 @@ The README is the product overview and safe starting path, [`SPEC.md`](../SPEC.m
 is the normative current-state contract, and this document carries the longer
 operational detail.
 
-All CLI command forms require `--json`.
+Command execution requires `--json`; help does not.
 Result objects go to stdout, including structured `ok: false` results with machine-readable errors.
 Parser/usage failures and uncaught fatal diagnostics go to stderr.
 Examples use portable paths; set `SRC` and target overrides for the machine running the CLI.
+
+The CLI without arguments, or with `--help`, `-h`, or `help`, shows a compact command index.
+Use `--help` or `-h` after a command for its flags and requirements, or use `help` followed by the command name.
+The `upstream` family also has help for each action.
+Help exits with code 0 and writes text to stderr, including when combined with `--json`, so stdout stays reserved for structured command results.
+Help does not execute the command, but unknown arguments and missing flag values remain usage errors.
+Parser and usage failures exit with code 2 and show help for the relevant command, or the command index when the command is unknown.
 
 ```bash
 SRC="/path/to/skills-catalog"

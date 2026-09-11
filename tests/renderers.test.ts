@@ -11,10 +11,12 @@ test("json renderer preserves deterministic pretty JSON with trailing newline", 
 
 test("usage and known CLI error renderers target stderr text", () => {
   const usage = usageText();
-  assert.equal(usage.startsWith("Usage:\n  skill-suitcase plan"), true);
-  assert.equal((usage.match(/--agents-skills/g) ?? []).length, 1);
-  assert.equal((usage.match(/--grok-skills/g) ?? []).length, 1);
-  assert.equal((usage.match(/--hermes-skills/g) ?? []).length, 1);
+  assert.match(usage, /Usage:\n  skill-suitcase <command> \[flags\]/);
+  const targetHelp = usageText("diff");
+  assert.equal((targetHelp.match(/--agents-skills/g) ?? []).length, 1);
+  assert.equal((targetHelp.match(/--grok-skills/g) ?? []).length, 1);
+  assert.equal((targetHelp.match(/--hermes-skills/g) ?? []).length, 1);
+  assert.equal(renderCliError({ type: "usage", message: null, usage: targetHelp }), `${targetHelp}\n`);
   assert.equal(renderCliError({ type: "usage", message: "Unknown argument: --nope" }), `${"Unknown argument: --nope"}\n${usageText()}\n`);
   assert.equal(renderCliError({ type: "usage", message: null }), `${usageText()}\n`);
   assert.equal(renderCliError({ type: "fatal", message: "boom" }), "boom\n");

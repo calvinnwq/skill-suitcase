@@ -4,6 +4,7 @@ export type KnownCliError =
   | {
     type: "usage";
     message: string | null;
+    usage?: string;
   }
   | {
     type: "fatal";
@@ -12,7 +13,7 @@ export type KnownCliError =
 
 export function renderCliError(error: KnownCliError): string {
   if (error.type === "usage") {
-    const usage = usageText();
+    const usage = error.usage ?? usageText();
     return error.message === null ? `${usage}\n` : `${error.message}\n${usage}\n`;
   }
 

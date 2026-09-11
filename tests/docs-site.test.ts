@@ -462,7 +462,6 @@ test("reference page documents the complete shipped command surface", () => {
 
   assert.ok(reference.includes("exactly one approved input"));
   assert.ok(reference.includes("There is no CLI command that creates a plan lock"));
-  assert.ok(reference.includes("All CLI command forms require <code>--json</code>"));
   assert.match(
     reference,
     /Pack refuses output beneath an absolute resolved install root,[\s\S]*?including CLI target overrides/

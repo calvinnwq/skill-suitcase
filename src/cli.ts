@@ -9,7 +9,7 @@ async function main(): Promise<void> {
     const dispatched = await dispatchCommand(process.argv.slice(2));
 
     if (dispatched.type === "usage") {
-      process.stderr.write(renderCliError({ type: "usage", message: dispatched.message }));
+      process.stderr.write(renderCliError(dispatched));
       process.exitCode = dispatched.exitCode;
       return;
     }

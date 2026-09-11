@@ -519,5 +519,5 @@ test("dispatcher routes valid commands and reports usage failures without stdout
   }
   assert.equal(usage.exitCode, 2);
   assert.equal(usage.message, null);
-  assert.equal(usage.usage, usageText());
+  assert.equal(usage.usage, usageText("apply"));
 });
