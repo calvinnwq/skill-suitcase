@@ -196,7 +196,12 @@ test("self-update replaces a disposable global installation and verifies every b
   const unlinkedMessage = unlinked.error?.message ?? "";
   assert.match(unlinkedMessage, /launcher/);
   assert.ok(unlinkedMessage.includes(`${PACKAGE}@${versionC}`), `recovery guidance names the exact target: ${unlinkedMessage}`);
-  assert.ok(unlinkedMessage.includes(`--prefix "${prefix}"`), `recovery guidance names the verified global prefix: ${unlinkedMessage}`);
-  assert.ok(unlinkedMessage.includes(`"${process.execPath}"`), `recovery guidance names the verified Node.js executable: ${unlinkedMessage}`);
+  const recoveryCommand = unlinkedMessage.split("reinstall the verified target with ")[1];
+  assert.ok(recoveryCommand);
+  const parsedRecovery = spawnSync("/bin/sh", ["-c", `set -- ${recoveryCommand}\nprintf '%s\\0' "$@"`], { encoding: "utf8" });
+  assert.equal(parsedRecovery.status, 0, parsedRecovery.stderr);
+  const recoveryArgs = parsedRecovery.stdout.split("\0").slice(0, -1);
+  assert.equal(recoveryArgs[0], process.execPath, "recovery guidance names the verified Node.js executable");
+  assert.deepEqual(recoveryArgs.slice(2), ["install", "--global", "--prefix", prefix, `${PACKAGE}@${versionC}`]);
   assert.doesNotMatch(unlinkedMessage, /sudo/);
 });
