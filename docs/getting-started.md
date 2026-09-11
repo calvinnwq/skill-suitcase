@@ -23,7 +23,7 @@ Update an existing global install later with `skill-suitcase update --json`, or 
 Updating the CLI leaves catalogs, installed skills, and agent homes unchanged.
 
 See the [command reference](command-reference.md) for the command directory and focused help.
-Command results always go to stdout; usage, fatal diagnostics, and the optional update reminder go to stderr.
+See the [output contract](../SPEC.md#output-contract) for stdout, stderr, and the CLI maintenance presentation exception.
 
 ## 2. Install The Operator Skill Into Your Agent
 

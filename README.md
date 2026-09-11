@@ -369,10 +369,8 @@ ownership, or target-drift semantics.
 <details>
 <summary>JSON contract</summary>
 
-Command results are serialized deterministically to stdout, including
-structured `ok: false` results with machine-readable errors. Parser/usage
-failures and uncaught fatal diagnostics are written to stderr. Known failures
-use stable exit codes. Absolute paths in JSON reflect caller inputs and resolved
+The [output contract](SPEC.md#output-contract) defines JSON serialization, stdout and stderr routing, and CLI maintenance presentation.
+Absolute paths in JSON reflect caller inputs and resolved
 local targets; the documentation uses portable placeholders instead of assuming
 a particular workstation layout.
 

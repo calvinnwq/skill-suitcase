@@ -508,7 +508,9 @@ It takes no catalog flags and no version argument.
 Without `--json` it prints a short summary on stderr and writes nothing to stdout; with `--json` it writes one structured result to stdout.
 
 `--check` reports whether a newer stable release exists without installing anything and without writing the reminder cache.
-Without `--check`, invoking the command is the approval to install: it fetches the latest stable release metadata from the public npm registry, installs that exact version with the npm bundled beside the running Node.js runtime, and reports `updated` only after the installed package version, its declared entrypoint, and the global launcher have been verified and help has run in a fresh process.
+Without `--check`, invoking the command is the approval to install: it fetches the latest stable release metadata from the public npm registry and installs that exact version.
+It prefers npm bundled beside the running Node.js runtime, falls back to a verified npm entrypoint found through PATH, and runs that entrypoint with the current Node.js executable against the verified global prefix.
+It reports `updated` only after the installed package version, its declared entrypoint, and the global launcher have been verified and help has run in a fresh process.
 Prereleases are never selected and the CLI never downgrades; an installed version equal to or newer than the registry version succeeds with `up-to-date` or `ahead`.
 
 Self-update supports only a verified global npm installation on macOS and Linux: the running package must be the real `skill-suitcase` directory in the global root that npm reports for the same Node.js runtime.
@@ -530,7 +532,8 @@ The updater never escalates privileges.
 Successful ordinary commands may print a one-line reminder on stderr when a newer stable release is known, including when the command runs with `--json`.
 The JSON on stdout, the exit code, and structured warnings are unchanged.
 The reminder appears only when stderr is an interactive terminal; it is skipped in CI, for help and usage failures, for failed commands, and for the `update` command itself.
-Passive checks are bounded to well under a second, cached for 24 hours on success and one hour on failure under `$XDG_CACHE_HOME/skill-suitcase/` (or `~/.cache/skill-suitcase/`), and never install anything.
+Passive registry requests have a 750 ms timeout and never install anything.
+Results are cached for 24 hours on success and one hour on failure under `$XDG_CACHE_HOME/skill-suitcase/` when `XDG_CACHE_HOME` is absolute, otherwise under `~/.cache/skill-suitcase/`.
 Set `SKILL_SUITCASE_NO_UPDATE_CHECK=1` to disable passive checks and reminders; explicit `update` and `update --check` still work.
 Source checkouts receive installation guidance instead of a self-update hint.
 

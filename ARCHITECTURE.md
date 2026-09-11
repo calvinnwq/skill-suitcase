@@ -34,7 +34,9 @@ src/
     promote.ts
     import-target.ts
     upstream.ts
+    update.ts
   core/
+    cli-update/
     planning/
     diffing/
     packing/
@@ -56,13 +58,16 @@ src/
     validation/
   adapters/
     filesystem.ts
+    cli-update.ts
   renderers/
     json.ts
     errors.ts
     usage.ts
     exit-codes.ts
+    update.ts
   config/
     defaults.ts
+    cli-update.ts
 ```
 
 This tree is the current target shape after the architecture refactor. Keep future
@@ -113,7 +118,7 @@ Core modules must not depend on command modules, help text, stdout/stderr, or
 - filesystem reads/writes
 - target installation locations
 - package/archive IO
-- future network or external process calls
+- network and external process calls
 
 Adapters should expose narrow functions that core code can call without knowing
 about CLI parsing or rendering.
