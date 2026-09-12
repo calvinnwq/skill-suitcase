@@ -38,9 +38,8 @@
           <p class="kicker"><span class="n">08</span>Reference · CLI</p>
           <h1>Every command on one page.</h1>
           <p class="lede">
-            The current <code>skill-suitcase</code> surface: eight read-only
-            inspection modes, one staging command, and nine explicit mutation
-            commands, each behind its own approval boundary.
+            The current <code>skill-suitcase</code> surface: read-only inspection,
+            staging, explicit mutation commands, and CLI maintenance.
           </p>
 
           <section>
@@ -48,11 +47,9 @@
             <p>
               See the
               <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/command-reference.md">command reference</a>
-              for JSON execution requirements and help conventions. One deterministic
-              structured result plus a trailing newline goes to stdout, including
-              structured <code>ok: false</code> results with machine-readable
-              errors. Parser and usage failures and uncaught fatal diagnostics go
-              to stderr. Known failures use stable exit codes.
+              for execution requirements and help conventions, and the
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/SPEC.md#output-contract">output contract</a>
+              for JSON serialization, stdout and stderr routing, and CLI maintenance presentation.
             </p>
             <pre><code>SRC="/path/to/skills-catalog"</code></pre>
             <p>
@@ -501,6 +498,15 @@ skill-suitcase rollback \
                 into a live target and never commits the resulting Git diff.
               </p>
             </div>
+          </section>
+
+          <section id="update">
+            <h2>CLI maintenance</h2>
+            <p>
+              For <code>update</code>, check-only mode, installation requirements,
+              recovery guidance, and passive reminders, see the
+              <a href="https://github.com/calvinnwq/skill-suitcase/blob/main/docs/command-reference.md#cli-maintenance">CLI maintenance reference</a>.
+            </p>
           </section>
 
           <section>
