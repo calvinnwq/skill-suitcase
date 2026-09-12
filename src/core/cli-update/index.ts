@@ -227,8 +227,8 @@ async function performInstall(
       error: { code: "unsupported-installation", message: recheck.installation.guidance } };
   }
   const context = recheck.context;
-  const quotePath = (value: string): string => `'${value.replaceAll("'", "'\"'\"'")}'`;
-  const recovery = `The installation may be partially changed; reinstall the verified target with ${quotePath(io.execPath)} ${quotePath(context.npmCli)} install --global --prefix ${quotePath(context.prefix)} ${target}`;
+  const quoteArgument = (value: string): string => `'${value.replaceAll("'", "'\"'\"'")}'`;
+  const recovery = `The installation may be partially changed; reinstall the verified target with ${quoteArgument(io.execPath)} ${quoteArgument(context.npmCli)} install --global --prefix ${quoteArgument(context.prefix)} --registry ${quoteArgument(io.registryUrl)} --ignore-scripts ${target}`;
   const install = await io.runProcess(io.execPath, [
     context.npmCli, "install", "--global", "--prefix", context.prefix, "--registry", io.registryUrl,
     "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel", "error", target

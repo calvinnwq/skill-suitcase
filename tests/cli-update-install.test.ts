@@ -12,7 +12,7 @@ import semver from "semver";
 import type { createUpdateIo, updateCli } from "../src/core/cli-update/index.js";
 
 type InstalledCore = { createUpdateIo: typeof createUpdateIo; updateCli: typeof updateCli };
-type Fixture = { version: string; tarball: string; bytes: Buffer };
+type Fixture = { version: string; tarball: string; bytes: Buffer; entrypoint: string };
 
 const PACKAGE = "skill-suitcase";
 const repoRoot = process.cwd();
@@ -46,7 +46,7 @@ async function buildFixture(root: string, version: string, options: { entrypoint
   assert.equal(pack.status, 0, pack.stderr);
   const filename = (JSON.parse(pack.stdout) as Array<{ filename: string }>)[0]?.filename ?? "";
   const tarball = join(root, filename);
-  return { version, tarball, bytes: await readFile(tarball) };
+  return { version, tarball, bytes: await readFile(tarball), entrypoint: options.entrypoint };
 }
 
 function registryVersionDocument(fixture: Fixture, base: string): Record<string, unknown> {
@@ -54,7 +54,7 @@ function registryVersionDocument(fixture: Fixture, base: string): Record<string,
     name: PACKAGE,
     version: fixture.version,
     engines: { node: ">=20" },
-    bin: { [PACKAGE]: "dist/src/cli.js" },
+    bin: { [PACKAGE]: fixture.entrypoint },
     dist: {
       tarball: `${base}/${PACKAGE}/-/${PACKAGE}-${fixture.version}.tgz`,
       shasum: createHash("sha1").update(fixture.bytes).digest("hex"),
@@ -104,7 +104,7 @@ test("self-update replaces a disposable global installation and verifies every b
   const versionC = semver.inc(versionB, "patch") ?? "0.0.3";
   const fixtureA = await buildFixture(root, versionA, { entrypoint: "dist/src/cli.js" });
   const fixtureB = await buildFixture(root, versionB, { entrypoint: "dist/src/cli.js", postinstallMarker: marker });
-  const fixtureC = await buildFixture(root, versionC, { entrypoint: "dist/src/main.js" });
+  const fixtureC = await buildFixture(root, versionC, { entrypoint: "dist/src/main.js", postinstallMarker: marker });
 
   let latest = fixtureB;
   const requests: string[] = [];
@@ -202,6 +202,24 @@ test("self-update replaces a disposable global installation and verifies every b
   assert.equal(parsedRecovery.status, 0, parsedRecovery.stderr);
   const recoveryArgs = parsedRecovery.stdout.split("\0").slice(0, -1);
   assert.equal(recoveryArgs[0], process.execPath, "recovery guidance names the verified Node.js executable");
-  assert.deepEqual(recoveryArgs.slice(2), ["install", "--global", "--prefix", prefix, `${PACKAGE}@${versionC}`]);
+  assert.deepEqual(recoveryArgs.slice(2), ["install", "--global", "--prefix", prefix,
+    "--registry", registryUrl, "--ignore-scripts", `${PACKAGE}@${versionC}`]);
   assert.doesNotMatch(unlinkedMessage, /sudo/);
+
+  // Model a missing package after an interrupted install so recovery must fetch it again.
+  await rm(installedPackage, { recursive: true });
+  requests.length = 0;
+  const recovered = await io.runProcess(process.execPath, recoveryArgs.slice(1), {
+    env: { ...env, npm_config_registry: "http://127.0.0.1:1", npm_config_ignore_scripts: "false", npm_config_bin_links: "true",
+      npm_config_cache: join(root, "recovery-cache") },
+    cwd: prefix,
+    timeoutMs: 30_000,
+    maxOutputBytes: 64 * 1024
+  });
+  assert.equal(recovered.failed, false, recovered.stderr);
+  assert.ok(requests.includes(`/${PACKAGE}/-/${PACKAGE}-${versionC}.tgz`), "recovery fetches from the selected registry, not inherited configuration");
+  assert.equal(await installedVersion(prefix), versionC);
+  await assert.rejects(stat(marker), /ENOENT/, "recovery still disables lifecycle scripts despite inherited npm settings");
+  const recoveredHelp = spawnSync(join(prefix, "bin", PACKAGE), ["--help"], { encoding: "utf8", env });
+  assert.equal(recoveredHelp.status, 0, recoveredHelp.error?.message ?? recoveredHelp.stderr);
 });

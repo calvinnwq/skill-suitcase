@@ -234,7 +234,7 @@ test("install failures are classified distinctly from verification failures", as
     assert.match(message, /skill-suitcase@0\.20\.0/);
     assert.doesNotMatch(message, /sudo|npm ERR/);
     assert.ok(
-      message.includes(`'${FAKE_NODE}' '${FAKE_NPM_CLI}' install --global --prefix '${FAKE_PREFIX}' skill-suitcase@0.20.0`),
+      message.includes(`'${FAKE_NODE}' '${FAKE_NPM_CLI}' install --global --prefix '${FAKE_PREFIX}' --registry 'https://registry.npmjs.org' --ignore-scripts skill-suitcase@0.20.0`),
       `recovery guidance names the verified npm and prefix: ${message}`
     );
   }
@@ -253,7 +253,7 @@ test("install failures are classified distinctly from verification failures", as
   }
 });
 
-test("recovery commands preserve literal paths through shell parsing", async () => {
+test("recovery commands preserve literal paths and registry through shell parsing", async () => {
   const special = "space 'quote\" $channel $(printf expanded) `printf expanded` \\path";
   const prefix = join("/fixtures", special, "prefix");
   const globalRoot = join(prefix, "lib", "node_modules");
@@ -267,6 +267,7 @@ test("recovery commands preserve literal paths through shell parsing", async () 
     registry: registryDocument("0.20.0")
   });
   io.execPath = join("/fixtures", special, "node");
+  io.registryUrl = "https://registry.example.invalid/?channel='$channel&value=$(printf expanded)";
   const result = await updateCli({ check: false, io });
   assert.ok(result.error);
   assert.equal(result.error?.code, "install-failed");
@@ -278,6 +279,7 @@ test("recovery commands preserve literal paths through shell parsing", async () 
   });
   assert.equal(parsed.status, 0, parsed.stderr);
   assert.deepEqual(parsed.stdout.split("\0"), [
-    io.execPath, npmCli, "install", "--global", "--prefix", prefix, "skill-suitcase@0.20.0", ""
+    io.execPath, npmCli, "install", "--global", "--prefix", prefix,
+    "--registry", io.registryUrl, "--ignore-scripts", "skill-suitcase@0.20.0", ""
   ]);
 });
