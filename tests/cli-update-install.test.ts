@@ -203,14 +203,14 @@ test("self-update replaces a disposable global installation and verifies every b
   const recoveryArgs = parsedRecovery.stdout.split("\0").slice(0, -1);
   assert.equal(recoveryArgs[0], process.execPath, "recovery guidance names the verified Node.js executable");
   assert.deepEqual(recoveryArgs.slice(2), ["install", "--global", "--prefix", prefix,
-    "--registry", registryUrl, "--ignore-scripts", `${PACKAGE}@${versionC}`]);
+    "--registry", registryUrl, "--ignore-scripts", "--bin-links=true", `${PACKAGE}@${versionC}`]);
   assert.doesNotMatch(unlinkedMessage, /sudo/);
 
   // Model a missing package after an interrupted install so recovery must fetch it again.
   await rm(installedPackage, { recursive: true });
   requests.length = 0;
   const recovered = await io.runProcess(process.execPath, recoveryArgs.slice(1), {
-    env: { ...env, npm_config_registry: "http://127.0.0.1:1", npm_config_ignore_scripts: "false", npm_config_bin_links: "true",
+    env: { ...env, npm_config_registry: "http://127.0.0.1:1", npm_config_ignore_scripts: "false", npm_config_bin_links: "false",
       npm_config_cache: join(root, "recovery-cache") },
     cwd: prefix,
     timeoutMs: 30_000,

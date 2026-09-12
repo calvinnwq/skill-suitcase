@@ -228,7 +228,7 @@ async function performInstall(
   }
   const context = recheck.context;
   const quoteArgument = (value: string): string => `'${value.replaceAll("'", "'\"'\"'")}'`;
-  const recovery = `The installation may be partially changed; reinstall the verified target with ${quoteArgument(io.execPath)} ${quoteArgument(context.npmCli)} install --global --prefix ${quoteArgument(context.prefix)} --registry ${quoteArgument(io.registryUrl)} --ignore-scripts ${target}`;
+  const recovery = `The installation may be partially changed; reinstall the verified target with ${quoteArgument(io.execPath)} ${quoteArgument(context.npmCli)} install --global --prefix ${quoteArgument(context.prefix)} --registry ${quoteArgument(io.registryUrl)} --ignore-scripts --bin-links=true ${target}`;
   const install = await io.runProcess(io.execPath, [
     context.npmCli, "install", "--global", "--prefix", context.prefix, "--registry", io.registryUrl,
     "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel", "error", target
