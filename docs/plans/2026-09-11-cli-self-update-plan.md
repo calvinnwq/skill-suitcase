@@ -55,9 +55,9 @@ The existing `upstream` command concerns catalog sources, not the CLI package, s
 
 ### Approved Decisions
 
-- **Explicit updates, not automatic upgrades.** Governs R1 and R8. (session-settled: user-approved — chosen over automatic installation: the user chooses when the CLI changes.)
-- **npm-installed CLI only.** Governs R2 and R7. (session-settled: user-approved — chosen over editing source checkouts or refreshing skills: installation ownership and scope stay clear.)
-- **Separate terminal reminders.** Governs R5. (session-settled: user-approved — chosen over mixing notices with command data: scripts and agents must continue to work.)
+- **Explicit updates, not automatic upgrades.** Governs R1 and R8. (session-settled: user-approved - chosen over automatic installation: the user chooses when the CLI changes.)
+- **npm-installed CLI only.** Governs R2 and R7. (session-settled: user-approved - chosen over editing source checkouts or refreshing skills: installation ownership and scope stay clear.)
+- **Separate terminal reminders.** Governs R5. (session-settled: user-approved - chosen over mixing notices with command data: scripts and agents must continue to work.)
 
 ### Proposed Command Surface
 
@@ -171,7 +171,7 @@ Read the running package's metadata through the IO adapter using a module-relati
 - **Dependencies:** U1–U3.
 - **Files:** Extend `scripts/package-smoke.mjs`; add `tests/cli-update-install.test.ts`; update `README.md`, `INSTALL.md`, `docs/getting-started.md`, `docs/command-reference.md`, `SPEC.md`, and `ARCHITECTURE.md` only where update behavior or the output exception belongs. Extend `tests/docs-guidance.test.ts` and `tests/public-docs-contract.test.ts` only as needed to assert the new shipped contract.
 - **Approach:** Retain existing local-package smoke coverage. Add a disposable global prefix and controlled package/registry fixtures to exercise real npm replacement and a fresh-process launch, using injected test boundaries rather than a public arbitrary-registry flag. A temporary newer fixture package must be clearly identified as test data, not a published release. Keep HOME, npm cache, and prefix isolated from real user state.
-- **Test scenarios:** Installed version metadata resolves outside repo cwd; first install to newer fixture updates the same prefix without creating prefix-level package/lock files; second update is a no-op; a different prefix remains untouched; lifecycle scripts do not run; inherited `bin-links=false` plus a changed declared entrypoint cannot yield success with a missing/stale launcher; copied operator skill remains unchanged; package smoke works on Node 20 and 24; public examples parse under the shipped command registry; existing help remains concise.
+- **Test scenarios:** Installed version metadata resolves outside repo cwd; first install to newer fixture updates the same prefix without creating prefix-level package/lock files; second update is a no-op; a different prefix remains untouched; lifecycle scripts do not run; inherited `bin-links=false` still produces a verified launcher for a changed declared entrypoint, and a hidden launcher fails verification with runnable recovery guidance; copied operator skill remains unchanged; package smoke works on Node 20 and 24; public examples parse under the shipped command registry; existing help remains concise.
 - **Verification:** Execute the full Verification Contract. Run real npm integration on macOS and Linux; exercise standard Windows launching on Windows before claiming that path supported, otherwise conservatively return unsupported guidance and disclose the limit. Never claim an unexecuted platform test passed.
 
 ---
