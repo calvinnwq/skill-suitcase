@@ -200,12 +200,12 @@ async function resolveUpdate(options: { check: boolean; io?: UpdateIo }): Promis
   const release = lookup.release;
   const status = compareVersions(currentVersion, release.version);
   const checked = { ...base, latestVersion: release.version, updateAvailable: status === "update-available" };
-  if (status === "update-available" && release.enginesNode !== null && !semver.satisfies(io.nodeVersion, release.enginesNode)) {
-    return { ...checked, ok: false, status: "failed", installation: ownership.installation, error: { code: "node-engine-incompatible",
-      message: `${CLI_UPDATE_PACKAGE_NAME}@${release.version} requires Node.js ${release.enginesNode}; upgrade Node.js before updating.` } };
-  }
   if (options.check || status !== "update-available" || ownership.context === null) {
     return { ...checked, ok: true, status, installation: ownership.installation, error: null };
+  }
+  if (release.enginesNode !== null && !semver.satisfies(io.nodeVersion, release.enginesNode)) {
+    return { ...checked, ok: false, status: "failed", installation: ownership.installation, error: { code: "node-engine-incompatible",
+      message: `${CLI_UPDATE_PACKAGE_NAME}@${release.version} requires Node.js ${release.enginesNode}; upgrade Node.js before updating.` } };
   }
   return performInstall(io, running, ownership.installation, release, checked);
 }

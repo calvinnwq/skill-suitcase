@@ -150,11 +150,12 @@ test("engine incompatibility fails before installation", async () => {
   assert.equal((await updateCli({ check: false, io: compatible.io })).status, "updated");
 });
 
-test("check reports engine incompatibility instead of recommending an update that cannot install", async () => {
-  const { io } = createFakeIo({ nodeVersion: "v20.0.0", registry: registryDocument("0.20.0", { engines: { node: ">=22" } }) });
+test("check reports a newer release successfully even when its Node engine is incompatible", async () => {
+  const { io, log } = createFakeIo({ nodeVersion: "v20.0.0", registry: registryDocument("0.20.0", { engines: { node: ">=22" } }) });
   const result = await updateCli({ check: true, io });
-  assert.deepEqual([result.ok, result.status, result.error?.code, result.latestVersion, result.updateAvailable],
-    [false, "failed", "node-engine-incompatible", "0.20.0", true], JSON.stringify(result));
+  assert.deepEqual([result.ok, result.status, result.error, result.latestVersion, result.updateAvailable],
+    [true, "update-available", null, "0.20.0", true], JSON.stringify(result));
+  assert.equal(log.processes.some((entry) => entry.args.includes("install")), false);
 });
 
 test("update forces launcher creation and recovery guidance mirrors the executed install", async () => {
