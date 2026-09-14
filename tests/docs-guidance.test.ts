@@ -75,8 +75,6 @@ test("command reference matches shipped planning, diff, pack, and rollback bound
   assert.ok(reference.includes("reported by pack and apply rather than `diff`"));
   assert.ok(reference.includes("plan-lock creation enforces the same gate through a thrown error"));
   assert.ok(reference.includes("`plan_lock_<reason>`"));
-  assert.ok(reference.includes("including structured `ok: false` results"));
-  assert.ok(reference.includes("parser/usage failures"));
   assert.ok(reference.includes("`version`: the installed receipt version differs"));
   assert.ok(reference.includes("those seven values are the complete status enum"));
   assert.ok(reference.includes("`statuscount: 0` and no status entries"));

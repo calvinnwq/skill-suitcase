@@ -139,10 +139,11 @@ test("portable sample catalog exercises the offline lifecycle through the CLI", 
   await Promise.all([
     cp(path.join(process.cwd(), "dist"), path.join(runtimeRoot, "dist"), { recursive: true }),
     cp(path.join(process.cwd(), "package.json"), path.join(runtimeRoot, "package.json")),
-    cp(path.join(process.cwd(), "node_modules", "yaml"), path.join(runtimeNodeModules, "yaml"), {
-      recursive: true,
-      dereference: true
-    })
+    ...["yaml", "semver"].map((dependency) =>
+      cp(path.join(process.cwd(), "node_modules", dependency), path.join(runtimeNodeModules, dependency), {
+        recursive: true,
+        dereference: true
+      }))
   ]);
   await cp(sampleCatalog, source, { recursive: true });
   await mkdir(targetRoot, { recursive: true });

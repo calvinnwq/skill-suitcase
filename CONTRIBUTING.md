@@ -29,11 +29,8 @@ in [`SECURITY.md`](SECURITY.md), not a public issue.
 5. Run the verification commands in `DEVELOPING.md` before requesting review.
 6. Complete the pull request template, including risk and rollback notes.
 
-Skill Suitcase is JSON-first. Keep JSON stdout deterministic. Structured command
-results, including findings, warnings, and `ok: false` errors, belong on stdout.
-Parser/usage failures, uncaught fatal diagnostics, and non-JSON notices belong
-on stderr. Command modules should own parsing and validation, while durable
-behavior belongs in core modules.
+Preserve the [output contract](SPEC.md#output-contract), including the CLI maintenance exception.
+Command modules should own parsing and validation, while durable behavior belongs in core modules.
 Every literal CLI invocation in public and reusable documentation must be
 accepted by the shipped CLI and produce deterministic output with `--json`,
 including each invocation in a chained command.

@@ -12,6 +12,8 @@ Before adding or changing a command:
 5. Keep JSON stdout deterministic. Structured command results, including
    findings, warnings, and `ok: false` errors, belong on stdout. Parser/usage
    failures, uncaught fatal diagnostics, and non-JSON notices belong on stderr.
+   The only exception is `update` without `--json`, whose readable summary
+   (success or failure) is rendered on stderr with no stdout.
 
 New product work should extend the command/core/adapter/renderer pattern instead
 of adding behavior directly to `src/cli.ts`.

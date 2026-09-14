@@ -12,11 +12,14 @@ import { rollbackCommand } from "./rollback.js";
 import { statusCommand } from "./status.js";
 import { targetsCommand } from "./targets.js";
 import { trackCommand } from "./track.js";
+import { updateCommand } from "./update.js";
 import { upstreamCommand } from "./upstream.js";
+import { isCliUpdateResult, passiveUpdateNotice } from "../core/cli-update/index.js";
+import type { CliUpdateNotice } from "../core/cli-update/index.js";
 import { validateCommand } from "./validate.js";
 import { exitCodeForCommandResult, EXIT_CODE_SUCCESS, EXIT_CODE_USAGE } from "../renderers/exit-codes.js";
 import { usageText } from "../renderers/usage.js";
-import type { CommandModule, CommandName, DispatchResult, ParsedCommandArgs, ValueFlagName } from "./types.js";
+import type { CommandModule, CommandName, DispatchOptions, DispatchResult, ParsedCommandArgs, ValueFlagName } from "./types.js";
 
 const DEFAULT_COMMANDS: CommandModule[] = [
   planCommand,
@@ -34,7 +37,8 @@ const DEFAULT_COMMANDS: CommandModule[] = [
   promoteCommand,
   pruneCommand,
   importTargetCommand,
-  upstreamCommand
+  upstreamCommand,
+  updateCommand
 ];
 
 const KNOWN_COMMAND_NAMES: ReadonlySet<string> = new Set(
@@ -117,6 +121,14 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       continue;
     }
 
+    if (token === "--check") {
+      if (!isFlagAllowedForCommand(args.command, token)) {
+        throw new Error(`Unknown argument: ${token}`);
+      }
+      args.check = true;
+      continue;
+    }
+
     if (token === "--skill") {
       if (!isSkillFlagAllowed(args.command)) {
         throw new Error(`Unknown argument: ${token}`);
@@ -153,7 +165,7 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   return args;
 }
 
-export async function dispatchCommand(argv: string[]): Promise<DispatchResult> {
+export async function dispatchCommand(argv: string[], options: DispatchOptions = {}): Promise<DispatchResult> {
   let args: ParsedCommandArgs;
   try {
     args = parseCommandArgs(argv);
@@ -186,11 +198,25 @@ export async function dispatchCommand(argv: string[]): Promise<DispatchResult> {
   }
 
   const result = await command.run(args);
+  const exitCode = exitCodeForCommandResult(result);
+  if (command.presentation?.(args) === "summary" && isCliUpdateResult(result)) {
+    return { type: "summary", result, exitCode };
+  }
+  const passive = result.ok && options.interactiveStderr === true && !isCliUpdateResult(result);
   return {
     type: "result",
     result,
-    exitCode: exitCodeForCommandResult(result)
+    exitCode,
+    notice: passive ? requestUpdateNotice() : Promise.resolve(null)
   };
+}
+
+async function requestUpdateNotice(): Promise<CliUpdateNotice | null> {
+  try {
+    return await passiveUpdateNotice({ interactive: true });
+  } catch {
+    return null;
+  }
 }
 
 function isKnownCommand(command: string): command is CommandName {
@@ -293,6 +319,8 @@ function isFlagAllowedForCommand(command: CommandName | "help", token: string): 
         || command === "import-target" || command === "upstream";
     case "--strict":
       return command === "validate";
+    case "--check":
+      return command === "update";
     default:
       return false;
   }

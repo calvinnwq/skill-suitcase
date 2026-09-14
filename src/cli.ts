@@ -3,10 +3,11 @@ import { dispatchCommand } from "./commands/index.js";
 import { EXIT_CODE_EXECUTION_FAILURE } from "./renderers/exit-codes.js";
 import { renderCliError, messageFromUnknownError } from "./renderers/errors.js";
 import { renderJson } from "./renderers/json.js";
+import { renderUpdateNotice, renderUpdateSummary } from "./renderers/update.js";
 
 async function main(): Promise<void> {
   try {
-    const dispatched = await dispatchCommand(process.argv.slice(2));
+    const dispatched = await dispatchCommand(process.argv.slice(2), { interactiveStderr: process.stderr.isTTY === true });
 
     if (dispatched.type === "usage") {
       process.stderr.write(renderCliError(dispatched));
@@ -14,8 +15,21 @@ async function main(): Promise<void> {
       return;
     }
 
-    process.stdout.write(renderJson(dispatched.result));
+    if (dispatched.type === "summary") {
+      process.stderr.write(renderUpdateSummary(dispatched.result));
+      process.exitCode = dispatched.exitCode;
+      return;
+    }
+
+    const flushed = new Promise<void>((resolve) => process.stdout.write(renderJson(dispatched.result), () => resolve()));
     process.exitCode = dispatched.exitCode;
+    const notice = await dispatched.notice;
+    if (notice !== null) {
+      process.stderr.write(renderUpdateNotice(notice));
+    }
+    await flushed;
+    // An aborted passive registry lookup can leave a connecting socket open for seconds; do not let it delay the shell.
+    process.exit();
   } catch (error) {
     process.stderr.write(renderCliError({
       type: "fatal",

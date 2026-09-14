@@ -1267,7 +1267,10 @@ function validateInvocation(path: string, invocation: string[]): void {
   const command = normalized[0] ?? "";
   const rendered = ["skill-suitcase", ...normalized].join(" ");
   assert.ok(PUBLIC_COMMANDS.has(command), `${path} documents unknown command: ${command}`);
-  assert.ok(normalized.includes("--json"), `${path} has a CLI example without --json: ${rendered}`);
+  assert.ok(
+    normalized.includes("--json") || command === "update",
+    `${path} has a CLI example without --json: ${rendered}`
+  );
 
   let parsed: ReturnType<typeof parseCommandArgs>;
   try {

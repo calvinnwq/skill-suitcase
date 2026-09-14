@@ -21,8 +21,7 @@ Live agent homes are never treated as the source of truth - the catalog is.
 - **Read-only commands** explain current state before any mutation.
 - Mutating commands require an explicit artifact, lock, `--apply`, or other
   approval boundary.
-- JSON result objects, including structured `ok: false` results, go to stdout;
-  usage and fatal diagnostics go to stderr.
+- JSON-first output follows the [output contract](SPEC.md#output-contract).
 - Copy and symlink installs are tracked with receipts and recoverable workflows.
 
 ## Install
@@ -32,6 +31,9 @@ Skill Suitcase requires Node.js 20 or newer:
 ```bash
 npm install --global skill-suitcase
 ```
+
+Later, `skill-suitcase update --check --json` reports whether a newer stable release exists, and `skill-suitcase update --json` installs it into the same global npm installation.
+Updating the CLI never changes catalogs, installed skills, or agent homes.
 
 For a hands-on first run covering installation, catalog setup, local target overrides, read-only audit, staged apply, and rollback, follow [`docs/getting-started.md`](docs/getting-started.md).
 
@@ -366,10 +368,8 @@ ownership, or target-drift semantics.
 <details>
 <summary>JSON contract</summary>
 
-Command results are serialized deterministically to stdout, including
-structured `ok: false` results with machine-readable errors. Parser/usage
-failures and uncaught fatal diagnostics are written to stderr. Known failures
-use stable exit codes. Absolute paths in JSON reflect caller inputs and resolved
+The [output contract](SPEC.md#output-contract) defines JSON serialization, stdout and stderr routing, and CLI maintenance presentation.
+Absolute paths in JSON reflect caller inputs and resolved
 local targets; the documentation uses portable placeholders instead of assuming
 a particular workstation layout.
 

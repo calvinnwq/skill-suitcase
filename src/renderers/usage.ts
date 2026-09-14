@@ -3,6 +3,7 @@ type HelpEntry = {
   flags: (keyof typeof FLAGS)[];
   notes?: string[];
   targetOverrides?: boolean;
+  jsonFlagDescription?: string;
 };
 
 const COMMAND_HELP: Record<string, HelpEntry> = {
@@ -86,6 +87,14 @@ const COMMAND_HELP: Record<string, HelpEntry> = {
   upstream: {
     description: "Refresh catalog source from pinned upstream providers",
     flags: []
+  },
+  update: {
+    description: "Update the npm-installed CLI to the latest stable release",
+    flags: ["check"],
+    jsonFlagDescription: "Write a deterministic JSON result instead of the summary",
+    notes: ["Runs without --json and prints a summary on stderr; --json writes one result to stdout.",
+      "Updates only a verified global npm installation, never catalogs, skills, or agent homes.",
+      "Finish other skill-suitcase work first; an interrupted install may need a manual npm reinstall."]
   }
 };
 
@@ -116,12 +125,13 @@ const FLAGS = {
   apply: ["--apply", "Approve and perform the mutation"],
   output: ["--output <dir>", "Artifact output directory"],
   strict: ["--strict", "Also validate strict skill authoring contracts"],
+  check: ["--check", "Report update availability without installing"],
   lock: ["--lock <path>", "Approved plan lock (created through the library API)"],
   artifact: ["--artifact <path>", "Approved packed artifact"],
   mode: ["--mode <mode>", "Install mode: copy (default) or symlink"],
   receipt: ["--receipt <path>", "Receipt containing rollback state (required)"],
   "plan-id": ["--plan-id <id>", "Reviewed prune dry-run plan ID"],
-  json: ["--json", "Write deterministic JSON results (required to run)"],
+  json: ["--json", "Write deterministic JSON results (required to run, except for update)"],
   help: ["-h, --help", "Show help for this command"]
 } satisfies Record<string, [string, string]>;
 
@@ -164,7 +174,9 @@ export function usageText(command?: string, action?: string): string {
     lines.push("", "Available Commands:",
       ...rows(Object.entries(UPSTREAM_HELP).map(([name, item]) => [name, item.description])));
   }
-  lines.push("", "Flags:", ...rows([...help.flags.map((flag) => FLAGS[flag]), FLAGS.json, FLAGS.help]));
+  const jsonFlag: [string, string] = help.jsonFlagDescription === undefined
+    ? FLAGS.json : [FLAGS.json[0], help.jsonFlagDescription];
+  lines.push("", "Flags:", ...rows([...help.flags.map((flag) => FLAGS[flag]), jsonFlag, FLAGS.help]));
   if (help.targetOverrides) lines.push("", "Target path overrides:", ...rows(TARGET_OVERRIDES));
   if (help.flags.includes("source") && command !== "rollback") {
     lines.push("", `Requires --source${help.flags.includes("target") && command !== "status" ? " and --target" : ""}.`);

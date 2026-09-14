@@ -1,0 +1,13 @@
+export const CLI_UPDATE_PACKAGE_NAME = "skill-suitcase";
+export const CLI_UPDATE_REGISTRY_URL = "https://registry.npmjs.org";
+export const CLI_UPDATE_OPT_OUT_ENV = "SKILL_SUITCASE_NO_UPDATE_CHECK";
+export const CLI_UPDATE_CACHE_DIRECTORY = "skill-suitcase";
+export const CLI_UPDATE_CACHE_FILE = "update-check.json";
+export const CLI_UPDATE_PASSIVE_TIMEOUT_MS = 750;
+export const CLI_UPDATE_EXPLICIT_TIMEOUT_MS = 5_000;
+export const CLI_UPDATE_METADATA_MAX_BYTES = 256 * 1024;
+export const CLI_UPDATE_CACHE_SUCCESS_TTL_MS = 24 * 60 * 60 * 1000;
+export const CLI_UPDATE_CACHE_FAILURE_TTL_MS = 60 * 60 * 1000;
+export const CLI_UPDATE_DISCOVERY_TIMEOUT_MS = 5_000;
+export const CLI_UPDATE_INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
+export const CLI_UPDATE_PROCESS_OUTPUT_MAX_BYTES = 64 * 1024;

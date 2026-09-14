@@ -14,6 +14,7 @@ import type { status } from "../core/status/index.js";
 import type { targets } from "../core/catalog/targets.js";
 import type { track } from "../core/track/index.js";
 import type { checkUpstream, fetchUpstreamSkillDryRun, importUpstreamSkill } from "../core/upstream/index.js";
+import type { CliUpdateNotice, CliUpdateResult } from "../core/cli-update/index.js";
 import type { validate } from "../core/validation/index.js";
 
 export type CommandName =
@@ -32,7 +33,8 @@ export type CommandName =
   | "promote"
   | "prune"
   | "import-target"
-  | "upstream";
+  | "upstream"
+  | "update";
 
 export type ParsedCommandArgs = {
   command: CommandName | "help";
@@ -41,6 +43,7 @@ export type ParsedCommandArgs = {
   help?: boolean;
   strict?: boolean;
   apply?: boolean;
+  check?: boolean;
   upstreamAction?: "check" | "fetch" | "import";
   source?: string;
   target?: string;
@@ -96,18 +99,32 @@ export type CommandJsonResult =
   | Awaited<ReturnType<typeof importTarget>>
   | Awaited<ReturnType<typeof checkUpstream>>
   | Awaited<ReturnType<typeof fetchUpstreamSkillDryRun>>
-  | Awaited<ReturnType<typeof importUpstreamSkill>>;
+  | Awaited<ReturnType<typeof importUpstreamSkill>>
+  | CliUpdateResult;
+
+export type CommandPresentation = "json" | "summary";
 
 export type CommandModule = {
   name: CommandName;
   accepts(args: ParsedCommandArgs): boolean;
+  presentation?(args: ParsedCommandArgs): CommandPresentation;
   run(args: ParsedCommandArgs): Promise<CommandJsonResult>;
+};
+
+export type DispatchOptions = {
+  interactiveStderr?: boolean;
 };
 
 export type DispatchResult =
   | {
     type: "result";
     result: CommandJsonResult;
+    exitCode: CliExitCode;
+    notice: Promise<CliUpdateNotice | null>;
+  }
+  | {
+    type: "summary";
+    result: CliUpdateResult;
     exitCode: CliExitCode;
   }
   | {

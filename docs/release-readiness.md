@@ -92,6 +92,8 @@ The sample catalog's explicitly curated contract test is part of the public fixt
 `prepack` remains routed through `package:prepare` so every supported npm pack or publish removes stale `dist` output, rebuilds the CLI, verifies its shebang and executable mode, and records hashes for `package.json`, `pnpm-lock.yaml`, `tsconfig.json`, source files, and compiled output in the ignored `dist/.package-build.json` manifest.
 `package:validate` is the non-rebuilding recheck of that manifest, so changed compiler configuration or dependency inputs and missing, additional, stale, changed, or non-executable compiled CLI output fail validation.
 `pnpm run package:smoke` parses `npm pack --json`, rejects missing or unintended payload entries, requires the installed CLI binary to remain executable, installs the generated tarball into an empty temporary project, runs the read-only `targets` command, and strictly validates the packaged sample catalog and its contract tests.
+It also verifies that the project-local installation refuses self-update, then installs the tarball into a disposable global npm prefix and checks update help, installation ownership, and release availability.
+The availability check accepts either a successful registry lookup or any structured `registry-*` failure (unreachable, timed out, redirected by a proxy, or an invalid body); it never installs a registry release.
 The package validation tests also compare the dry-run payload's `docs/` entries
 to the six curated Markdown paths exactly, which keeps the GitHub Pages-only
 HTML, CSS, and JavaScript outside the tarball.
