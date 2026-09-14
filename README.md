@@ -21,8 +21,7 @@ Live agent homes are never treated as the source of truth - the catalog is.
 - **Read-only commands** explain current state before any mutation.
 - Mutating commands require an explicit artifact, lock, `--apply`, or other
   approval boundary.
-- JSON result objects, including structured `ok: false` results, go to stdout;
-  usage and fatal diagnostics go to stderr.
+- JSON-first output follows the [output contract](SPEC.md#output-contract).
 - Copy and symlink installs are tracked with receipts and recoverable workflows.
 
 ## Install

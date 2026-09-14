@@ -7,8 +7,7 @@ operational detail.
 
 Command execution requires `--json`; help does not.
 The one exception is `update`, which prints a readable summary on stderr when `--json` is omitted.
-Result objects go to stdout, including structured `ok: false` results with machine-readable errors.
-Parser/usage failures, uncaught fatal diagnostics, and the optional update reminder go to stderr.
+See the [output contract](../SPEC.md#output-contract) for structured results, diagnostics, and reminder routing.
 Examples use portable paths; set `SRC` and target overrides for the machine running the CLI.
 
 The CLI without arguments, or with `--help`, `-h`, or `help`, shows a compact command index.
@@ -508,6 +507,8 @@ It takes no catalog flags and no version argument.
 Without `--json` it prints a short summary on stderr and writes nothing to stdout; with `--json` it writes one structured result to stdout.
 
 `--check` reports whether a newer stable release exists without installing anything and without writing the reminder cache.
+A successful lookup remains successful even when the release requires a newer Node.js runtime; `installation.canSelfUpdate` describes installation ownership, not release engine compatibility.
+Before installing a newer release, `update` checks its Node.js engine requirement and refuses an incompatible runtime with `node-engine-incompatible`.
 Without `--check`, invoking the command is the approval to install: it fetches the latest stable release metadata from the public npm registry and installs that exact version.
 It prefers npm bundled beside the running Node.js runtime, falls back to a verified npm entrypoint found through PATH, and runs that entrypoint with the current Node.js executable against the verified global prefix.
 It reports `updated` only after the installed package version, its declared entrypoint, and the global launcher have been verified and help has run in a fresh process.

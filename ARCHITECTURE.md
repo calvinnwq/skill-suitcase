@@ -136,8 +136,7 @@ Renderers must not read `process.argv` or write `process.stdout` or
 renderer helpers.
 
 Skill Suitcase is JSON-first.
-Structured command results, including findings and `ok: false` errors, belong on stdout.
-Parser/usage failures, uncaught fatal diagnostics, and non-JSON notices belong on stderr.
+Follow the [output contract](SPEC.md#output-contract) for stdout and stderr routing, including the CLI maintenance exception.
 
 `src/config/` owns defaults:
 
