@@ -21,12 +21,15 @@ async function main(): Promise<void> {
       return;
     }
 
-    process.stdout.write(renderJson(dispatched.result));
+    const flushed = new Promise<void>((resolve) => process.stdout.write(renderJson(dispatched.result), () => resolve()));
     process.exitCode = dispatched.exitCode;
     const notice = await dispatched.notice;
     if (notice !== null) {
       process.stderr.write(renderUpdateNotice(notice));
     }
+    await flushed;
+    // An aborted passive registry lookup can leave a connecting socket open for seconds; do not let it delay the shell.
+    process.exit();
   } catch (error) {
     process.stderr.write(renderCliError({
       type: "fatal",
