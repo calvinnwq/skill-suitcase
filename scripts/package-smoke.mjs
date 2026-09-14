@@ -5,13 +5,14 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { isRegistryUnavailable, parseCliJson } from "./package-smoke-helpers.mjs";
 import { parsePackJson, validatePackResult } from "./package-validation.mjs";
 
 const execFileAsync = promisify(execFile);
 
 function runInstalledCli(binPath, args, options) {
   const result = spawnSync(binPath, args, { ...options, encoding: "utf8" });
-  return { ...result, json: () => JSON.parse(result.stdout) };
+  return { ...result, json: () => parseCliJson(result) };
 }
 const root = process.cwd();
 const tempRoot = await mkdtemp(path.join(os.tmpdir(), "skill-suitcase-package-smoke-"));
@@ -157,7 +158,7 @@ try {
   const globalCheck = runInstalledCli(globalBinPath, ["update", "--check", "--json"], { cwd: globalPrefix, env: globalEnv });
   const globalCheckResult = globalCheck.json();
   const checkSucceeded = globalCheck.status === 0 && globalCheckResult.ok === true;
-  const checkOffline = globalCheck.status === 1 && globalCheckResult.error?.code === "registry-unreachable";
+  const checkOffline = isRegistryUnavailable(globalCheck.status, globalCheckResult);
   if (
     globalCheck.stderr !== ""
       || globalCheckResult.action !== "check"
@@ -182,7 +183,7 @@ try {
     sampleValidation: "strict",
     sampleContractTests: "passed",
     localSelfUpdate: "refused",
-    globalSelfUpdateCheck: checkSucceeded ? globalCheckResult.status : "registry-unreachable"
+    globalSelfUpdateCheck: checkSucceeded ? globalCheckResult.status : globalCheckResult.error.code
   }, null, 2)}\n`);
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
