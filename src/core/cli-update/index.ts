@@ -200,6 +200,10 @@ async function resolveUpdate(options: { check: boolean; io?: UpdateIo }): Promis
   const release = lookup.release;
   const status = compareVersions(currentVersion, release.version);
   const checked = { ...base, latestVersion: release.version, updateAvailable: status === "update-available" };
+  if (status === "update-available" && release.enginesNode !== null && !semver.satisfies(io.nodeVersion, release.enginesNode)) {
+    return { ...checked, ok: false, status: "failed", installation: ownership.installation, error: { code: "node-engine-incompatible",
+      message: `${CLI_UPDATE_PACKAGE_NAME}@${release.version} requires Node.js ${release.enginesNode}; upgrade Node.js before updating.` } };
+  }
   if (options.check || status !== "update-available" || ownership.context === null) {
     return { ...checked, ok: true, status, installation: ownership.installation, error: null };
   }
@@ -217,21 +221,22 @@ async function performInstall(
   const fail = (code: CliUpdateErrorCode, message: string, installedVersion: string | null = null): CliUpdateResult => ({
     ...checked, ok: false, status: "failed", installedVersion, installation, error: { code, message }
   });
-  if (release.enginesNode !== null && !semver.satisfies(io.nodeVersion, release.enginesNode)) {
-    return fail("node-engine-incompatible",
-      `${target} requires Node.js ${release.enginesNode}; upgrade Node.js before updating.`);
-  }
   const recheck = await classifyInstallation(io, running);
   if (recheck.context === null) {
     return { ...checked, ok: false, status: "unsupported-installation", installation: recheck.installation,
       error: { code: "unsupported-installation", message: recheck.installation.guidance } };
   }
   const context = recheck.context;
-  const quoteArgument = (value: string): string => `'${value.replaceAll("'", "'\"'\"'")}'`;
-  const recovery = `The installation may be partially changed; reinstall the verified target with ${quoteArgument(io.execPath)} ${quoteArgument(context.npmCli)} install --global --prefix ${quoteArgument(context.prefix)} --registry ${quoteArgument(io.registryUrl)} --ignore-scripts --bin-links=true ${target}`;
-  const install = await io.runProcess(io.execPath, [
+  // Safeguards that must survive inherited npm configuration; the recovery hint repeats exactly these.
+  const safeguards = [
     context.npmCli, "install", "--global", "--prefix", context.prefix, "--registry", io.registryUrl,
-    "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel", "error", target
+    "--ignore-scripts", "--bin-links=true", target
+  ];
+  const external = new Set([io.execPath, context.npmCli, context.prefix, io.registryUrl]);
+  const quoteArgument = (value: string): string => external.has(value) ? `'${value.replaceAll("'", "'\"'\"'")}'` : value;
+  const recovery = `The installation may be partially changed; reinstall the verified target with ${[io.execPath, ...safeguards].map(quoteArgument).join(" ")}`;
+  const install = await io.runProcess(io.execPath, [
+    ...safeguards.slice(0, -1), "--no-audit", "--no-fund", "--loglevel", "error", target
   ], { env: io.env, timeoutMs: CLI_UPDATE_INSTALL_TIMEOUT_MS, maxOutputBytes: CLI_UPDATE_PROCESS_OUTPUT_MAX_BYTES, cwd: context.prefix });
   if (install.timedOut) {
     return fail("install-timeout", `npm install ${target} did not finish within the time limit. ${recovery}`);

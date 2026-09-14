@@ -187,6 +187,16 @@ test("process execution is shell-free, output-bounded, and time-bounded", async 
   assert.equal(missing.status, null);
 });
 
+test("a timed-out process settles even when a grandchild keeps the output pipes open", async () => {
+  // The direct child inherits its pipes to a grandchild that outlives the SIGKILL, so "close" would wait for the grandchild.
+  const script = "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3000)'], { stdio: 'inherit' }); setTimeout(() => {}, 30000)";
+  const started = Date.now();
+  const result = await runProcess(process.execPath, ["-e", script], { env: { PATH: process.env.PATH }, timeoutMs: 200, maxOutputBytes: 1024 });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.failed, true);
+  assert.ok(Date.now() - started < 2000, "the promise settles when the child exits, not when the grandchild releases the pipes");
+});
+
 test("path inspection distinguishes directories, files, symlinks, and missing entries", async (t) => {
   const root = await temporaryRoot(t, "inspect");
   await mkdir(join(root, "dir"));

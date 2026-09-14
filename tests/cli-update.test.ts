@@ -150,6 +150,27 @@ test("engine incompatibility fails before installation", async () => {
   assert.equal((await updateCli({ check: false, io: compatible.io })).status, "updated");
 });
 
+test("check reports engine incompatibility instead of recommending an update that cannot install", async () => {
+  const { io } = createFakeIo({ nodeVersion: "v20.0.0", registry: registryDocument("0.20.0", { engines: { node: ">=22" } }) });
+  const result = await updateCli({ check: true, io });
+  assert.deepEqual([result.ok, result.status, result.error?.code, result.latestVersion, result.updateAvailable],
+    [false, "failed", "node-engine-incompatible", "0.20.0", true], JSON.stringify(result));
+});
+
+test("update forces launcher creation and recovery guidance mirrors the executed install", async () => {
+  const { io, log } = createFakeIo({ currentVersion: "0.19.0", registry: registryDocument("0.20.0"), launcherKind: "missing" });
+  const result = await updateCli({ check: false, io });
+  const install = log.processes.find((entry) => entry.args[1] === "install");
+  assert.ok(install);
+  assert.ok(install.args.includes("--bin-links=true"), `npm must create the launcher even when user config disables bin links: ${install.args.join(" ")}`);
+  assert.equal(result.error?.code, "verification-failed");
+  const recovery = (result.error?.message ?? "").split("reinstall the verified target with ")[1] ?? "";
+  const unquoted = recovery.replaceAll(/'((?:[^']|'"'"')*)'/g, (_match, inner: string) => inner.replaceAll(`'"'"'`, "'"));
+  const expected = [io.execPath, ...install.args.filter((argument, index, all) =>
+    !["--no-audit", "--no-fund", "--loglevel"].includes(argument) && all[index - 1] !== "--loglevel")];
+  assert.equal(unquoted, expected.join(" "), "recovery guidance repeats the executed arguments minus output noise");
+});
+
 test("update installs the exact validated version through npm with narrow arguments and verifies afterward", async () => {
   const { io, log } = createFakeIo({ currentVersion: "0.19.0", registry: registryDocument("0.20.0") });
   const result = await updateCli({ check: false, io });
@@ -167,6 +188,7 @@ test("update installs the exact validated version through npm with narrow argume
     "--registry",
     "https://registry.npmjs.org",
     "--ignore-scripts",
+    "--bin-links=true",
     "--no-audit",
     "--no-fund",
     "--loglevel",

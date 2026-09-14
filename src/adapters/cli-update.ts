@@ -205,6 +205,9 @@ export function runProcess(file: string, args: string[], options: ProcessOptions
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // A grandchild may still hold the inherited pipes; release them so the caller and the event loop do not wait on it.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       resolveResult({ status, stdout, stderr, timedOut, failed });
     };
     const child = spawn(file, args, {
@@ -223,6 +226,8 @@ export function runProcess(file: string, args: string[], options: ProcessOptions
     child.stdout?.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk); });
     child.stderr?.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk); });
     child.on("error", () => finish(null, true));
+    // After a timeout the child was killed; do not wait for "close", which needs every pipe holder to exit.
+    child.on("exit", (status) => { if (timedOut) finish(status, true); });
     child.on("close", (status) => finish(status, timedOut || status !== 0));
   });
 }

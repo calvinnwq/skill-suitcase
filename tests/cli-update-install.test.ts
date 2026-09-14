@@ -190,10 +190,19 @@ test("self-update replaces a disposable global installation and verifies every b
   assert.equal(await installedVersion(prefix), versionB);
 
   latest = fixtureC;
-  const unlinked = await core.updateCli({ check: false, io: core.createUpdateIo({ registryUrl, env: { ...env, npm_config_bin_links: "false" } }) });
-  assert.deepEqual([unlinked.ok, unlinked.status, unlinked.error?.code, unlinked.installedVersion],
-    [false, "failed", "verification-failed", versionC], JSON.stringify(unlinked));
-  const unlinkedMessage = unlinked.error?.message ?? "";
+  const unlinkedEnv = { ...env, npm_config_bin_links: "false" };
+  const linked = await core.updateCli({ check: false, io: core.createUpdateIo({ registryUrl, env: unlinkedEnv }) });
+  assert.deepEqual([linked.ok, linked.status, linked.installedVersion, linked.error], [true, "updated", versionC, null],
+    `inherited bin-links=false must not prevent launcher creation: ${JSON.stringify(linked)}`);
+  assert.equal(await readlink(join(prefix, "bin", PACKAGE)).then((target) => join(prefix, "bin", target)), join(installedPackage, "dist", "src", "main.js"));
+
+  // Force a verification failure by hiding the fresh launcher, so the recovery guidance can be exercised end to end.
+  await installGlobal(fixtureA.tarball, prefix, env);
+  const hiddenLauncher = await core.updateCli({ check: false, io: core.createUpdateIo({ registryUrl, env: unlinkedEnv,
+    inspectPath: async (target) => target === join(prefix, "bin", PACKAGE) ? { kind: "missing", realPath: null } : io.inspectPath(target) }) });
+  assert.deepEqual([hiddenLauncher.ok, hiddenLauncher.status, hiddenLauncher.error?.code, hiddenLauncher.installedVersion],
+    [false, "failed", "verification-failed", versionC], JSON.stringify(hiddenLauncher));
+  const unlinkedMessage = hiddenLauncher.error?.message ?? "";
   assert.match(unlinkedMessage, /launcher/);
   assert.ok(unlinkedMessage.includes(`${PACKAGE}@${versionC}`), `recovery guidance names the exact target: ${unlinkedMessage}`);
   const recoveryCommand = unlinkedMessage.split("reinstall the verified target with ")[1];
