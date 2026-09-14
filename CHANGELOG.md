@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.20.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.19.0...v0.20.0) (2026-09-14)
+
+
+### Features
+
+* add CLI self-update and release reminders ([05653e1](https://github.com/calvinnwq/skill-suitcase/commit/05653e135bff6df90e560373119aba617f350146))
+* **update:** add CLI self-update command and update reminders ([5c61e06](https://github.com/calvinnwq/skill-suitcase/commit/5c61e0626bc90e6132c4eae81d79702a039fea7c))
+
+
+### Bug Fixes
+
+* **cli:** exit promptly after the passive update notice settles ([36fa5b5](https://github.com/calvinnwq/skill-suitcase/commit/36fa5b522b1955070b950fbf1d4a6935e10ba360))
+* **update:** name the verified npm and prefix in install recovery guidance ([99477ac](https://github.com/calvinnwq/skill-suitcase/commit/99477ac3249ee72b739b35cc2c3d93d1b3cc1cb1))
+* **update:** preserve registry and script safeguards in recovery ([9802282](https://github.com/calvinnwq/skill-suitcase/commit/9802282ab0ee1eeb4faff149b2572c6d104a71d9))
+* **update:** settle timed-out installs, force launcher links, and check engines early ([14e460c](https://github.com/calvinnwq/skill-suitcase/commit/14e460cb8acfbfe336245f58856bbe8e9a49bd3a))
+
 ## [0.19.0](https://github.com/calvinnwq/skill-suitcase/compare/v0.18.1...v0.19.0) (2026-09-11)
 
 
